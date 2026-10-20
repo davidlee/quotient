@@ -19,8 +19,7 @@ import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
 import { createLatch, failedResult, refusedResult, resultFor } from './result.ts';
 import type { AgentResult } from './result.ts';
-import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm, transcriptBudget } from './policy.ts';
-import type { PostureState } from './policy.ts';
+import { admitCall, clampCeilings, knownRunDir, selectForm, transcriptBudget } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
 import type { SnapshotLoad } from './profiles.ts';
 import { acquireSession } from './session.ts';
@@ -108,7 +107,6 @@ type Context = {
   output: Writable;
   diagnostics: Writable;
   env: Record<string, string | undefined>;
-  posture: PostureState;
   /** The start-up snapshot, or the failure that put the server in the start-up-refused state. */
   profiles: SnapshotLoad;
   /** What an absent `cwd` resolves to, through the same allowlist as any root. */
@@ -280,7 +278,7 @@ async function callTool(
   if (!parsed.ok) return refused(context, id, 'request-invalid', parsed.detail);
   const request = parsed.request;
 
-  const admission = admitCall(context.env, context.posture, id);
+  const admission = admitCall(context.env, id);
   if (!admission.ok) return toolResult(refusedResult(admission.reason, admission.detail));
 
   const refuse = (reason: string, detail: string): ToolResult => {
@@ -342,7 +340,9 @@ async function callTool(
   const gate = createGate({
     ceilings: ceilings.ceilings,
     policyPath: admission.policyPath,
-    abort: (cause) => controller.abort(cause),
+    // The cause token stays the ladder's input; the trigger rides along
+    // additively, so the abort's audit record can name the crossing.
+    abort: (trigger) => controller.abort({ cause: trigger.cause, trigger }),
     idleMs: context.gateIdleMs,
   });
 
@@ -614,7 +614,6 @@ export async function serve(
     output,
     diagnostics,
     env,
-    posture: createPostureState(),
     profiles,
     launchDir: options.launchDir ?? process.cwd(),
     inFlight: new Map(),

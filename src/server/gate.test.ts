@@ -225,9 +225,9 @@ function unitGate(rig: Rig, overrides: Partial<GateConfig> = {}): { gate: Gate; 
   const gate = createGate({
     ceilings: {},
     policyPath: rig.policyPath,
-    abort: (cause) => {
-      causes.push(cause);
-      settle(cause);
+    abort: (trigger) => {
+      causes.push(trigger.cause);
+      settle(trigger.cause);
     },
     idleMs: 20,
     ...overrides,
@@ -552,6 +552,11 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
   assert.equal(abort.cause, 'ceiling');
   assert.ok(abort.usage.requests >= 1, 'the abort record carries the accumulator\'s usage');
   assert.equal(abort.usage.cost_usd, 0.01, 'the usage is the accumulator\'s at the crossing');
+  // The crossing itself rides the record: which unit crossed, what it read and the
+  // bound it crossed — evidence an operator cannot reconstruct from the cause token.
+  assert.equal(abort.unit, 'cost_usd', 'the abort record names the unit that crossed');
+  assert.equal(abort.observed, 0.01, 'and the accumulator\'s value at the crossing');
+  assert.equal(abort.limit, 0.005, 'and the clamped bound it crossed');
   assert.equal(isAlive(markerPid(rig)), false, 'the child is gone');
 });
 
@@ -688,6 +693,62 @@ test('a run that hits no limit completes, and its audit has no abort record (EX-
   assert.equal(doc.termination, 'stop');
   const records = jsonLines(doc.artifacts.audit).map((record) => record.record);
   assert.deepEqual(records, ['spawn', 'exit'], 'no abort record on a run that hit no limit');
+});
+
+// ── PHASE-08 EX-6: the transcript budget reaches the reducer of a live call ──
+
+test('the transcript budget reaches a running call: the policy re-read at admission elides the next call\'s transcript and not the first\'s (PHASE-08 EX-6)', async (t) => {
+  // A bulky stream: forty tool round-trips of a few hundred bytes each, then an
+  // answer. Each round-trip is distinct, so the reducer's collapsing of repeated
+  // activity never folds them, and the transcript is large enough that a
+  // 256-byte budget must elide. One send, so no ceiling reaches the run.
+  const prose = 'x'.repeat(300);
+  const exchanges = Array.from({ length: 40 }, (_, index) => [
+    emit({ type: 'tool_execution_start', toolCallId: `c${index}`, toolName: 'bash', args: { command: `cat notes ${index}` } }),
+    emit({
+      type: 'tool_execution_end',
+      toolCallId: `c${index}`,
+      toolName: 'bash',
+      result: { content: [{ type: 'text', text: `note ${index} ${prose}` }], structuredContent: { exit_code: 0 } },
+      isError: false,
+    }),
+  ]).flat();
+  const rig = newRig(
+    t,
+    [
+      `printf '%s\\n' $$ > "@MARKER@/pid"`,
+      ...exchanges,
+      emit(messageEnd('stop')),
+      SETTLED,
+      'exit 0',
+    ].join('\n'),
+    { transcript_budget_bytes: 10_000_000 },
+  );
+  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+
+  session.write(callLine(1, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget1' }));
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
+  const [first] = await waitForReplies(session, 1);
+  const unbudgeted = document(first);
+  assert.equal(unbudgeted.state, 'completed', JSON.stringify(unbudgeted));
+  assert.equal(unbudgeted.status.transcript.elided, 0, 'an effectively unbudgeted transcript elides nothing');
+  assert.ok(unbudgeted.status.transcript.bytes > 256, `the bulky stream is the point: ${unbudgeted.status.transcript.bytes} bytes`);
+
+  // The operator's next write is a real 256-byte ceiling: the call reads the policy
+  // per call, so it is the reducer of the NEXT run that it reaches.
+  patchPolicy(rig, 'transcript_budget_bytes', 256);
+  session.write(callLine(2, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget2' }));
+  const [, second] = await waitForReplies(session, 2);
+  await closeServer(session);
+
+  const budgeted = document(second);
+  assert.equal(budgeted.state, 'completed', JSON.stringify(budgeted));
+  assert.ok(budgeted.status.transcript.elided > 0, 'the budget reached this run\'s reducer: the middle was elided');
+  assert.ok(
+    budgeted.status.transcript.bytes < unbudgeted.status.transcript.bytes,
+    `the budgeted transcript is smaller: ${budgeted.status.transcript.bytes} < ${unbudgeted.status.transcript.bytes}`,
+  );
+  assert.ok(budgeted.transcript.includes('entries elided'), 'the elision is stated in the text an operator reads');
 });
 
 // ── EX-7 / VT-6: nested spend is neither attributed nor claimed ────────────

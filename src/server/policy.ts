@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { appendAttempt, sha256Hex } from './evidence.ts';
 import type { CallId } from './evidence.ts';
+import { MCP_EXTENSION } from './profiles.ts';
 import type { Filesystem } from './profiles.ts';
 
 export const POLICY_VAR = 'PI_MCP_POLICY';
@@ -62,8 +63,6 @@ export type RefusalReason =
   | 'policy-invalid'
   | 'posture-unsupported'
   | 'disabled';
-/** The posture the process serves, fixed by the first call it admits (EX-11). */
-export type PostureState = { acceptedMode: PolicyMode | null };
 
 export type Admission =
   | {
@@ -76,10 +75,6 @@ export type Admission =
       sessionHome: string;
     }
   | { ok: false; reason: RefusalReason; detail: string; digest: string | null };
-
-export function createPostureState(): PostureState {
-  return { acceptedMode: null };
-}
 
 /** An absolute launch-env value, or null when unset, empty or relative. */
 function absoluteVar(env: Record<string, string | undefined>, name: string): string | null {
@@ -152,6 +147,11 @@ export function readPolicy(policyPath: string): { ok: true; policy: Policy; dige
  * extension), or an object naming the path and the `-e` paths the form passes.
  * Nothing else is accepted inside the object: an operator who mistypes
  * `extensions` must not get a form that silently passes none.
+ *
+ * The extension list is not free-form: the launch forms pass no `-e` other than
+ * `builtin:mcp` (design sec-3), so an entry naming anything else is a policy that
+ * describes a launcher this build does not have, and is refused rather than
+ * carried as a claim the spawn never acts on.
  */
 function readForm(field: string, value: unknown): { ok: true; form: Form } | { ok: false; detail: string } {
   if (isAbsolutePath(value)) return { ok: true, form: { path: value, extensions: [] } };
@@ -167,6 +167,14 @@ function readForm(field: string, value: unknown): { ok: true; form: Form } | { o
   if (extensions === undefined) return { ok: true, form: { path, extensions: [] } };
   if (!Array.isArray(extensions) || !extensions.every((extension) => typeof extension === 'string' && extension.length > 0)) {
     return { ok: false, detail: `forms.${field}.extensions must be an array of extension path strings` };
+  }
+  for (const [index, extension] of extensions.entries()) {
+    if (extension !== MCP_EXTENSION) {
+      return {
+        ok: false,
+        detail: `forms.${field}.extensions[${index}] "${String(extension)}" is not an extension this build passes: the launch forms pass no "-e" other than "${MCP_EXTENSION}"`,
+      };
+    }
   }
   return { ok: true, form: { path, extensions: [...extensions] } };
 }
@@ -329,7 +337,7 @@ export function clampCeilings(requested: Maxima | undefined, maxima: Maxima): Ce
 }
 
 /**
- * The byte budget that reaches the reducer (A5, EX-6). The policy's maximum is
+ * The byte budget that reaches the reducer (EX-6). The policy's maximum is
  * authoritative: a call asking for less is clamped down to it, and a call asking
  * for everything (`0`, the reducer's own word for the full transcript) gets the
  * maximum rather than unbounded access past an operator's ceiling. An absent
@@ -351,20 +359,17 @@ export function transcriptBudget(requested?: number, policyMax?: number): number
 /**
  * Steps 1-2 for one call, in order, first failure wins:
  *
- *   1. the launch environment (absent/relative -> `policy-unavailable`), the
+ *   1. the launch environment (absent/relative -> `policy-unavailable`) and the
  *      artefact (unreadable -> `policy-unavailable`, unparsable or schema-invalid
- *      -> `policy-invalid`) and the posture (`posture-unsupported`);
+ *      -> `policy-invalid`, a mode or static-only field this build does not serve
+ *      -> `posture-unsupported`);
  *   2. `enabled` (`disabled`).
  *
  * A refusal is recorded as it is decided: nothing spawned, so `attempts.jsonl`
  * is its sink (design sec-6). The caller's verdict is returned unchanged even
  * when the ledger cannot be written.
  */
-export function admitCall(
-  env: Record<string, string | undefined>,
-  posture: PostureState,
-  callId: CallId,
-): Admission {
+export function admitCall(env: Record<string, string | undefined>, callId: CallId): Admission {
   const runDir = knownRunDir(env);
   const refuse = (reason: RefusalReason, detail: string, digest: string | null = null): Admission => {
     appendAttempt(runDir, { callId, reason, detail, policyDigest: digest });
@@ -386,21 +391,18 @@ export function admitCall(
   const loaded = readPolicy(policyPath);
   if (!loaded.ok) return refuse(loaded.reason, loaded.detail, loaded.digest);
 
-  // The posture is fixed for the process lifetime (EX-11): a file edited to name
-  // another mode is refused at the next call, and no path re-launches into it.
-  if (posture.acceptedMode !== null && loaded.policy.mode !== posture.acceptedMode) {
-    return refuse(
-      'posture-unsupported',
-      `mode changed from "${posture.acceptedMode}" to "${loaded.policy.mode}" while the server was running; the posture is fixed for the process lifetime`,
-      loaded.digest,
-    );
-  }
+  // The posture is fixed for the process lifetime (EX-11), and the mechanism is
+  // the schema, not process state: every call re-reads and re-validates the
+  // artefact, and `validatePolicy` refuses any `mode` other than `per-call` with
+  // `posture-unsupported`, so a file edited mid-life to name another mode is
+  // refused at the next call and no path re-launches into one. (A remembered
+  // mode would add nothing: the one value it could hold is the one the schema
+  // already enforces.)
 
   if (!loaded.policy.enabled) {
     return refuse('disabled', 'the operator has disabled pi_agent (enabled = false)', loaded.digest);
   }
 
-  posture.acceptedMode = loaded.policy.mode;
   return {
     ok: true,
     policy: loaded.policy,

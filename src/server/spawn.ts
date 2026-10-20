@@ -48,11 +48,18 @@ const SERVER_VAR_PREFIX = 'PI_MCP_';
  * The causes a trigger may abort a run with. They ride `AbortSignal.reason`, so a
  * trigger is one value: the cancellation notification, stdin EOF, an evidence
  * failure and (PHASE-07) the gate all hand the ladder a cause through the same
- * signal rather than a second channel beside it.
+ * signal rather than a second channel beside it. The gate's rung carries its
+ * crossing in that same value (`{ cause, trigger }`), so the abort's audit record
+ * can name what crossed; a bare token means the rung had no crossing to report.
  */
 export type AbortCause = Extract<Termination, 'cancelled' | 'eof' | 'audit' | 'timeout' | 'switch' | 'ceiling' | 'accounting'>;
 
 const ABORT_CAUSES: readonly AbortCause[] = ['cancelled', 'eof', 'audit', 'timeout', 'switch', 'ceiling', 'accounting'];
+
+/** The crossing a gate trigger carried: which unit, what it read and the bound it
+ *  crossed. Structural on purpose — `spawn` reads the three fields off the abort
+ *  reason and keeps no dependency on the gate. */
+type Crossing = { unit: string; observed: number | null; limit: number | null };
 
 /** What an admitted call hands the spawn: the launch form, the profile it runs
  *  under, the active session directory the form binds, and the evidence root. */
@@ -365,7 +372,8 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   /**
    * The one ladder. Idempotent: the first trigger's cause is the reported one, and
    * a later trigger is not a second shutdown. The abort record is written where
-   * the decision is taken, so it carries the usage facts known at that moment.
+   * the decision is taken, so it carries the usage facts known at that moment and,
+   * when the rung carried one, the crossing it judged.
    *
    * Whatever the rung, a trigger that has signalled leaves a `drainBound` behind:
    * from there the drain is bounded rather than trustful, because a member the
@@ -373,10 +381,18 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
    * last, one grace past the signal actually sent, so the drain never gives up
    * before the ladder has finished with the leader.
    */
-  const terminate = async (cause: Termination): Promise<void> => {
+  const terminate = async (cause: Termination, crossing: Crossing | null = null): Promise<void> => {
     if (abort !== null) return;
     abort = cause;
-    audit({ record: 'abort', cause, settled, usage: usageOf(tally) });
+    // Additive evidence, never a new cause: only a gate rung names a crossing, so
+    // a `cancelled`/`eof`/`audit` abort writes the same record it always wrote.
+    audit({
+      record: 'abort',
+      cause,
+      settled,
+      usage: usageOf(tally),
+      ...(crossing ? { unit: crossing.unit, observed: crossing.observed, limit: crossing.limit } : {}),
+    });
     const pid = child.pid;
     // Never signal without a verified pid of our own child, and never `-0` or the
     // server's own group: the child leads its group, the server leads another.
@@ -407,7 +423,8 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   stderrLog.on('error', evidenceFailure);
 
   const onAbort = (): void => {
-    void terminate(abortCauseOf(control.signal.reason));
+    const reason: unknown = control.signal.reason;
+    void terminate(abortCauseOf(reason), crossingOf(reason));
   };
   control.signal.addEventListener('abort', onAbort, { once: true });
   if (control.signal.aborted) onAbort();
@@ -470,10 +487,32 @@ function usageOf(tally: Tally): Record<string, unknown> {
   };
 }
 
-/** The cause a trigger asked for. An unrecognised reason is a cancellation: a
- *  trigger fired, and the ladder needs a cause rather than none. */
+/** The cause a trigger asked for. A bare cause token is the whole reason for a
+ *  cancellation; the gate hands an object carrying one beside its trigger. An
+ *  unrecognised reason is a cancellation: a trigger fired, and the ladder needs a
+ *  cause rather than none. */
 function abortCauseOf(reason: unknown): AbortCause {
-  return ABORT_CAUSES.find((cause) => cause === reason) ?? 'cancelled';
+  const named = typeof reason === 'string' ? reason : (reason as { cause?: unknown } | null | undefined)?.cause;
+  return ABORT_CAUSES.find((cause) => cause === named) ?? 'cancelled';
+}
+
+/** The crossing a gate rung carried, read structurally off the abort reason: the
+ *  unit that crossed, what it read and the bound it crossed. A bare cause token,
+ *  or a trigger without a readable unit, names no crossing and adds no fields. */
+function crossingOf(reason: unknown): Crossing | null {
+  if (typeof reason !== 'object' || reason === null) return null;
+  const trigger = (reason as { trigger?: unknown }).trigger;
+  if (typeof trigger !== 'object' || trigger === null) return null;
+  const fields = trigger as Record<string, unknown>;
+  const unit = fields.unit;
+  if (typeof unit !== 'string') return null;
+  const observed = fields.observed;
+  const limit = fields.limit;
+  return {
+    unit,
+    observed: typeof observed === 'number' ? observed : null,
+    limit: typeof limit === 'number' ? limit : null,
+  };
 }
 
 /** A pid this process may signal as a group: its own child's, positive, and never

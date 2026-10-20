@@ -64,7 +64,7 @@ export type SessionRefusal =
 /** Somewhere a note about a release can go; `process.stderr` in production. */
 export type Diagnostics = { write: (text: string) => void };
 
-/** The paths one session's state occupies (A1). */
+/** The paths one session's state occupies. */
 export type SessionPaths = {
   /** `PI_MCP_SESSION_HOME`. */
   home: string;
@@ -147,7 +147,7 @@ export function isSessionId(value: string): boolean {
   return SESSION_GRAMMAR.test(value);
 }
 
-/** Where one session's state lives under a session home (A1, EX-9). */
+/** Where one session's state lives under a session home (EX-9). */
 export function sessionPaths(home: string, session: string): SessionPaths {
   const sessions = join(home, SESSIONS_DIR);
   const lock = join(sessions, `${session}${LOCK_SUFFIX}`);

@@ -221,8 +221,8 @@ function succeeded(reduced: Reduced, outcome: RunFacts): boolean {
 }
 
 /**
- * The cause when the latch is empty: what the stream and the child already say
- * (A6). `spawn` first, because nothing ran; `exit` covers `null` and nonzero alike;
+ * The cause when the latch is empty: what the stream and the child already say.
+ * `spawn` first, because nothing ran; `exit` covers `null` and nonzero alike;
  * then accounting; then the stream's terminal reason; then `eof` — which is also
  * what a `pending` message, a reason pi adds later, and an unsettled stream leave.
  */
@@ -412,7 +412,7 @@ export type Reachability = { producedBy: string } | { unreachable: string };
  * Every member of both enums, each with the path that produces it in this build or
  * an explicit statement that it is unreachable. A member with neither is the silent
  * hole RV-043 F-12 raised; the table test asserts the hole list is empty, so
- * "unreachable" is always a stated choice (A4).
+ * "unreachable" is always a stated choice.
  */
 export const REACHABILITY: {
   states: Record<ResultState, Reachability>;

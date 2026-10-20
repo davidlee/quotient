@@ -18,11 +18,13 @@
 //   - usage sanity — `accounting === 'unknown'` is the accumulator's own
 //     statement that a usage-bearing record carried absent or invalid usage.
 //
-// The first crossing fires once: it stops the poll and hands the cause to
+// The first crossing fires once: it stops the poll and hands the trigger to
 // `abort`, which is the call's `AbortController.abort` — the one ladder, exactly
-// as a cancellation reaches it. The gate keeps no usage of its own (A1/D2), so
-// the numbers it judges and the numbers the result reports are the same
-// accumulator's, and it never accounts anything itself.
+// as a cancellation reaches it. The whole trigger travels, not just its cause, so
+// the abort's audit record can name which unit crossed, what it read and the bound
+// it crossed. The gate keeps no usage of its own, so the numbers it judges and
+// the numbers the result reports are the same accumulator's, and it never accounts
+// anything itself.
 import { readPolicy } from './policy.ts';
 import type { Maxima } from './policy.ts';
 import { createTally } from '../reduce/reduce.ts';
@@ -52,8 +54,9 @@ export type GateConfig = {
   /** The policy file the switch re-reads every tick. */
   policyPath: string;
   /** The call's `AbortController.abort`: the ladder, reached the way a
-   *  cancellation reaches it. */
-  abort: (cause: GateCause) => void;
+   *  cancellation reaches it. The whole trigger, so the audit record the ladder
+   *  writes can carry the crossing as well as the cause token. */
+  abort: (trigger: GateTrigger) => void;
   /** Epoch ms the run's wall clock started; defaults to `Date.now()`. */
   startedAt?: number;
   /** The idle poll's period. Design sec-4: an idle poll bounded to about a
@@ -128,7 +131,7 @@ export function createGate(config: GateConfig): Gate {
   const fire = (trigger: GateTrigger): void => {
     fired.push(trigger);
     stop();
-    config.abort(trigger.cause);
+    config.abort(trigger);
   };
 
   /** Design sec-4's order: ceilings, wall clock, switch, usage sanity. */

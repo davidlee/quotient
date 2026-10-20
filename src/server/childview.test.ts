@@ -77,9 +77,9 @@ function refusal(check: ReturnType<typeof checkChildView>): string {
   return check.detail;
 }
 
-// ── Canonicalisation and containment (A2, DEC-095) ─────────────────────────
+// ── Canonicalisation and containment (DEC-095) ─────────────────────────
 
-test('canonicalPath resolves through the longest existing ancestor, so a store that does not exist yet is canonical too (A2)', () => {
+test('canonicalPath resolves through the longest existing ancestor, so a store that does not exist yet is canonical too', () => {
   const t = tree();
   // A symlinked ancestor with a tail that does not exist: the run dir and the
   // session home may be absent at check time, and a lexical comparison would
@@ -140,9 +140,9 @@ test('a root that is the run evidence directory itself, or one of the run direct
   assert.ok(inside.includes(JSON.stringify(store)));
 });
 
-// ── The protected stores (A3, EX-5: the layout, not a bind list) ───────────
+// ── The protected stores (EX-5: the layout, not a bind list) ───────────
 
-test('the protected stores come from the evidence layout: the run evidence and the attempts ledger unreachable, the policy file never-writable, the session home unreachable (A3)', () => {
+test('the protected stores come from the evidence layout: the run evidence and the attempts ledger unreachable, the policy file never-writable, the session home unreachable', () => {
   const t = tree();
   const stores = protectedStores(view(t));
   assert.deepEqual(
@@ -227,7 +227,7 @@ test('the policy file is never writable: a write root containing it refuses, a r
   // Reading the policy is tolerated: it governs other calls, it is not a secret.
   assert.deepEqual(checkChildView({ ...shared, capability: 'read' }), { ok: true });
 
-  // Every fixed child mount is writable (A1), so naming the policy file as one
+  // Every fixed child mount is writable, so naming the policy file as one
   // is a writable exposure whatever the root's capability.
   const bindDetail = refusal(
     checkChildView({ ...shared, root: t.work, capability: 'read', childBinds: [policyPath] }),

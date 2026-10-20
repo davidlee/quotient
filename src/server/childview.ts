@@ -23,7 +23,7 @@ export type ViewRefusal = 'view-overlaps-protected';
 export type MemberRole = 'root' | 'session-directory' | 'child_bind';
 
 /**
- * How strongly a member exposes what it covers, in this posture (A1): the root is
+ * How strongly a member exposes what it covers, in this posture: the root is
  * writable for a `write` capability and read-only for a `read` one; every fixed
  * child mount and the active session directory are writable.
  */
@@ -89,7 +89,7 @@ export function childViewMembers(input: ChildViewInput): ChildViewMember[] {
 }
 
 /**
- * The protected stores (design sec-3's table, A3), derived from the evidence
+ * The protected stores (design sec-3's table), derived from the evidence
  * layout rather than from a list the caller assembles. Ordered widest-first, so a
  * member that covers a whole run's evidence directory is reported against that
  * directory rather than against the ledger inside it.

@@ -15,7 +15,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
  * A path's canonical form: `realpath` of its longest existing ancestor, with the
  * remaining components appended. The run dir, the session home and a policy file
  * named in a policy's fixed mounts may not exist at check time, and a lexical
- * comparison would let a symlinked ancestor through (A2).
+ * comparison would let a symlinked ancestor through.
  *
  * A path with no existing ancestor keeps its resolved lexical form; it names
  * nothing on disk, so it matches nothing that does.

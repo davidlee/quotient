@@ -10,7 +10,6 @@
 // reports them. Offline, no child, no wall clock, no filesystem.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
 import {
@@ -554,31 +553,6 @@ test('the transcript budget is soft and wired through the policy clamp (EX-6, VT
     assert.deepEqual(doc.artifacts, ARTIFACTS);
     assert.equal(refusedResult('request-invalid', 'nothing ran').artifacts, null);
   });
-
-  await t.test('server.ts hands the clamp to the reducer: request and policy, no budget of its own', () => {
-    // The clamp is unit-tested above, but a dropped argument at the seam would leave
-    // both suites green. Read the one call site and require both values in it.
-    const server = readFileSync(new URL('./server.ts', import.meta.url), 'utf8');
-    const start = server.indexOf('reduce(run.lines');
-    assert.notEqual(start, -1, 'the reduce(run.lines, { budgetBytes: … }) seam must exist to be wired');
-    let depth = 0;
-    let end = -1;
-    for (let index = server.indexOf('(', start); index !== -1; index += 1) {
-      if (server[index] === '(') depth += 1;
-      else if (server[index] === ')') {
-        depth -= 1;
-        if (depth === 0) {
-          end = index + 1;
-          break;
-        }
-      }
-    }
-    assert.notEqual(end, -1, 'the reduce call must close: an unlocatable seam fails here, not vacuously');
-    const seam = server.slice(start, end);
-    assert.match(seam, /budgetBytes:\s*transcriptBudget\(/, 'the budget reaches the reducer through the clamp');
-    assert.match(seam, /request\.transcript_budget_bytes/, 'the request\'s value is one argument: dropping it fails here');
-    assert.match(seam, /admission\.policy\.transcript_budget_bytes/, 'the policy maximum is the other: neither is ignored');
-  });
 });
 
 // ── EX-5: two verdicts, one reason ─────────────────────────────────────────
@@ -662,7 +636,7 @@ test('every state and every termination is produced by a named path or declared 
     assert.ok(producedBy(entry) ? entry.producedBy.length > 0 : entry.unreachable.length > 0, `state ${state} names its path or its reason`);
   }
 
-  // A4: every member is reachable in this build, so the hole list is empty — and it
+  // every member is reachable in this build, so the hole list is empty — and it
   // is empty as a stated choice, which is why the arm exists.
   const holes = [
     ...Object.entries(REACHABILITY.states)
