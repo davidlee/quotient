@@ -13,10 +13,13 @@
 // incremental and ends at stdin EOF — no timer, no poll, no child.
 import { StringDecoder } from 'node:string_decoder';
 import type { Readable, Writable } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { refusedResult, failedResult } from './result.ts';
 import type { AgentResult } from './result.ts';
-import { admitCall, createPostureState, knownRunDir } from './policy.ts';
+import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm } from './policy.ts';
 import type { PostureState } from './policy.ts';
+import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
+import type { SnapshotLoad } from './profiles.ts';
 import { appendAttempt } from './evidence.ts';
 import type { CallId } from './evidence.ts';
 
@@ -24,6 +27,13 @@ export const SERVER_NAME = 'pi-mcp';
 export const SERVER_VERSION = '0';
 /** The revision `satan/satan-mcp.el` announces. */
 export const PROTOCOL_VERSION = '2025-06-18';
+
+/**
+ * The tracked profile directory, resolved from this module's own URL: never the
+ * environment, never the call's cwd, so a delegate cannot choose the authority
+ * it is checked against (design sec-2 step 3).
+ */
+export const DEFAULT_PROFILES_DIR = fileURLToPath(new URL('./profiles/', import.meta.url));
 
 /** The one tool this server exposes, with its declared input schema. */
 export const PI_AGENT_TOOL = {
@@ -87,6 +97,10 @@ type Context = {
   diagnostics: Writable;
   env: Record<string, string | undefined>;
   posture: PostureState;
+  /** The start-up snapshot, or the failure that put the server in the start-up-refused state. */
+  profiles: SnapshotLoad;
+  /** What an absent `cwd` resolves to, through the same allowlist as any root. */
+  launchDir: string;
 };
 
 const CEILING_FIELDS = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
@@ -109,7 +123,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * it, and this build puts the request's own shape first — a caller with a broken
  * request is told about its request rather than about a policy it cannot see.
  * The order is: request shape (`request-invalid`) -> step 1 policy -> step 2
- * enabled -> the seam.
+ * enabled -> step 3 profile -> step 4 root -> step 5 capability/form -> step 6
+ * ceilings -> `tools` narrowing -> the seam.
  */
 function readAgentRequest(value: Record<string, unknown>): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
   for (const field of Object.keys(value)) {
@@ -172,18 +187,18 @@ function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { 
 }
 
 /**
- * The A3 seam: steps 1-2 passed, and everything that turns an admitted call into
- * a run does not exist in this build. PHASE-03 adds the profile, root,
- * capability and ceiling steps, PHASE-04 sessions, PHASE-05 the child-view check
- * and the evidence layout, PHASE-06 the spawn itself — each replacing this
- * answer from its own step. Nothing here launches a process, so there is no
- * second launch path to fall back to.
+ * The seam: steps 1-6 and the `tools` narrowing passed, and everything that
+ * turns an admitted call into a run does not exist in this build. PHASE-04 adds
+ * sessions, PHASE-05 the child-view check and the evidence layout, PHASE-06 the
+ * spawn itself — each replacing this answer from its own step. The snapshot's
+ * digest is what PHASE-06 records in the run's audit `spawn` record. Nothing here
+ * launches a process, so there is no second launch path to fall back to.
  */
 function admittedWithoutRun(): AgentResult {
   return failedResult(
     'spawn',
     ['spawn'],
-    'pi_agent admitted this call and launched nothing: the profile, root, capability, ceiling, session, child-view and spawn stages are not built yet (SL-029 PHASE-03..06).',
+    'pi_agent admitted this call and launched nothing: the session, child-view and spawn stages are not built yet (SL-029 PHASE-04..06).',
   );
 }
 
@@ -200,14 +215,62 @@ function refused(context: Context, callId: CallId, reason: string, detail: strin
   return toolResult(refusedResult(reason, detail));
 }
 
-/** One `tools/call`: request shape, step 1, step 2, then the seam. */
+/**
+ * One `tools/call`: the start-up profile snapshot, the request's shape, steps
+ * 1-6, the `tools` narrowing, then the seam. Every refusal is a tool result,
+ * recorded in `attempts.jsonl` as it is decided.
+ */
 async function callTool(params: unknown, id: WireId, context: Context): Promise<ToolResult> {
+  // A snapshot that did not load is a start-up-refused server, not a per-call
+  // discovery: every call answers the reason and the path, whatever its shape.
+  if (!context.profiles.ok) {
+    return refused(
+      context,
+      id,
+      'profile-invalid',
+      `the profile snapshot did not load at start-up: ${context.profiles.path}: ${context.profiles.detail}`,
+    );
+  }
+
   const parsed = readToolCall(params);
   if (!parsed.ok) return refused(context, id, 'request-invalid', parsed.detail);
+  const request = parsed.request;
 
   const admission = admitCall(context.env, context.posture, id);
   if (!admission.ok) return toolResult(refusedResult(admission.reason, admission.detail));
 
+  const refuse = (reason: string, detail: string): ToolResult => {
+    appendAttempt(admission.runDir, { callId: id, reason, detail, policyDigest: admission.digest });
+    return toolResult(refusedResult(reason, detail));
+  };
+
+  // Step 3: the profile, from the start-up snapshot only.
+  const profile = resolveProfile(context.profiles.snapshot, request.profile, admission.policy.profiles);
+  if (!profile.ok) return refuse(profile.reason, profile.detail);
+
+  // Step 4: the root, canonicalised and allowlisted by components.
+  const root = resolveRoot(request.cwd, context.launchDir, admission.policy.roots);
+  if (!root.ok) return refuse(root.reason, root.detail);
+
+  // Step 5: the capability selects the wrapper form, and the form's declared
+  // extensions must be able to deliver the profile's tools (EX-7).
+  const form = selectForm(admission.policy, profile.profile.filesystem);
+  if (!form.ok) return refuse(form.reason, form.detail);
+  const extensions = checkProfileExtensions(profile.profile, form.form.extensions);
+  if (!extensions.ok) return refuse(extensions.reason, extensions.detail);
+
+  // Step 6: the ceilings, clamped downward.
+  const ceilings = clampCeilings(request.ceilings, admission.policy.maxima);
+  if (!ceilings.ok) return refuse(ceilings.reason, ceilings.detail);
+
+  // The call's `tools` may only narrow the profile's snapshotted set; the whole
+  // narrowed list is what the launch form will hand to `--tools` (PHASE-06).
+  const tools = effectiveTools(profile.profile, request.tools);
+  if (!tools.ok) return refuse(tools.reason, tools.detail);
+
+  // The admitted values (`root.root`, `form.form`, `ceilings.ceilings`,
+  // `tools.tools`) and the snapshot digest are what PHASE-06's spawn consumes;
+  // this build stops at the seam below.
   const document = admittedWithoutRun();
   appendAttempt(admission.runDir, {
     callId: id,
@@ -279,18 +342,43 @@ async function handleLine(line: string, context: Context): Promise<void> {
   }
 }
 
+/** What a caller may override; production takes every default. */
+export type ServeOptions = {
+  /** The profile directory to snapshot; production uses the module's own. */
+  profilesDir?: string;
+  /** The server's launch directory, which an absent `cwd` resolves to. */
+  launchDir?: string;
+};
+
 /**
- * Serve one client over `input`/`output` until stdin EOF. Takes its streams and
- * its environment, so the protocol is driven in-process by the tests; `main.ts`
- * wires the process's own.
+ * Serve one client over `input`/`output` until stdin EOF. Takes its streams, its
+ * environment and its two deployment locations, so the protocol is driven
+ * in-process by the tests; `main.ts` wires the process's own.
+ *
+ * The profile directory is read once, here, before the first line: one snapshot
+ * for the process lifetime, so an edit on disk is inert until a restart (EX-1).
  */
 export async function serve(
   input: Readable,
   output: Writable,
   env: Record<string, string | undefined>,
   diagnostics: Writable = process.stderr,
+  options: ServeOptions = {},
 ): Promise<void> {
-  const context: Context = { output, diagnostics, env, posture: createPostureState() };
+  const profiles = loadProfiles(options.profilesDir ?? DEFAULT_PROFILES_DIR);
+  if (!profiles.ok) {
+    // One line, naming the path: the server refuses from here on, and an
+    // operator needs to know which document to fix (EX-2).
+    diagnostics.write(`pi-mcp: the profile snapshot did not load: ${profiles.path}: ${profiles.detail}\n`);
+  }
+  const context: Context = {
+    output,
+    diagnostics,
+    env,
+    posture: createPostureState(),
+    profiles,
+    launchDir: options.launchDir ?? process.cwd(),
+  };
   const decoder = new StringDecoder('utf8');
   let pending = '';
 

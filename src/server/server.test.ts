@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable, Writable } from 'node:stream';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, SERVER_NAME, PI_AGENT_TOOL, serve } from './server.ts';
@@ -261,10 +261,14 @@ test('a request-invalid refusal reaches attempts.jsonl with the call id', async 
 
 // ── The admitted-but-unbuilt seam (EX-2: a failure is `failed`) ─────────────
 
-test('a call past steps 1-2 reports the spawn seam as failed, with isError', async () => {
-  const { runDir, env } = workspace();
+// PHASE-03 moved the seam past steps 3-6, so this call now needs a root that
+// exists and is allowlisted; nothing else about the call changed.
+test('a call past steps 3-6 reports the spawn seam as failed, with isError', async () => {
+  const root = join(mkdtempSync(join(tmpdir(), 'pi-mcp-server-root-')), 'root');
+  mkdirSync(root, { recursive: true });
+  const { runDir, env } = workspace(validPolicy({ roots: [root] }));
   const { doc, isError, reply } = await call(
-    callTool({ prompt: 'review this', profile: 'read', cwd: '/work/one' }),
+    callTool({ prompt: 'review this', profile: 'read', cwd: root }),
     env,
   );
   assert.equal(reply.error, undefined);

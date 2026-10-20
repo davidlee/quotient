@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { appendAttempt, sha256Hex } from './evidence.ts';
 import type { CallId } from './evidence.ts';
+import type { Filesystem } from './profiles.ts';
 
 export const POLICY_VAR = 'PI_MCP_POLICY';
 export const RUN_DIR_VAR = 'PI_MCP_RUN_DIR';
@@ -29,9 +30,16 @@ export type Maxima = {
   wall_clock_s?: number;
 };
 
-/** The per-call wrapper forms, one per filesystem capability. Each is an
- *  absolute path to a flake-provided launcher; the server names no jail flag. */
-export type Forms = { read?: string; write?: string };
+/**
+ * One per-call wrapper form: a flake-provided launcher, plus the extension paths
+ * the launcher passes. `extensions` is empty for the plain string form, which is
+ * what EX-7 compares a profile's `mcp__*` tools against (design sec-3).
+ */
+export type Form = { path: string; extensions: string[] };
+
+/** The per-call wrapper forms, one per filesystem capability. The server names
+ *  no jail flag; it selects a form and the form owns its confinement. */
+export type Forms = { read?: Form; write?: Form };
 
 export type Policy = {
   mode: PolicyMode;
@@ -54,7 +62,6 @@ export type RefusalReason =
   | 'policy-invalid'
   | 'posture-unsupported'
   | 'disabled';
-
 /** The posture the process serves, fixed by the first call it admits (EX-11). */
 export type PostureState = { acceptedMode: PolicyMode | null };
 
@@ -99,7 +106,8 @@ const OPTIONAL_FIELDS = ['transcript_budget_bytes'];
  */
 const STATIC_ONLY_FIELDS = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
 const MAXIMA_FIELDS = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
-const FORM_FIELDS = ['read', 'write'];
+const FORM_FIELDS: readonly string[] = ['read', 'write'];
+const FORM_KEYS: readonly string[] = ['path', 'extensions'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };
 
@@ -133,6 +141,30 @@ function readPolicy(policyPath: string): { ok: true; policy: Policy; digest: str
   const check = validatePolicy(parsed);
   if (!check.ok) return { ok: false, reason: check.reason, detail: check.detail, digest };
   return { ok: true, policy: check.policy, digest };
+}
+
+/**
+ * One form value: an absolute path string (the PHASE-02 shape, which declares no
+ * extension), or an object naming the path and the `-e` paths the form passes.
+ * Nothing else is accepted inside the object: an operator who mistypes
+ * `extensions` must not get a form that silently passes none.
+ */
+function readForm(field: string, value: unknown): { ok: true; form: Form } | { ok: false; detail: string } {
+  if (isAbsolutePath(value)) return { ok: true, form: { path: value, extensions: [] } };
+  if (!isRecord(value)) {
+    return { ok: false, detail: `forms.${field} must be an absolute path string or an object carrying one` };
+  }
+  for (const key of Object.keys(value)) {
+    if (!FORM_KEYS.includes(key)) return { ok: false, detail: `unknown policy field: forms.${field}.${key}` };
+  }
+  const path = value.path;
+  if (!isAbsolutePath(path)) return { ok: false, detail: `forms.${field}.path must be an absolute path string` };
+  const extensions = value.extensions;
+  if (extensions === undefined) return { ok: true, form: { path, extensions: [] } };
+  if (!Array.isArray(extensions) || !extensions.every((extension) => typeof extension === 'string' && extension.length > 0)) {
+    return { ok: false, detail: `forms.${field}.extensions must be an array of extension path strings` };
+  }
+  return { ok: true, form: { path, extensions: [...extensions] } };
 }
 
 /**
@@ -193,9 +225,12 @@ function validatePolicy(value: unknown): PolicyCheck {
 
   const forms = value.forms;
   if (!isRecord(forms)) return invalid('forms must be an object');
+  const parsedForms: Forms = {};
   for (const field of Object.keys(forms)) {
     if (!FORM_FIELDS.includes(field)) return invalid(`unknown policy field: forms.${field}`);
-    if (!isAbsolutePath(forms[field])) return invalid(`forms.${field} must be an absolute path string`);
+    const parsed = readForm(field, forms[field]);
+    if (!parsed.ok) return invalid(parsed.detail);
+    parsedForms[field as Filesystem] = parsed.form;
   }
 
   const childBinds = value.child_binds;
@@ -216,12 +251,77 @@ function validatePolicy(value: unknown): PolicyCheck {
     roots: roots as string[],
     maxima: maxima as Maxima,
     profiles: profiles as string[],
-    forms: forms as Forms,
+    forms: parsedForms,
     child_binds: childBinds as string[],
     enabled,
   };
   if (budget !== undefined) policy.transcript_budget_bytes = budget as number;
   return { ok: true, policy };
+}
+
+/** Step 5's refusal: the capability's wrapper form is not declared. */
+export type FormRefusal = 'wrapper-unavailable';
+
+export type FormSelection = { ok: true; form: Form } | { ok: false; reason: FormRefusal; detail: string };
+
+/**
+ * Step 5: the profile's filesystem capability selects its wrapper form. In the
+ * per-call posture that form is the confinement, so a capability with no form
+ * has no way to run and refuses `wrapper-unavailable`.
+ *
+ * Static mode's `capability-mismatch` is not reachable here and has no branch:
+ * step 1 refuses that posture, so this build never has a launch-time capability
+ * for a per-call one to disagree with (design sec-2 steps 1, 5).
+ */
+export function selectForm(policy: Policy, filesystem: Filesystem): FormSelection {
+  const form = policy.forms[filesystem];
+  if (form === undefined) {
+    return {
+      ok: false,
+      reason: 'wrapper-unavailable',
+      detail: `the policy declares no "${filesystem}" wrapper form, and a ${filesystem}-capability profile has no other way to run`,
+    };
+  }
+  return { ok: true, form };
+}
+
+/** Step 6's refusal: a ceiling the policy does not permit. */
+export type CeilingRefusal = 'ceiling-above-maximum';
+
+export type CeilingResolution =
+  | { ok: true; ceilings: Maxima }
+  | { ok: false; reason: CeilingRefusal; detail: string };
+
+/**
+ * Step 6: clamp the call's ceilings to the policy maxima, downward.
+ *
+ * A request above a maximum is refused rather than silently clamped: the caller
+ * asked for a bound the operator did not grant, and lowering it without saying
+ * so would answer a different question than the one asked. At or below the
+ * maximum the request stands; an absent request takes the maximum, so a call can
+ * never be unbounded while the policy declares a bound. No maximum and no
+ * request leaves the unit absent. Enforcement is the gate's (PHASE-07), not
+ * this function's.
+ */
+export function clampCeilings(requested: Maxima | undefined, maxima: Maxima): CeilingResolution {
+  const ceilings: Maxima = {};
+  for (const unit of MAXIMA_FIELDS as (keyof Maxima)[]) {
+    const limit = requested?.[unit];
+    const maximum = maxima[unit];
+    if (limit === undefined) {
+      if (maximum !== undefined) ceilings[unit] = maximum;
+      continue;
+    }
+    if (maximum !== undefined && limit > maximum) {
+      return {
+        ok: false,
+        reason: 'ceiling-above-maximum',
+        detail: `${unit}: the requested ceiling ${limit} is above the policy maximum ${maximum}`,
+      };
+    }
+    ceilings[unit] = limit;
+  }
+  return { ok: true, ceilings };
 }
 
 /**

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { admitCall, createPostureState } from './policy.ts';
+import { admitCall, clampCeilings, createPostureState, selectForm } from './policy.ts';
 import type { Admission } from './policy.ts';
 import { attemptsPath, sha256Hex } from './evidence.ts';
 
@@ -241,4 +241,92 @@ test('a policy re-read per call sees an enable flip at the next call', () => {
 
   writeFileSync(ws.policyPath, JSON.stringify(validPolicy({ enabled: false })));
   refuse(admitCall(ws.env, posture, 15), 'disabled', /enabled/);
+});
+
+// ── The forms: a capability selects its wrapper form (EX-5, EX-7) ──────────
+
+/** A policy as `admitCall` normalised it, so the later steps see the real shape. */
+function admittedPolicy(overrides: Record<string, unknown> = {}) {
+  const ws = workspace(validPolicy(overrides));
+  const verdict = admitCall(ws.env, createPostureState(), 1);
+  if (!verdict.ok) assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);
+  return verdict.policy;
+}
+
+test('the profile capability selects its form; a form the policy does not declare is wrapper-unavailable', () => {
+  const policy = admittedPolicy({ forms: { read: '/nix/store/aaa/bin/pi-mcp-read' } });
+
+  const read = selectForm(policy, 'read');
+  if (!read.ok) assert.fail(`expected the read form, got ${read.reason}: ${read.detail}`);
+  assert.equal(read.form.path, '/nix/store/aaa/bin/pi-mcp-read');
+  assert.deepEqual(read.form.extensions, [], 'the string form declares no extension');
+
+  const write = selectForm(policy, 'write');
+  if (write.ok) assert.fail('expected wrapper-unavailable for a capability with no form');
+  assert.equal(write.reason, 'wrapper-unavailable');
+  assert.match(write.detail, /write/);
+});
+
+test('a form may declare the extensions it passes, and nothing else', () => {
+  const policy = admittedPolicy({
+    forms: { read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['builtin:mcp'] } },
+  });
+  assert.deepEqual(policy.forms.read, { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['builtin:mcp'] });
+
+  // A form with no declared extensions passes none, which is what EX-7 compares.
+  assert.deepEqual(admittedPolicy({ forms: { read: { path: '/nix/store/aaa/bin/pi-mcp-read' } } }).forms.read, {
+    path: '/nix/store/aaa/bin/pi-mcp-read',
+    extensions: [],
+  });
+
+  const cases: [Record<string, unknown>, RegExp][] = [
+    [{ read: { path: '/nix/store/aaa/bin/pi-mcp-read', flags: [] } }, /forms\.read\.flags/],
+    [{ read: { path: 'pi-mcp-read' } }, /forms\.read\.path/],
+    [{ read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: [7] } }, /forms\.read\.extensions/],
+    [{ read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: 'builtin:mcp' } }, /forms\.read\.extensions/],
+  ];
+  for (const [forms, detail] of cases) {
+    refuse(admitCall(workspace(validPolicy({ forms })).env, createPostureState(), 2), 'policy-invalid', detail);
+  }
+});
+
+// ── Ceilings clamp downward and refuse an above-maximum request (EX-6) ─────
+
+test('ceilings clamp to the maxima, refuse an above-maximum request, and take the maximum when absent', () => {
+  const maxima = { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
+
+  const narrowed = clampCeilings({ requests: 5, tokens: 1000 }, maxima);
+  if (!narrowed.ok) assert.fail(`expected a clamp, got ${narrowed.reason}: ${narrowed.detail}`);
+  assert.deepEqual(
+    narrowed.ceilings,
+    { requests: 5, tokens: 1000, cost_usd: 1.5, wall_clock_s: 600 },
+    'an absent ceiling takes the maximum',
+  );
+
+  const atMaximum = clampCeilings({ requests: 20, cost_usd: 1.5 }, maxima);
+  if (!atMaximum.ok) assert.fail(`a ceiling at the maximum is admitted, got ${atMaximum.reason}`);
+  assert.equal(atMaximum.ceilings.requests, 20);
+  assert.equal(atMaximum.ceilings.cost_usd, 1.5);
+
+  for (const [unit, requested, maximum] of [
+    ['requests', 21, 20],
+    ['tokens', 100001, 100000],
+    ['cost_usd', 1.6, 1.5],
+    ['wall_clock_s', 601, 600],
+  ] as const) {
+    const refused = clampCeilings({ [unit]: requested }, maxima);
+    if (refused.ok) assert.fail(`expected ceiling-above-maximum for ${unit}`);
+    assert.equal(refused.reason, 'ceiling-above-maximum');
+    assert.match(refused.detail, new RegExp(unit));
+    assert.match(refused.detail, new RegExp(String(requested)));
+    assert.match(refused.detail, new RegExp(String(maximum)));
+  }
+
+  const unbounded = clampCeilings(undefined, {});
+  if (!unbounded.ok) assert.fail('no maximum and no request is not a refusal');
+  assert.deepEqual(unbounded.ceilings, {}, 'no maximum and no request leaves the ceiling absent');
+
+  const requestedOnly = clampCeilings({ tokens: 10 }, {});
+  if (!requestedOnly.ok) assert.fail('a request under no maximum is admitted');
+  assert.deepEqual(requestedOnly.ceilings, { tokens: 10 });
 });
