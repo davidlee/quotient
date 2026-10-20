@@ -17,8 +17,8 @@ import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
-import { RESULT_SCHEMA, refusedResult, failedResult } from './result.ts';
-import type { AgentResult, Artifacts, ResultState, Termination } from './result.ts';
+import { createLatch, failedResult, refusedResult, resultFor, transcriptBudget } from './result.ts';
+import type { AgentResult } from './result.ts';
 import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm } from './policy.ts';
 import type { PostureState } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
@@ -28,7 +28,6 @@ import { checkChildView } from './childview.ts';
 import { attemptsPath, appendAttempt, writeAttemptProbe } from './evidence.ts';
 import type { CallId, RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
-import type { RunOutcome } from './spawn.ts';
 import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
 
 export const SERVER_NAME = 'pi-mcp';
@@ -213,7 +212,7 @@ function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { 
   return readAgentRequest(params.arguments);
 }
 
-// ── The run: evidence, the ladder's outcome and the provisional result ─────
+// ── The run: evidence, the ladder's outcome and the run's result ───────────
 //
 // The run replaces the seam PHASE-02..05 left here. Everything before it decided
 // that this call MAY run; from here the launcher is spawned, the ladder owns the
@@ -234,113 +233,6 @@ function writeRunFiles(layout: RunLayout, reduced: Reduced): boolean {
     process.stderr.write(`pi-mcp: could not write ${layout.transcript} / ${layout.status}: ${message}\n`);
     return false;
   }
-}
-
-/** The stop reasons design sec-5 names as terminal, verbatim (pi's tokens). */
-const TERMINAL_REASONS: readonly Termination[] = ['stop', 'length', 'error', 'aborted', 'toolUse', 'deferred'];
-
-/**
- * The run's termination when nothing aborted it: what the stream's terminal reason
- * and the child's exit status already say. Reported, not interpreted — PHASE-08
- * owns the rest of the mapping (sec-5's table).
- */
-function runTermination(reduced: Reduced, outcome: RunOutcome): Termination {
-  if (outcome.spawnFailed) return 'spawn';
-  if (outcome.exitCode !== 0) return 'exit';
-  const reason = reduced.terminalReason;
-  const terminal = TERMINAL_REASONS.find((candidate) => candidate === reason);
-  return terminal ?? 'eof';
-}
-
-type ProvisionalInput = {
-  reduced: Reduced;
-  outcome: RunOutcome;
-  session: string;
-  /** An audit or evidence append failed after the child was launched. */
-  auditFailed: boolean;
-};
-
-/**
- * The PROVISIONAL result builder. PHASE-08 replaces it with sec-5's precedence
- * table, the abort latch and the enum-reachability claims; what stands here is
- * only design sec-5 without a table.
- *
- * `completed` requires ALL of: `agent_settled` observed, exit status 0, a
- * terminal reason that answers (`stop` / `length`), accounting known, and no
- * abort cause — so a nonzero exit is never success, and an answer is never
- * inferred from exit 0 (EX-7). Everything else is `failed`, or `cancelled` when
- * DEC-103's cancel caused the abort, with `causes[0]` reported as the
- * termination.
- */
-function provisionalResult(input: ProvisionalInput): AgentResult {
-  const { reduced, outcome } = input;
-  const artifacts: Artifacts = {
-    dir: outcome.layout.dir,
-    events: outcome.layout.events,
-    transcript: outcome.layout.transcript,
-    status: outcome.layout.status,
-    audit: outcome.layout.audit,
-  };
-  const causes: Termination[] = [];
-  if (outcome.abort !== null) causes.push(outcome.abort);
-  if (outcome.spawnFailed) causes.push('spawn');
-  if (input.auditFailed) causes.push('audit');
-
-  const completed =
-    causes.length === 0 &&
-    outcome.exitCode === 0 &&
-    reduced.settled &&
-    (reduced.terminalReason === 'stop' || reduced.terminalReason === 'length') &&
-    reduced.accounting === 'known';
-
-  if (completed) {
-    const termination = reduced.terminalReason as Termination;
-    return {
-      schema: RESULT_SCHEMA,
-      state: 'completed',
-      termination,
-      causes: [termination],
-      session: input.session,
-      final: true,
-      truncated: reduced.truncated,
-      result: reduced.result,
-      transcript: reduced.transcript,
-      status: reduced.status,
-      artifacts,
-      refusal: null,
-    };
-  }
-
-  const termination = causes.length > 0 ? causes[0] : runTermination(reduced, outcome);
-  const reported = causes.length > 0 ? causes : [termination];
-  // The one provisional cause -> state map. PHASE-08 replaces it with DEC-093's
-  // table in result.ts; this is sec-5's row for each cause the gate can raise.
-  const state: ResultState =
-    termination === 'cancelled'
-      ? 'cancelled'
-      : termination === 'audit'
-        ? 'audit_failed'
-        : termination === 'ceiling'
-          ? 'ceiling_exceeded'
-          : termination === 'timeout'
-            ? 'timeout'
-            : termination === 'accounting'
-              ? 'accounting_unknown'
-              : 'failed';
-  return {
-    schema: RESULT_SCHEMA,
-    state,
-    termination,
-    causes: reported,
-    session: input.session,
-    final: false,
-    truncated: false,
-    result: null,
-    transcript: reduced.transcript,
-    status: reduced.status,
-    artifacts,
-    refusal: null,
-  };
 }
 
 function toolResult(document: AgentResult): ToolResult {
@@ -476,6 +368,12 @@ async function callTool(
       );
     }
 
+    // The abort latch (design sec-5, DEC-093): the causes this call discovers are
+    // recorded here, in discovery order, and read once at the commit point below.
+    // The result is derived from it in one place, `resultFor` — the server holds no
+    // cause → state map of its own (EX-8).
+    const latch = createLatch();
+
     const run = await runChild(
       {
         form: form.form,
@@ -512,17 +410,29 @@ async function callTool(
     }
 
     // The one reader (design sec-4): the stream this run captured, reduced by the
-    // reducer that owns the accounting, with the policy's transcript budget.
-    const reduced = reduce(run.lines, { budgetBytes: admission.policy.transcript_budget_bytes });
+    // reducer that owns the accounting, with the transcript budget the call asked
+    // for — clamped by the policy's maximum, so neither value is ignored.
+    const reduced = reduce(run.lines, {
+      budgetBytes: transcriptBudget(request.transcript_budget_bytes, admission.policy.transcript_budget_bytes),
+    });
     const wrote = writeRunFiles(run.layout, reduced);
 
-    // The child's exit status and the observed `agent_settled` are REPORTED to the
-    // builder, not interpreted here (EX-7).
-    const document = provisionalResult({
+    // The three causes the server discovers, in the order it discovers them: the
+    // ladder's own cause, a launch that never ran, then an evidence append that
+    // failed. `!wrote` is the same failure as a failed audit append — the run's own
+    // evidence cannot be written — so it is the same cause, recorded once.
+    if (run.abort !== null) latch.record(run.abort);
+    if (run.spawnFailed) latch.record('spawn');
+    if (run.auditFailed || !wrote) latch.record('audit');
+
+    // The commit point: after the ladder, the reap, the drain, the final accounting
+    // (the reduction above) and the `exit`/abort evidence appends (inside the
+    // spawn). Nothing that can fail is left, because the return is the last step.
+    const document = resultFor({
       reduced,
       outcome: run,
+      causes: latch.commit(),
       session: session.session,
-      auditFailed: run.auditFailed || !wrote,
     });
     return toolResult(document);
   } finally {

@@ -564,7 +564,7 @@ test('switch: flipping enabled to false halts an in-flight run through the ladde
   const [reply] = await waitForReplies(session, 1);
 
   const doc = document(reply);
-  assert.equal(doc.state, 'failed', 'a switch leaves the run failed, not a counting verdict');
+  assert.equal(doc.state, 'cancelled', 'a switch flips the run to cancelled, not a counting verdict');
   assert.equal(doc.termination, 'switch');
   assert.deepEqual(doc.causes, ['switch']);
   const abort = jsonLines(doc.artifacts.audit).find((record) => record.record === 'abort');

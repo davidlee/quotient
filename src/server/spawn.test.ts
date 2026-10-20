@@ -871,7 +871,7 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
       name: 'settled, exit 0, stopReason toolUse (counted, not an answer)',
       stop: 'toolUse',
       exit: 0,
-      state: 'failed',
+      state: 'incomplete',
       termination: 'toolUse',
       stream: 'completed',
     },
@@ -893,8 +893,9 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
       assert.equal(doc.final, testCase.state === 'completed');
       assert.equal(doc.result, testCase.state === 'completed' ? 'the answer' : null);
       // `status.state` is the reducer's verdict on the STREAM; `state` is the
-      // server's verdict on the CALL, and the two differ exactly where the exit
-      // status decided it (design sec-5).
+      // server's verdict on the CALL. They differ where a cause outside the stream
+      // decided it (the exit status here) and where the stream came to rest without
+      // an answer (the toolUse row), and `causes` names which (design sec-5).
       assert.equal(doc.status.state, testCase.stream);
     });
   }
