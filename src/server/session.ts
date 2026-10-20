@@ -285,6 +285,11 @@ type Step = { ok: true } | { ok: false; reason: SessionRefusal; detail: string }
 /**
  * Take ownership of `<lock>`: the single `O_EXCL` create, or — when the record
  * there is stale — one serialised reclaim of it (EX-4).
+ *
+ * `retried` says this call is the second attempt of a create that lost to a lock
+ * which then vanished: the create is re-attempted exactly once, never recursively,
+ * because one vanished path is a race and two are a disagreement the caller has to
+ * hear about.
  */
 function takeOwnership(
   paths: SessionPaths,
@@ -293,6 +298,7 @@ function takeOwnership(
   runDir: string | null,
   callId: CallId,
   policyDigest: string | null | undefined,
+  retried: boolean,
 ): Step {
   let fd: number;
   try {
@@ -301,7 +307,7 @@ function takeOwnership(
     if (errorCode(error) !== 'EEXIST') {
       return { ok: false, reason: 'session-busy', detail: `${paths.lock} could not be created (${errorCode(error)})` };
     }
-    return reclaim(paths, record, procDir, runDir, callId, policyDigest);
+    return reclaim(paths, record, procDir, runDir, callId, policyDigest, retried);
   }
   try {
     writeFileSync(fd, `${JSON.stringify(record)}\n`);
@@ -345,7 +351,8 @@ function dropClaim(paths: SessionPaths): void {
  * `<lock>` and requires the identical stale record it first saw, writes the
  * successor to a temp file in the same directory and renames it OVER `<lock>` —
  * one atomic replacement, so the path is never absent. No path here unlinks the
- * lock itself (EX-4).
+ * lock itself (EX-4). A lock that vanished before the read is not reclaimed but
+ * re-created: there is no record to replace, so the single create is legal again.
  */
 function reclaim(
   paths: SessionPaths,
@@ -354,14 +361,20 @@ function reclaim(
   runDir: string | null,
   callId: CallId,
   policyDigest: string | null | undefined,
+  retried: boolean,
 ): Step {
   const before = readOwnership(paths.lock);
   if (!before.ok) {
     if (before.missing) {
+      // The lock the create lost to is gone. Nothing was replaced, nothing is
+      // serialised and no record was observed: the plain create is legal again,
+      // and it is re-attempted exactly once (never recursively — a second vanish
+      // is a path that keeps changing under us, not a race to keep chasing).
+      if (!retried) return takeOwnership(paths, record, procDir, runDir, callId, policyDigest, true);
       return {
         ok: false,
         reason: 'session-busy',
-        detail: `${paths.lock} disappeared between the create attempt and the read; ownership is decided by one create, so the call is refused rather than retried in place`,
+        detail: `${paths.lock} was absent when read after the create lost to it, and again after one re-attempt; ownership is decided by a single create, so the call is refused`,
       };
     }
     return {
@@ -388,7 +401,10 @@ function reclaim(
   }
 
   // Under the claim, re-confirm the record we intended to replace: two stale
-  // observers must not both install an owner.
+  // observers must not both install an owner. The re-confirm is a fresh liveness
+  // observation, so it can say all three things the first one could: the owner is
+  // alive, the owner is stale, or the owner's liveness cannot be read — and only
+  // the last is a refusal about knowing, not about a live owner.
   const again = readOwnership(paths.lock);
   if (!again.ok || again.record.pid !== before.record.pid || again.record.starttime !== before.record.starttime) {
     dropClaim(paths);
@@ -398,9 +414,10 @@ function reclaim(
       detail: `${paths.lock} changed while the reclaim was being serialised; the lock is not the stale record this call saw`,
     };
   }
-  if (observeLiveness(procDir, again.record.pid, again.record.starttime) !== 'stale') {
+  const reconfirmed = observeLiveness(procDir, again.record.pid, again.record.starttime);
+  if (reconfirmed !== 'stale') {
     dropClaim(paths);
-    return aliveRefusal(again.record);
+    return reconfirmed === 'alive' ? aliveRefusal(again.record) : unknownRefusal(again.record, procDir);
   }
 
   const successor = `${paths.lock}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
@@ -518,7 +535,6 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
   try {
     mkdirSync(paths.home, { recursive: true, mode: OWNER_ONLY_DIR });
     mkdirSync(paths.sessions, { recursive: true, mode: OWNER_ONLY_DIR });
-    mkdirSync(paths.sessionDir, { recursive: true, mode: OWNER_ONLY_DIR });
   } catch (error) {
     return refuse('session-busy', `the session state under ${sessionHome} could not be laid out (${errorCode(error)})`);
   }
@@ -540,8 +556,23 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
     capability,
   };
 
-  const held = takeOwnership(paths, record, procDir, runDir, callId, options.policyDigest);
+  const held = takeOwnership(paths, record, procDir, runDir, callId, options.policyDigest, false);
   if (!held.ok) return refuse(held.reason, held.detail);
+
+  // `<home>/<id>` is laid out only now, under the lock this call won: a refused
+  // call leaves the session home exactly as it found it (EX-2), so the loser of a
+  // contended session creates no directory of its own. Home and `sessions` are
+  // made before the lock because the lock lives in `sessions`; the session
+  // directory is a side effect of ownership, so it comes after it.
+  try {
+    mkdirSync(paths.sessionDir, { recursive: true, mode: OWNER_ONLY_DIR });
+  } catch (error) {
+    // The lock is this call's and the layout it protects cannot be made: give the
+    // ownership back before refusing, so the refusal is this call's layout failure
+    // and not a lock the next caller would have to wait out.
+    releaseSession(paths, record);
+    return refuse('session-busy', `the session state under ${sessionHome} could not be laid out (${errorCode(error)})`);
+  }
 
   const bound = bind(paths, record);
   if (!bound.ok) {

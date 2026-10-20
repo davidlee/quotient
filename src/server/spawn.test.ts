@@ -903,15 +903,15 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
 
 // ── EX-4: ordering — result and release last ───────────────────────────────
 
-test('the session lock is released only after the drain and the final audit append: another process is refused session-busy while a grandchild holds stdout', async (t) => {
+test('the session lock is released only after the drain and the final audit append: another process is refused session-busy while a grandchild holds stdout, and the ladder is what ends the drain', async (t) => {
   const rig = newRig(
     t,
     [
       'printf \'%s\\n\' $$ >> "@MARKER@/pids"',
       'if [ -z "${FAST:-}" ]; then',
       // A grandchild keeps the stdout pipe open past the child's own exit, so the
-      // drain (and the lock) outlive the child.
-      '  sleep 2 &',
+      // drain (and the lock) outlive the child by as long as it chooses to sleep.
+      '  sleep 30 &',
       '  printf \'%s\\n\' $! > "@MARKER@/grandchild.pid"',
       'fi',
       'printf \'%s\\n\' done > "@MARKER@/child-done"',
@@ -924,6 +924,8 @@ test('the session lock is released only after the drain and the final audit appe
   session.write(callLine(21, { prompt: 'slow drain', profile: 'read', cwd: rig.root, session: 'drain' }));
   await waitForPath(join(rig.markerDir, 'child-done'), 'the child to exit');
   assert.equal(session.replies().length, 0, 'the answer waits for the drain, not for the exit');
+  const [grandchildPid] = markerPids(rig, 'grandchild.pid');
+  assert.ok(isAlive(grandchildPid), 'the grandchild is what holds the pipe open');
 
   const rival = async (extra: Env = {}): Promise<Record<string, any>> =>
     document(await oneShot(t, { ...rig.env, ...extra }, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' })));
@@ -933,15 +935,23 @@ test('the session lock is released only after the drain and the final audit appe
   assert.equal(busy.refusal.reason, 'session-busy', 'cleanup has not finished, so the lock is still held');
   assert.equal(readFileSync(join(rig.markerDir, 'pids'), 'utf8').trim().split('\n').length, 1, 'no second child was created');
 
-  const [reply] = await waitForReplies(session, 1);
+  // Nothing has triggered the run, so the drain has no bound and the answer is
+  // still owed. The ladder is what ends it: the cancellation kills the group the
+  // grandchild is in, so the run settles in the grace rather than in 30 seconds.
+  const cancelledAt = Date.now();
+  session.write(line({ method: 'notifications/cancelled', params: { requestId: 21 } }));
+  const [reply] = await waitForReplies(session, 1, 5000);
+  const elapsed = Date.now() - cancelledAt;
   session.end();
   await session.done;
-  assert.equal(document(reply).state, 'completed');
+  assert.equal(document(reply).state, 'cancelled');
+  assert.ok(elapsed < 2000, `the ladder bounded the drain: ${elapsed} ms`);
+  assert.equal(isAlive(grandchildPid), false, 'the drain was not outlived by the member holding the pipe');
   // The final audit append is the `exit` record, written after the drain.
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
     records.map((record) => record.record),
-    ['spawn', 'exit'],
+    ['spawn', 'abort', 'exit'],
   );
 
   // Only after that cleanup does the next call get through.
@@ -1016,6 +1026,86 @@ test('notifications/cancelled aborts exactly the requestId it names; an unknown 
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.equal(records.find((record) => record.record === 'abort')?.cause, 'cancelled');
   assert.equal(records.at(-1)?.record, 'exit');
+});
+
+test('a cancellation arriving after the leader was reaped still bounds the drain: the group that holds stdout is killed, so the call answers instead of waiting on a grandchild', async (t) => {
+  const rig = newRig(
+    t,
+    [
+      'printf \'%s\\n\' $$ > "@MARKER@/pid"',
+      // The leader ends itself with its stream written; the grandchild, alone in the
+      // group now, keeps the stdout pipe open past the leader's exit.
+      'sleep 30 &',
+      'printf \'%s\\n\' $! > "@MARKER@/grandchild.pid"',
+      answer('stop', 'tail'),
+      SETTLED,
+      'printf \'%s\\n\' done > "@MARKER@/leader-exited"',
+      'exit 0',
+    ].join('\n'),
+  );
+  const session = openServer(rig.env, { graceMs: 200 });
+  session.write(callLine(53, { prompt: 'the tail is held open', profile: 'read', cwd: rig.root, session: 'tail' }));
+  await waitForPath(join(rig.markerDir, 'leader-exited'), 'the leader to exit');
+  const [grandchildPid] = markerPids(rig, 'grandchild.pid');
+  assert.ok(isAlive(grandchildPid), 'the grandchild holds the pipe while the leader is already reaped');
+  assert.equal(session.replies().length, 0, 'the answer waits for the drain');
+
+  // The trigger arrives with no leader left to TERM. The group is still there, and
+  // the drain is bounded by the ladder rather than by the grandchild, so the answer
+  // arrives within the grace however long the grandchild would have slept.
+  const abortedAt = Date.now();
+  session.write(line({ method: 'notifications/cancelled', params: { requestId: 53 } }));
+  const [reply] = await waitForReplies(session, 1, 5000);
+  const elapsed = Date.now() - abortedAt;
+  session.end();
+  await session.done;
+
+  assert.ok(elapsed < 2000, `the answer waits for the bounded drain, not for the grandchild: ${elapsed} ms`);
+  const doc = document(reply);
+  assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
+  assert.equal(doc.termination, 'cancelled');
+  assert.deepEqual(doc.causes, ['cancelled']);
+
+  const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
+  assert.deepEqual(
+    records.map((record) => record.record),
+    ['spawn', 'abort', 'exit'],
+  );
+  assert.equal(records[1].cause, 'cancelled');
+  assert.equal(isAlive(grandchildPid), false, 'the group signal reached the member holding the pipe: no child is left behind');
+});
+
+test('two tools/calls carrying one id are both in the index: a cancellation naming it aborts both, and each run records its abort', async (t) => {
+  const rig = newRig(t, ['printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'trap \'\' TERM', 'sleep 60'].join('\n'));
+  const session = openServer(rig.env, { graceMs: 200 });
+  // The same wire id twice: the id is the client's, and neither call may drop out of
+  // the index the cancellation and the EOF sweep read.
+  session.write(callLine(71, { prompt: 'first', profile: 'read', cwd: rig.root, session: 'dupe-one' }));
+  session.write(callLine(71, { prompt: 'second', profile: 'read', cwd: rig.root, session: 'dupe-two' }));
+  const started = Date.now() + 10000;
+  while (markerPids(rig, 'pids').length < 2) {
+    if (Date.now() > started) throw new Error('timed out waiting for both launchers');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  session.write(line({ method: 'notifications/cancelled', params: { requestId: 71 } }));
+  const replies = await waitForReplies(session, 2);
+  session.end();
+  await session.done;
+
+  for (const reply of replies) {
+    assert.equal(reply.id, 71);
+    const doc = document(reply);
+    assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
+    assert.deepEqual(doc.causes, ['cancelled']);
+  }
+  for (const pid of markerPids(rig, 'pids')) assert.equal(isAlive(pid), false, 'both cancelled children are gone');
+
+  // Two calls, two run directories, each with its own abort record: the first
+  // call's cleanup did not remove the second from the index and vice versa.
+  const audits = runDirs(rig.runDir).map((name) => jsonLines(join(rig.runDir, name, 'audit.jsonl')));
+  assert.equal(audits.length, 2);
+  for (const records of audits) assert.equal(records.find((record) => record.record === 'abort')?.cause, 'cancelled');
 });
 
 test('stdin EOF aborts every in-flight run through the same ladder, writes no result and leaves no child behind', async (t) => {

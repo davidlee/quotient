@@ -14,10 +14,13 @@
 // call. `no-new-session` in the jail means no group would exist otherwise.
 //
 // ONE ladder, for every trigger: SIGTERM to the group, `graceMs`, SIGKILL to the
-// group, reap, drain, audit, return. Cancellation (DEC-103), stdin EOF, an
-// evidence failure and later the gate all ride it; there is no second shutdown
-// path that could fall out of step with it. Releasing the session lock and
-// answering the call are the server's, and they happen after this resolves.
+// group, reap, drain, audit, return. The one rung a trigger may skip is the
+// SIGTERM: a trigger arriving after the leader was reaped has no live leader left
+// to grace, so the group it left behind is SIGKILLed directly, and the drain is
+// what that signal bounds. Cancellation (DEC-103), stdin EOF, an evidence failure
+// and later the gate all ride it; there is no second shutdown path that could fall
+// out of step with it. Releasing the session lock and answering the call are the
+// server's, and they happen after this resolves.
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
@@ -209,6 +212,9 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   let auditFailed = false;
   let auditFailedBeforeSpawn = false;
   let exit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+  /** When the drain must give up on the pipes; null until a trigger signals the
+   *  group, because a run that ended itself has a tail worth waiting for. */
+  let drainBound: number | null = null;
 
   // The tally exists before the first byte does: the hook is told the run's
   // starting state, so an idle poll has something to judge while the child is
@@ -360,20 +366,35 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
    * The one ladder. Idempotent: the first trigger's cause is the reported one, and
    * a later trigger is not a second shutdown. The abort record is written where
    * the decision is taken, so it carries the usage facts known at that moment.
+   *
+   * Whatever the rung, a trigger that has signalled leaves a `drainBound` behind:
+   * from there the drain is bounded rather than trustful, because a member the
+   * group signal could not reach is exactly what keeps the pipe open. It is set
+   * last, one grace past the signal actually sent, so the drain never gives up
+   * before the ladder has finished with the leader.
    */
   const terminate = async (cause: Termination): Promise<void> => {
     if (abort !== null) return;
     abort = cause;
     audit({ record: 'abort', cause, settled, usage: usageOf(tally) });
-    if (exit !== null) return; // already reaped: there is no group left to signal
     const pid = child.pid;
     // Never signal without a verified pid of our own child, and never `-0` or the
     // server's own group: the child leads its group, the server leads another.
     if (!signallable(pid)) return;
-    signalGroup(pid, 'SIGTERM');
-    if (await waitFor(exited, graceMs)) return;
-    signalGroup(pid, 'SIGKILL');
-    await exited;
+    if (exit === null) {
+      signalGroup(pid, 'SIGTERM');
+      if (!(await waitFor(exited, graceMs))) {
+        signalGroup(pid, 'SIGKILL');
+        await exited;
+      }
+    } else {
+      // The leader is reaped; its process group is not. A member that outlived the
+      // leader is exactly what holds the stdout pipe open, so the group is killed
+      // outright: there is no graceful rung for a leader that has already exited,
+      // and the drain is what this signal bounds.
+      signalGroup(pid, 'SIGKILL');
+    }
+    drainBound = Date.now() + graceMs;
   };
 
   // An evidence failure fails the run closed: a stream that cannot be recorded
@@ -391,21 +412,49 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   control.signal.addEventListener('abort', onAbort, { once: true });
   if (control.signal.aborted) onAbort();
 
-  // Reap: the exit status is the child's, whatever the trigger.
+  // Reap: the exit status is the child's, whatever the trigger. The abort listener
+  // stays attached through the drain below: a trigger that lands while the pipe is
+  // still open is what bounds the wait, so it may not be removed with the reap.
   await exited;
-  control.signal.removeEventListener('abort', onAbort);
 
-  // Drain: the child's exit does not close stdout while a grandchild holds the
-  // pipe, and the `exit` record and the caller's answer both wait for the last
-  // byte. The ladder's SIGKILL to the group is what bounds this on the abort path.
-  await finished(stdout).catch(() => {});
-  await finished(child.stderr!).catch(() => {});
+  // Drain: the child's exit does not close stdout while a member of its group
+  // holds the pipe, and the `exit` record and the caller's answer both wait for
+  // the last byte. With no trigger the wait is unbounded — a run that ended itself
+  // has a tail worth every byte of, and truncating it would lose evidence — so the
+  // wait is taken a grace at a time and the bound re-read between slices: a trigger
+  // landing mid-drain applies a bound the wait did not have when it started. With
+  // a trigger the wait is bounded by `drainBound` outright.
+  const pipesClosed = Promise.all([finished(stdout).catch(() => {}), finished(child.stderr!).catch(() => {})]);
+  let drained = false;
+  for (;;) {
+    const bound = drainBound;
+    const slice = bound === null ? graceMs : bound - Date.now();
+    if (slice <= 0) break;
+    if (await waitFor(pipesClosed, slice)) {
+      drained = true;
+      break;
+    }
+  }
+  if (!drained) {
+    // The bound expired with the pipe still open: a member our group signal could
+    // not reach is holding it. EX-11 does not let that stand — the group is
+    // SIGKILLed once more — and the pipes are destroyed so the two evidence
+    // writers still end and the run ends without an unreachable tail rather than
+    // never ending at all.
+    if (signallable(child.pid)) signalGroup(child.pid, 'SIGKILL');
+    stdout.destroy();
+    child.stderr!.destroy();
+  }
   finishEvents();
   finishStderr();
   await finished(events).catch(() => {});
   await finished(stderrLog).catch(() => {});
 
   audit({ record: 'exit', code: exit?.code ?? null, signal: exit?.signal ?? null, settled, spawn_failed: spawnFailed });
+
+  // The `exit` record is the last thing a trigger could usefully precede: from
+  // here the run is over and a late trigger has no bound left to move.
+  control.signal.removeEventListener('abort', onAbort);
 
   return outcome();
 }

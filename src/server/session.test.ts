@@ -328,6 +328,34 @@ test('a second caller is refused session-busy while the first holds the lock (EX
   held.release();
 });
 
+test('a refused acquisition creates no session directory: the layout is made only once the lock is this call\'s (EX-2)', () => {
+  const { home, runDir } = state();
+  const session = 's9';
+  // A live owner, written rather than hoped for: this process's pid AND its own
+  // kernel start time name the same owner, so the lock is alive and not reclaimable.
+  const paths = writeLock(home, session, {
+    session,
+    pid: process.pid,
+    starttime: ownStartTime(),
+    call_id: 'the-other-caller',
+    started: new Date().toISOString(),
+    root: '/work/one',
+    capability: 'read',
+  });
+  assert.equal(existsSync(paths.sessionDir), false, 'nothing has created the session directory yet');
+
+  const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5 });
+  assert.equal(refused.ok, false);
+  if (refused.ok) return;
+  assert.equal(refused.reason, 'session-busy');
+  assert.match(refused.detail, /owned by pid/);
+  // The loser leaves no side effect behind: <home>/<id> is the layout the winner
+  // would have used, and a refused call never makes it.
+  assert.equal(existsSync(paths.sessionDir), false, 'a refused call creates no session directory');
+  assert.equal(existsSync(paths.sessions), true, 'the metadata directory the lock lives in stays');
+  assert.equal(readRecord(paths.lock).pid, process.pid, 'the live owner keeps its lock');
+});
+
 test('two forked callers racing for one session: exactly one owns it, the other is refused session-busy (EX-2)', async (t) => {
   const { home, runDir, helperPath } = state();
   const session = 'race';

@@ -114,8 +114,11 @@ type Context = {
   /** What an absent `cwd` resolves to, through the same allowlist as any root. */
   launchDir: string;
   /** `tools/call` is the only method that overlaps the reader (design sec-4); a
-   *  cancellation names one of these by its request id. */
-  inFlight: Map<string, InFlightCall>;
+   *  cancellation names one of these by its request id. The id is the client's to
+   *  repeat, so one key holds every call running under it: the invariant is that
+   *  every running call is in this index, and a second call with an id already in
+   *  flight joins the list rather than displacing its namesake. */
+  inFlight: Map<string, InFlightCall[]>;
   /** stdin reached EOF: the client is gone, so nothing is admitted and no result
    *  is written down the closed channel (DEC-103). */
   closed: boolean;
@@ -502,8 +505,12 @@ async function handleLine(line: string, context: Context): Promise<void> {
       const entry: InFlightCall = { controller: new AbortController(), done: Promise.resolve() };
       const key = callKey(id);
       // Registered before the call starts, so a cancellation arriving in the same
-      // tick finds it instead of racing the registration.
-      context.inFlight.set(key, entry);
+      // tick finds it instead of racing the registration. A repeated id appends to
+      // the list already under its key: both calls stay reachable by the id they
+      // share, for the cancellation and for the EOF sweep alike.
+      const already = context.inFlight.get(key);
+      if (already === undefined) context.inFlight.set(key, [entry]);
+      else already.push(entry);
       entry.done = (async () => {
         try {
           const result = await callTool(message.params, id, context, entry.controller);
@@ -515,7 +522,14 @@ async function handleLine(line: string, context: Context): Promise<void> {
             reply(context, { id, result: toolResult(failedResult('error', ['error'], `the server failed while running this call: ${detail}`)) });
           }
         } finally {
-          context.inFlight.delete(key);
+          // By identity, never by key: the list may hold a namesake that started
+          // after this call did, and only this call's own entry may go.
+          const running = context.inFlight.get(key);
+          if (running !== undefined) {
+            const at = running.indexOf(entry);
+            if (at >= 0) running.splice(at, 1);
+            if (running.length === 0) context.inFlight.delete(key);
+          }
         }
       })();
       return;
@@ -548,7 +562,9 @@ function abortNamed(params: unknown, context: Context): void {
   if (!isRecord(params)) return;
   const requestId = params.requestId;
   if (typeof requestId !== 'string' && typeof requestId !== 'number') return;
-  context.inFlight.get(callKey(requestId))?.controller.abort('cancelled');
+  // Every call running under the id, not just the most recent one: two calls may
+  // share a wire id, and a cancellation names the id.
+  for (const call of context.inFlight.get(callKey(requestId)) ?? []) call.controller.abort('cancelled');
 }
 
 /**
@@ -606,7 +622,7 @@ export async function serve(
   // ladder, wait for their cleanup and audit flush, and return — no result is
   // written down the closed channel, and no child outlives the server.
   context.closed = true;
-  const inFlight = [...context.inFlight.values()];
+  const inFlight = [...context.inFlight.values()].flat();
   for (const call of inFlight) call.controller.abort('eof');
   await Promise.all(inFlight.map((call) => call.done));
 }
