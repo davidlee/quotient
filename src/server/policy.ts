@@ -229,9 +229,11 @@ function validatePolicy(value: unknown): PolicyCheck {
       return invalid(`maxima.${field} must be a positive finite number`);
     }
   }
-  // A delegate with no ceiling is unbounded spend, and the wall clock is the one
-  // ceiling that holds when the stream reports no usage (design sec-1).
-  if (!Object.hasOwn(maxima, 'wall_clock_s')) return invalid('missing policy field: maxima.wall_clock_s');
+  // A delegate with no ceiling is unbounded spend: every unit is bounded, and the
+  // wall clock is the one that holds when the stream reports no usage (design sec-1).
+  for (const field of MAXIMA_FIELDS) {
+    if (!Object.hasOwn(maxima, field)) return invalid(`missing policy field: maxima.${field}`);
+  }
 
   const profiles = value.profiles;
   if (!Array.isArray(profiles) || !profiles.every((name) => typeof name === 'string')) {

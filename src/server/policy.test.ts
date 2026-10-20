@@ -156,21 +156,25 @@ test('a wrong-typed policy value refuses policy-invalid, naming the field', () =
   }
 });
 
-test('maxima that do not bound the run refuse policy-invalid: wall_clock_s is required and every maximum is positive', () => {
-  // A delegate with no ceiling is unbounded spend, and the wall clock is the one
-  // ceiling that holds when the stream reports no usage (design sec-1).
+test('maxima that do not bound the run refuse policy-invalid: all four are required and positive', () => {
+  // A delegate with no ceiling is unbounded spend: the wall clock bounds time, not
+  // money, so a spend ceiling may not be left out (design sec-1; REQ-004, DEC-057).
+  const full = { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
+  const without = (field: string): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(full).filter(([key]) => key !== field));
   const cases: [Record<string, unknown>, RegExp][] = [
-    [{}, /maxima\.wall_clock_s/],
-    [{ requests: 20, tokens: 100000, cost_usd: 1.5 }, /maxima\.wall_clock_s/],
-    [{ wall_clock_s: 0 }, /maxima\.wall_clock_s/],
-    [{ wall_clock_s: 600, cost_usd: -1 }, /maxima\.cost_usd/],
-    [{ wall_clock_s: 600, requests: 0 }, /maxima\.requests/],
+    [{}, /maxima\./],
+    [{ wall_clock_s: 600 }, /maxima\./],
+    ...Object.keys(full).map((field): [Record<string, unknown>, RegExp] => [without(field), new RegExp(`maxima\\.${field}`)]),
+    [{ ...full, wall_clock_s: 0 }, /maxima\.wall_clock_s/],
+    [{ ...full, cost_usd: -1 }, /maxima\.cost_usd/],
+    [{ ...full, requests: 0 }, /maxima\.requests/],
   ];
   for (const [maxima, detail] of cases) {
     const ws = workspace(validPolicy({ maxima }));
     refuse(admitCall(ws.env, 4), 'policy-invalid', detail);
   }
-  assert.ok(admitCall(workspace(validPolicy({ maxima: { wall_clock_s: 600 } })).env, 4).ok, 'the wall clock alone bounds the run');
+  assert.ok(admitCall(workspace(validPolicy({ maxima: full })).env, 4).ok);
 });
 
 test('a negative transcript budget refuses policy-invalid; 0 is admitted and sets no ceiling', () => {
