@@ -3,8 +3,8 @@
 //
 // Design sec-5 is the contract and DEC-093's table is normative here: this module
 // owns the two vocabularies, the cause → state table, the success predicate, the
-// abort latch and its commit point, the refusal arm, the soft transcript budget and
-// the enum-reachability claim. It reads no stream, spawns nothing and appends no
+// abort latch and its commit point, the refusal arm and the enum-reachability
+// claim. It reads no stream, spawns nothing and appends no
 // evidence: the reducer supplies the stream-side facts, the spawn supplies the
 // child's, and `resultFor` is the ONLY place a verdict is derived (EX-8).
 import type { Reduced } from '../reduce/reduce.ts';
@@ -87,9 +87,11 @@ export const CAUSE_STATE: Record<Termination, ResultState> = {
 /**
  * The refusal reasons this module declares valid (EX-3): a refusal token, or a
  * failure to record one. Steps 1-8 own the tokens they raise (`disabled`,
- * `profile-invalid`, `session-busy`, …) and name them where they are raised.
+ * `profile-invalid`, `session-busy`, …) and name them where they are raised;
+ * `server-error` is the outer `tools/call` catch's, for a throw that landed before
+ * any run was established.
  */
-export const RESULT_REFUSAL_REASONS = ['request-invalid', 'audit-failed', 'audit-unavailable'] as const;
+export const RESULT_REFUSAL_REASONS = ['request-invalid', 'audit-failed', 'audit-unavailable', 'server-error'] as const;
 
 /** Where a spawned run's evidence lives. Null for a refusal: nothing ran. */
 export type Artifacts = {
@@ -298,15 +300,23 @@ export function refusedResult(reason: string, detail: string): AgentResult {
 }
 
 /**
- * The failure arm for a call the server itself could not finish (a thrown error
- * while running): a fixed non-success, never a verdict derived from a run. A run
- * that reached the stream is answered by `resultFor`.
+ * The failure arm for a call the server itself could not finish after the run was
+ * established: the session and the run directory exist, so the envelope is a
+ * conforming `failed` one rather than a verdict derived from a stream. `state` is
+ * the row of the cause that ended the call.
+ *
+ * The stream was never read, so `transcript` is empty: the diagnostic detail is
+ * not reduced markdown and belongs to the diagnostics sink, not to the envelope.
+ * The status handed in is the honest verdict on an unread stream. A throw that
+ * landed before anything ran is a refusal — `refusedResult('server-error', …)` —
+ * not this arm.
  */
 export function failedResult(
   termination: Termination,
   causes: Termination[],
-  detail: string,
-  session: string | null = null,
+  session: string,
+  status: Record<string, unknown>,
+  layout: Artifacts,
 ): AgentResult {
   return {
     schema: RESULT_SCHEMA,
@@ -317,29 +327,17 @@ export function failedResult(
     final: false,
     truncated: false,
     result: null,
-    transcript: detail,
-    status: null,
-    artifacts: null,
+    transcript: '',
+    status,
+    artifacts: {
+      dir: layout.dir,
+      events: layout.events,
+      transcript: layout.transcript,
+      status: layout.status,
+      audit: layout.audit,
+    },
     refusal: null,
   };
-}
-
-// ── The budget ─────────────────────────────────────────────────────────────
-
-/**
- * The byte budget that reaches the reducer (A5, EX-6). The policy's maximum is
- * authoritative: a call asking for less is clamped down to it, and a call asking
- * for everything (`0`, the reducer's own word for the full transcript) gets the
- * maximum rather than unbounded access past an operator's ceiling. An absent
- * policy maximum leaves the call's value alone, and an absent call value leaves the
- * reducer's own default (returns `undefined`, which `reduce` reads as 8192).
- */
-export function transcriptBudget(requested?: number, policyMax?: number): number | undefined {
-  const ceiling = policyMax !== undefined && policyMax > 0 ? policyMax : undefined;
-  if (ceiling === undefined) return requested;
-  if (requested === undefined) return ceiling;
-  if (requested <= 0) return ceiling;
-  return Math.min(requested, ceiling);
 }
 
 // ── Conformance ────────────────────────────────────────────────────────────

@@ -26,7 +26,7 @@ import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
-import { countRecord } from '../reduce/reduce.ts';
+import { countRecord, createTally } from '../reduce/reduce.ts';
 import type { Tally } from '../reduce/reduce.ts';
 import { attemptsPath, appendAudit, removeRun, runLayout } from './evidence.ts';
 import type { AuditRecord, CallId, RunLayout } from './evidence.ts';
@@ -205,7 +205,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   const env = childEnv(control.env ?? process.env, plan.runDir, layout);
 
   const lines: string[] = [];
-  const tally = emptyTally();
+  const tally = createTally();
   let settled = false;
   let abort: Termination | null = null;
   let spawnFailed = false;
@@ -457,17 +457,6 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   control.signal.removeEventListener('abort', onAbort);
 
   return outcome();
-}
-
-/** An empty accumulator, shaped exactly like the reducer's. */
-function emptyTally(): Tally {
-  return {
-    requests: 0,
-    requests_unmeasured: 0,
-    tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
-    cost: null,
-    accounting: 'known',
-  };
 }
 
 /** The usage facts an audit record carries: the accumulator's units, verbatim. */

@@ -17,15 +17,15 @@ import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
-import { createLatch, failedResult, refusedResult, resultFor, transcriptBudget } from './result.ts';
+import { createLatch, failedResult, refusedResult, resultFor } from './result.ts';
 import type { AgentResult } from './result.ts';
-import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm } from './policy.ts';
+import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm, transcriptBudget } from './policy.ts';
 import type { PostureState } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
 import type { SnapshotLoad } from './profiles.ts';
 import { acquireSession } from './session.ts';
 import { checkChildView } from './childview.ts';
-import { attemptsPath, appendAttempt, writeAttemptProbe } from './evidence.ts';
+import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe } from './evidence.ts';
 import type { CallId, RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
 import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
@@ -330,6 +330,11 @@ async function callTool(
   });
   if (!session.ok) return refuse(session.reason, session.detail);
 
+  // The run's evidence layout, allocated once and handed to the spawn: the spawn
+  // would allocate the same five paths itself, and a throw before it returns must
+  // still be able to name where the run's evidence lives.
+  const layout = runLayout(admission.runDir, id);
+
   // The gate (design sec-4, PHASE-07): one tick evaluator over the clamped
   // snapshot, aborting through this call's own controller so a crossing reaches
   // the ladder exactly as a cancellation does. Created after the last refusal
@@ -390,6 +395,7 @@ async function callTool(
         prompt: request.prompt,
         policyDigest: admission.digest,
         profileDigest: snapshot.digest,
+        layout,
       },
       { signal: controller.signal, graceMs: context.graceMs, env: context.env, onRecord: gate.tick },
     );
@@ -438,6 +444,14 @@ async function callTool(
       session: session.session,
     });
     return toolResult(document);
+  } catch (error) {
+    // The run was established (a session, a run directory) and the server threw
+    // while running it: the answer is a conforming `failed` envelope over the
+    // layout, with the reducer's verdict on an unread stream. The detail is
+    // diagnostics, not reduced markdown, so it never enters the envelope.
+    const detail = error instanceof Error ? error.message : String(error);
+    context.diagnostics.write(`pi-mcp: call ${String(id)} failed while running: ${detail}\n`);
+    return toolResult(failedResult('error', ['error'], session.session, reduce([], {}).status, layout));
   } finally {
     gate.close();
     session.release();
@@ -519,7 +533,15 @@ async function handleLine(line: string, context: Context): Promise<void> {
           const detail = error instanceof Error ? error.message : String(error);
           context.diagnostics.write(`pi-mcp: call ${String(id)} failed while running: ${detail}\n`);
           if (!context.closed) {
-            reply(context, { id, result: toolResult(failedResult('error', ['error'], `the server failed while running this call: ${detail}`)) });
+            // Every step that precedes the run answers a refusal rather than
+            // throwing, so this catch only sees a failure before the run was
+            // established: nothing ran, so a refusal is the truth.
+            reply(context, {
+              id,
+              result: toolResult(
+                refusedResult('server-error', `the server failed before this call could run: ${detail}`),
+              ),
+            });
           }
         } finally {
           // By identity, never by key: the list may hold a namesake that started

@@ -92,6 +92,19 @@ export type Tally = {
   accounting: Accounting;
 };
 
+/** The accumulator's one constructor: the state a `Tally` has before its first
+ *  record. The reducer, the spawn and the gate's idle poll all start here, so an
+ *  empty accumulator is spelled once. */
+export function createTally(): Tally {
+  return {
+    requests: 0,
+    requests_unmeasured: 0,
+    tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
+    cost: null,
+    accounting: 'known',
+  };
+}
+
 type Entry = {
   kind: 'prose' | 'call' | 'result' | 'error';
   /** Rendered line(s), no trailing newline. */
@@ -124,13 +137,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
   let turns = 0;
   let toolCalls = 0;
   let stopReason: string | null = null;
-  const tally: Tally = {
-    requests: 0,
-    requests_unmeasured: 0,
-    tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
-    cost: null,
-    accounting: 'known',
-  };
+  const tally: Tally = createTally();
   /** The last assistant message seen and where its own prose landed. A later
    *  assistant `message_start` or `message_end` replaces it, so only a message
    *  with none after it can be the terminal one. */

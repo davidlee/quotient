@@ -16,6 +16,7 @@ import type { Reduced } from '../reduce/reduce.ts';
 import {
   CAUSE_STATE,
   createLatch,
+  failedResult,
   REACHABILITY,
   refusedResult,
   RESULT_REFUSAL_REASONS,
@@ -23,9 +24,9 @@ import {
   RESULT_STATES,
   resultFor,
   TERMINATIONS,
-  transcriptBudget,
   validateAgentResult,
 } from './result.ts';
+import { transcriptBudget } from './policy.ts';
 import type { AgentResult, Artifacts, LatchCause, Reachability, ResultState, RunFacts, Termination } from './result.ts';
 
 /** pi's `Usage` shape with every component present: missing data is then missing
@@ -451,6 +452,23 @@ test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every
     }
   });
 
+  await t.test('the last resort: a post-run throw is a conforming `failed` envelope, not a refusal', () => {
+    // The arm the server answers with when it throws after the run was established:
+    // it has the call's session, a status and a layout, so it must satisfy the same
+    // schema every derived outcome does.
+    const status = reduce([], {}).status;
+    const doc = failedResult('error', ['error'], 'sess-9', status, ARTIFACTS);
+    assertConforms(doc, 'failedResult');
+    assert.equal(doc.state, 'failed');
+    assert.equal(doc.session, 'sess-9', 'the call\'s own session');
+    assert.equal(doc.artifacts?.dir, ARTIFACTS.dir, 'the run layout\'s directory');
+    assert.equal(doc.transcript, '', 'the diagnostic detail is not reduced markdown');
+    assert.equal(doc.result, null);
+    assert.equal(doc.final, false);
+    assert.equal(doc.refusal, null);
+    assert.equal(doc.status, status, 'the verdict on an unread stream');
+  });
+
   await t.test('a cause token outside the enum fails the suite, not the reader', () => {
     const outside = { ...run({ causes: ['timeout'] }).doc, termination: 'backstop', causes: ['backstop'] };
     const check = validateAgentResult(outside);
@@ -502,16 +520,6 @@ function bulky(): string[] {
 }
 
 test('the transcript budget is soft and wired through the policy clamp (EX-6, VT-5)', async (t) => {
-  await t.test('the clamp', () => {
-    assert.equal(transcriptBudget(undefined, undefined), undefined, 'nothing asked and no ceiling: the reducer default stands');
-    assert.equal(transcriptBudget(4096, undefined), 4096);
-    assert.equal(transcriptBudget(0, undefined), 0, '0 is the reducer\'s own word for the full transcript');
-    assert.equal(transcriptBudget(undefined, 4096), 4096, 'the policy maximum applies to a call that asked for nothing');
-    assert.equal(transcriptBudget(4096, 2048), 2048, 'the call\'s value is clamped, never passed through');
-    assert.equal(transcriptBudget(0, 2048), 2048, 'a call asking for the whole transcript cannot unbound an operator ceiling');
-    assert.equal(transcriptBudget(8192, 0), 8192, 'a policy maximum of 0 sets no ceiling');
-  });
-
   await t.test('the clamped budget is what reaches the reducer', () => {
     const lines = bulky();
     const loose = run({ lines, budgetBytes: transcriptBudget(undefined, undefined) }).reduced;

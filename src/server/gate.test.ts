@@ -19,7 +19,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { countRecord, reduce } from '../reduce/reduce.ts';
+import { countRecord, createTally, reduce } from '../reduce/reduce.ts';
 import type { Tally } from '../reduce/reduce.ts';
 import { createGate } from './gate.ts';
 import type { Gate, GateConfig } from './gate.ts';
@@ -93,20 +93,10 @@ const RETRY_FIXTURE: string[] = [
   ev('agent_settled'),
 ];
 
-/** An empty accumulator, shaped like the reducer's: the state a `Tally` has
- *  before its first record. */
-const emptyTally = (): Tally => ({
-  requests: 0,
-  requests_unmeasured: 0,
-  tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
-  cost: null,
-  accounting: 'known',
-});
-
 /** The accumulator as the spawn leaves it after the stream: every line counted by
  *  `countRecord`, the one writer of its units. */
 const tallyOf = (lines: string[]): Tally => {
-  const tally = emptyTally();
+  const tally = createTally();
   for (const raw of lines) countRecord(JSON.parse(raw), tally);
   return tally;
 };
@@ -413,7 +403,7 @@ test('switch: a flip to enabled:false is caught by an idle tick with no new reco
   const { gate, aborted } = unitGate(rig, { idleMs: 20 });
   // The spawn's seam hands the gate the fresh tally before the first byte, so the
   // idle poll has something to judge while the child is silent.
-  gate.tick(emptyTally());
+  gate.tick(createTally());
   assert.equal(gate.cause(), null, 'an enabled policy and a quiet child fire nothing');
 
   patchPolicy(rig, 'enabled', false);
@@ -425,7 +415,7 @@ test('switch: a flip to enabled:false is caught by an idle tick with no new reco
 test('switch: a policy deleted mid-run aborts the run — policy-unavailable is not evidence that the switch is off (VT-4)', async (t) => {
   const rig = newRig(t);
   const { gate, aborted } = unitGate(rig);
-  gate.tick(emptyTally());
+  gate.tick(createTally());
 
   rmSync(rig.policyPath);
   assert.equal(await within(aborted, 2000, 'the switch'), 'switch');
@@ -436,7 +426,7 @@ test('switch: a policy deleted mid-run aborts the run — policy-unavailable is 
 test('switch: a policy corrupted mid-run aborts the run — an unparsable source is policy-invalid, not silence (VT-4)', async (t) => {
   const rig = newRig(t);
   const { gate, aborted } = unitGate(rig);
-  gate.tick(emptyTally());
+  gate.tick(createTally());
 
   writeFileSync(rig.policyPath, '{ this is not json');
   assert.equal(await within(aborted, 2000, 'the switch'), 'switch');
@@ -512,12 +502,27 @@ test('timeout: the wall clock aborts with cause timeout, however quiet the child
     startedAt: Date.now() - 100,
     idleMs: 10,
   });
-  gate.tick(emptyTally());
+  gate.tick(createTally());
   assert.equal(await within(aborted, 2000, 'the wall clock'), 'timeout');
   const [trigger] = gate.triggers();
   assert.equal(trigger.unit, 'wall_clock_s');
   assert.equal(trigger.limit, 0.05);
   assert.ok((trigger.observed as number) >= 0.1, `observed ${trigger.observed} s`);
+  gate.close();
+});
+
+test('timeout: the wall clock fires with no tick at all — the idle poll stands alone (F-7)', async (t) => {
+  const rig = newRig(t);
+  const { gate, aborted } = unitGate(rig, {
+    ceilings: { wall_clock_s: 0.05 },
+    startedAt: Date.now() - 100,
+    idleMs: 10,
+  });
+  // No `tick`: the gate starts on an empty accumulator, so a caller that never
+  // hands one in is still bounded.
+  assert.equal(await within(aborted, 2000, 'the wall clock'), 'timeout');
+  const [trigger] = gate.triggers();
+  assert.equal(trigger.unit, 'wall_clock_s');
   gate.close();
 });
 

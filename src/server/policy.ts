@@ -329,6 +329,26 @@ export function clampCeilings(requested: Maxima | undefined, maxima: Maxima): Ce
 }
 
 /**
+ * The byte budget that reaches the reducer (A5, EX-6). The policy's maximum is
+ * authoritative: a call asking for less is clamped down to it, and a call asking
+ * for everything (`0`, the reducer's own word for the full transcript) gets the
+ * maximum rather than unbounded access past an operator's ceiling. An absent
+ * policy maximum leaves the call's value alone, and an absent call value leaves the
+ * reducer's own default (returns `undefined`, which `reduce` reads as 8192).
+ *
+ * This maximum clamps silently where `clampCeilings` refuses an above-maximum
+ * request: a transcript budget is a report bound, not a spend bound, so nothing is
+ * refused over it.
+ */
+export function transcriptBudget(requested?: number, policyMax?: number): number | undefined {
+  const ceiling = policyMax !== undefined && policyMax > 0 ? policyMax : undefined;
+  if (ceiling === undefined) return requested;
+  if (requested === undefined) return ceiling;
+  if (requested <= 0) return ceiling;
+  return Math.min(requested, ceiling);
+}
+
+/**
  * Steps 1-2 for one call, in order, first failure wins:
  *
  *   1. the launch environment (absent/relative -> `policy-unavailable`), the

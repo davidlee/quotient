@@ -25,6 +25,7 @@
 // accumulator's, and it never accounts anything itself.
 import { readPolicy } from './policy.ts';
 import type { Maxima } from './policy.ts';
+import { createTally } from '../reduce/reduce.ts';
 import type { Tally } from '../reduce/reduce.ts';
 
 /** The causes the gate aborts with: a subset of the spawn's `AbortCause`, so the
@@ -78,7 +79,10 @@ export function createGate(config: GateConfig): Gate {
   const idleMs = config.idleMs ?? DEFAULT_IDLE_MS;
   const startedAt = config.startedAt ?? Date.now();
   const fired: GateTrigger[] = [];
-  let last: Tally | null = null;
+  // Primed with an empty accumulator, never null: the wall clock and the switch
+  // bound a silent child from the gate's first poll, before any caller has handed
+  // in a tally. The ceiling units read zero, which crosses nothing.
+  let last: Tally = createTally();
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
 
@@ -149,11 +153,13 @@ export function createGate(config: GateConfig): Gate {
     judge(tally);
   };
 
-  // The idle poll: the same evaluation, over the last tally handed in, so a
-  // silent child is still bounded by the switch and the wall clock. Unref'd, so
-  // an interval a forgotten `close()` left behind cannot hold the process open.
+  // The idle poll: the same evaluation, with no record and no caller needed. It
+  // judges the last tally handed in — the empty accumulator until the spawn hands
+  // the first one over — so the switch and the wall clock bound a silent child
+  // from the first period on. Unref'd, so an interval a forgotten `close()` left
+  // behind cannot hold the process open.
   timer = setInterval(() => {
-    if (last !== null) judge(last);
+    judge(last);
   }, idleMs);
   timer.unref();
 

@@ -30,7 +30,8 @@
 // not parsed.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve, sep } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { canonicalPath, within } from './paths.ts';
 
 /** The profile-name grammar (design sec-2 step 3): 1-32 characters, lower-case. */
 export const PROFILE_NAME = /^[a-z][a-z0-9-]{0,31}$/;
@@ -252,19 +253,6 @@ export type RootRefusal = 'root-missing' | 'root-not-a-directory' | 'root-not-al
 
 export type RootResolution = { ok: true; root: string } | { ok: false; reason: RootRefusal; detail: string };
 
-/** A path as components, so an allowlist comparison cannot be a string prefix. */
-const componentsOf = (path: string): string[] => path.split(sep).filter((component) => component.length > 0);
-
-/** Canonical where the path exists; its lexical form otherwise, which matches
- *  nothing on disk and so grants nothing. */
-function canonicalForComparison(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-}
-
 /**
  * Step 4: canonicalise the call's root and allowlist it by path components.
  *
@@ -301,12 +289,12 @@ export function resolveRoot(
     return { ok: false, reason: 'root-not-a-directory', detail: `${canonical} is not a directory` };
   }
 
-  const components = componentsOf(canonical);
+  // The same predicate the child-view check uses (DEC-095): `canonical` is already
+  // a realpath, so the comparison is against the allowlisted root's canonical form.
+  // `/work/oneevil` is not inside `/work/one`, however much of it the string shares,
+  // and a root that does not exist canonicalises to a path that matches nothing.
   for (const allowedRoot of allowedRoots) {
-    const allowed = componentsOf(canonicalForComparison(allowedRoot));
-    // Equal or descendant, component by component: `/work/oneevil` is neither,
-    // however much of `/work/one` its string shares.
-    if (allowed.every((component, index) => component === components[index])) {
+    if (within(canonicalPath(allowedRoot), canonical)) {
       return { ok: true, root: canonical };
     }
   }

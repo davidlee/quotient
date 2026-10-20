@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { admitCall, clampCeilings, createPostureState, selectForm } from './policy.ts';
+import { admitCall, clampCeilings, createPostureState, selectForm, transcriptBudget } from './policy.ts';
 import type { Admission } from './policy.ts';
 import { attemptsPath, sha256Hex } from './evidence.ts';
 
@@ -329,4 +329,16 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
   const requestedOnly = clampCeilings({ tokens: 10 }, {});
   if (!requestedOnly.ok) assert.fail('a request under no maximum is admitted');
   assert.deepEqual(requestedOnly.ceilings, { tokens: 10 });
+});
+
+// ── The transcript budget: the one clamp that narrows silently ─────────────
+
+test('the transcript budget clamps to the policy maximum, silently where clampCeilings refuses (F-6)', () => {
+  assert.equal(transcriptBudget(undefined, undefined), undefined, 'nothing asked and no ceiling: the reducer default stands');
+  assert.equal(transcriptBudget(4096, undefined), 4096);
+  assert.equal(transcriptBudget(0, undefined), 0, '0 is the reducer\'s own word for the full transcript');
+  assert.equal(transcriptBudget(undefined, 4096), 4096, 'the policy maximum applies to a call that asked for nothing');
+  assert.equal(transcriptBudget(4096, 2048), 2048, 'the call\'s value is clamped, never passed through');
+  assert.equal(transcriptBudget(0, 2048), 2048, 'a call asking for the whole transcript cannot unbound an operator ceiling');
+  assert.equal(transcriptBudget(8192, 0), 8192, 'a policy maximum of 0 sets no ceiling');
 });

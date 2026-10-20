@@ -12,9 +12,8 @@
 // Refusal, never a mask: this module names the overlapping member and the
 // protected path and stops. It authors no confinement argument — jail policy is
 // the flake's (SPEC-001 REQ-009) — and writes no file.
-import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { evidenceStores } from './evidence.ts';
+import { canonicalPath, within } from './paths.ts';
 import type { Filesystem } from './profiles.ts';
 
 /** The one refusal token step 8 produces (design sec-2 step 8). */
@@ -71,44 +70,6 @@ export type ChildViewInput = {
 };
 
 export type ChildViewCheck = { ok: true } | { ok: false; reason: ViewRefusal; detail: string };
-
-/**
- * A path's canonical form: `realpath` of its longest existing ancestor, with the
- * remaining components appended. The run dir, the session home and a policy file
- * named in a policy's fixed mounts may not exist at check time, and a lexical
- * comparison would let a symlinked ancestor through (A2).
- *
- * A path with no existing ancestor keeps its resolved lexical form; it names
- * nothing on disk, so it matches nothing that does.
- */
-export function canonicalPath(path: string): string {
-  const target = resolve(path);
-  let head = target;
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      const real = realpathSync(head);
-      return tail.length === 0 ? real : join(real, ...tail);
-    } catch {
-      const parent = dirname(head);
-      if (parent === head) return target;
-      tail.unshift(basename(head));
-      head = parent;
-    }
-  }
-}
-
-/**
- * Whether `inner` is `outer` itself or a descendant of it, by path COMPONENTS
- * (DEC-095): `/work/one` does not contain `/work/one-2`, however much of it the
- * string shares.
- */
-export function within(outer: string, inner: string): boolean {
-  const rel = relative(outer, inner);
-  if (rel === '') return true;
-  if (isAbsolute(rel)) return false;
-  return rel !== '..' && !rel.startsWith(`..${sep}`);
-}
 
 /** The child view's members, in the order the check reports them. */
 export function childViewMembers(input: ChildViewInput): ChildViewMember[] {
