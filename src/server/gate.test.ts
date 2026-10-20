@@ -436,12 +436,13 @@ test('switch: a policy corrupted mid-run aborts the run — an unparsable source
 
 test('a maximum lowered mid-run does not reach the run: the admission snapshot judges it (EX-4)', async (t) => {
   const rig = newRig(t);
-  // The snapshot allows one request; the tick then sees the policy's maximum
-  // lowered to zero, and ignores it: the re-read supplies the switch, never the
-  // bounds.
+  // The snapshot allows one request; the tick then sees the policy's maxima
+  // lowered below what the run has already used, and ignores them: the re-read
+  // supplies the switch, never the bounds. (Positive, so the policy stays valid:
+  // a zero maximum is malformed and would itself abort `switch`.)
   const { gate, causes } = unitGate(rig, { ceilings: { requests: 1 } });
   gate.tick(tallyOf([send('stop')]));
-  patchPolicy(rig, 'maxima', { requests: 0, tokens: 0, cost_usd: 0, wall_clock_s: 600 });
+  patchPolicy(rig, 'maxima', { requests: 0.5, tokens: 1, cost_usd: 0.000001, wall_clock_s: 600 });
   await pause(80);
   gate.close();
   assert.deepEqual(causes, [], 'the snapshot judges the run, not the re-read maxima');

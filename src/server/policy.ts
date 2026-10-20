@@ -225,10 +225,13 @@ function validatePolicy(value: unknown): PolicyCheck {
   for (const field of Object.keys(maxima)) {
     if (!MAXIMA_FIELDS.includes(field)) return invalid(`unknown policy field: maxima.${field}`);
     const limit = maxima[field];
-    if (typeof limit !== 'number' || !Number.isFinite(limit)) {
-      return invalid(`maxima.${field} must be a finite number`);
+    if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
+      return invalid(`maxima.${field} must be a positive finite number`);
     }
   }
+  // A delegate with no ceiling is unbounded spend, and the wall clock is the one
+  // ceiling that holds when the stream reports no usage (design sec-1).
+  if (!Object.hasOwn(maxima, 'wall_clock_s')) return invalid('missing policy field: maxima.wall_clock_s');
 
   const profiles = value.profiles;
   if (!Array.isArray(profiles) || !profiles.every((name) => typeof name === 'string')) {
@@ -254,8 +257,8 @@ function validatePolicy(value: unknown): PolicyCheck {
   if (typeof enabled !== 'boolean') return invalid('enabled must be a boolean');
 
   const budget = value.transcript_budget_bytes;
-  if (budget !== undefined && (typeof budget !== 'number' || !Number.isInteger(budget))) {
-    return invalid('transcript_budget_bytes must be an integer');
+  if (budget !== undefined && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 0)) {
+    return invalid('transcript_budget_bytes must be a non-negative integer (0 sets no ceiling)');
   }
 
   const policy: Policy = {

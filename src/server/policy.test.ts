@@ -156,6 +156,28 @@ test('a wrong-typed policy value refuses policy-invalid, naming the field', () =
   }
 });
 
+test('maxima that do not bound the run refuse policy-invalid: wall_clock_s is required and every maximum is positive', () => {
+  // A delegate with no ceiling is unbounded spend, and the wall clock is the one
+  // ceiling that holds when the stream reports no usage (design sec-1).
+  const cases: [Record<string, unknown>, RegExp][] = [
+    [{}, /maxima\.wall_clock_s/],
+    [{ requests: 20, tokens: 100000, cost_usd: 1.5 }, /maxima\.wall_clock_s/],
+    [{ wall_clock_s: 0 }, /maxima\.wall_clock_s/],
+    [{ wall_clock_s: 600, cost_usd: -1 }, /maxima\.cost_usd/],
+    [{ wall_clock_s: 600, requests: 0 }, /maxima\.requests/],
+  ];
+  for (const [maxima, detail] of cases) {
+    const ws = workspace(validPolicy({ maxima }));
+    refuse(admitCall(ws.env, 4), 'policy-invalid', detail);
+  }
+  assert.ok(admitCall(workspace(validPolicy({ maxima: { wall_clock_s: 600 } })).env, 4).ok, 'the wall clock alone bounds the run');
+});
+
+test('a negative transcript budget refuses policy-invalid; 0 is admitted and sets no ceiling', () => {
+  refuse(admitCall(workspace(validPolicy({ transcript_budget_bytes: -1 })).env, 4), 'policy-invalid', /transcript_budget_bytes/);
+  assert.ok(admitCall(workspace(validPolicy({ transcript_budget_bytes: 0 })).env, 4).ok);
+});
+
 test('a policy naming a non-absolute root or form path refuses policy-invalid', () => {
   refuse(
     admitCall(workspace(validPolicy({ roots: ['relative/root'] })).env, 5),
