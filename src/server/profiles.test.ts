@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable, Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import {
   MCP_EXTENSION,
   PROFILE_NAME,
@@ -371,9 +371,14 @@ async function converse(
 ): Promise<{ replies: Record<string, any>[]; stderr: string }> {
   const out: string[] = [];
   const err: string[] = [];
+  let answered = (): void => {};
+  const answer = new Promise<void>((resolve) => {
+    answered = resolve;
+  });
   const output = new Writable({
     write(chunk, _encoding, done) {
       out.push(String(chunk));
+      answered();
       done();
     },
   });
@@ -383,7 +388,15 @@ async function converse(
       done();
     },
   });
-  await serve(Readable.from(lines.map((l) => `${l}\n`)), output, env, diagnostics, options);
+  // `tools/call` is answered asynchronously (design sec-4 lets it overlap the
+  // reader), and stdin EOF is DEC-103's abort trigger: the channel stays open
+  // until the call has answered, so the reply is a reply and not an abort.
+  const input = new PassThrough();
+  const serving = serve(input, output, env, diagnostics, options);
+  input.write(lines.map((line) => `${line}\n`).join(''));
+  await answer;
+  input.end();
+  await serving;
   const replies = out
     .join('')
     .split('\n')
@@ -409,12 +422,21 @@ function attemptLines(runDir: string): Record<string, unknown>[] {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-test('a call that clears steps 3-6 reaches the seam, with an absent cwd taken from the launch directory', async () => {
+test('a call that clears steps 3-6 reaches the run, with an absent cwd taken from the launch directory', async () => {
   const wire = mintWire();
   const doc = await drive({ prompt: 'review this', profile: 'read', tools: ['read', 'bash'] }, wire);
   assert.equal(doc.state, 'failed');
   assert.equal(doc.termination, 'spawn');
-  assert.match(doc.transcript, /not built/i);
+  // The run was reached: step 8 passed, a run directory exists, and its `spawn`
+  // record names the root the absent `cwd` resolved to through the launch
+  // directory and the policy's allowlist.
+  assert.ok(doc.artifacts !== null);
+  const audit = readFileSync(doc.artifacts.audit, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.equal(audit[0].record, 'spawn');
+  assert.equal(audit[0].root, realpathSync(wire.root));
 });
 
 test('the profile refusals reach the caller as tool results, in grammar -> snapshot -> policy order', async () => {

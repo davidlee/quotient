@@ -1,0 +1,459 @@
+// The spawn: one wrapped launch form, one child, one termination ladder.
+//
+// Design sec-3's executable contract is a launcher with the executable baked in.
+// It consumes exactly one positional — the active session directory it binds at
+// run time — and then receives pi's own options verbatim, with no executable word
+// and no `--`; the confinement is the form's, so the server names no jail flag and
+// has no second argv shape to fall back to.
+//
+// Design sec-4's spawn: cwd is the root, the prompt travels on the child's own
+// stdin pipe (closed after the write), stdout is captured into the run's
+// `events.jsonl` and stderr into `stderr.log` (never merged), and the child is
+// spawned `detached` — one `setsid(2)` session, i.e. its own process-group leader
+// — so the ladder signals `-pid` and can never reach the server or a concurrent
+// call. `no-new-session` in the jail means no group would exist otherwise.
+//
+// ONE ladder, for every trigger: SIGTERM to the group, `graceMs`, SIGKILL to the
+// group, reap, drain, audit, return. Cancellation (DEC-103), stdin EOF, an
+// evidence failure and later the gate all ride it; there is no second shutdown
+// path that could fall out of step with it. Releasing the session lock and
+// answering the call are the server's, and they happen after this resolves.
+import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import { StringDecoder } from 'node:string_decoder';
+import { finished } from 'node:stream/promises';
+import { countRecord } from '../reduce/reduce.ts';
+import type { Tally } from '../reduce/reduce.ts';
+import { attemptsPath, appendAudit, removeRun, runLayout } from './evidence.ts';
+import type { AuditRecord, CallId, RunLayout } from './evidence.ts';
+import type { Form } from './policy.ts';
+import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument } from './profiles.ts';
+import type { Profile } from './profiles.ts';
+import type { Termination } from './result.ts';
+
+/** Design sec-4's grace between SIGTERM and SIGKILL on the abort path. Injectable
+ *  so a test does not spend two seconds per cancelled run; the default is the
+ *  contract. */
+export const DEFAULT_GRACE_MS = 2000;
+
+/** Every variable the server's own launch environment carries is named here and
+ *  nowhere reaches a child: a `PI_MCP_*` value is the server's configuration. */
+const SERVER_VAR_PREFIX = 'PI_MCP_';
+
+/**
+ * The causes a trigger may abort a run with. They ride `AbortSignal.reason`, so a
+ * trigger is one value: the cancellation notification, stdin EOF, an evidence
+ * failure and (PHASE-07) the gate all hand the ladder a cause through the same
+ * signal rather than a second channel beside it.
+ */
+export type AbortCause = Extract<Termination, 'cancelled' | 'eof' | 'audit' | 'timeout' | 'switch' | 'ceiling' | 'accounting'>;
+
+const ABORT_CAUSES: readonly AbortCause[] = ['cancelled', 'eof', 'audit', 'timeout', 'switch', 'ceiling', 'accounting'];
+
+/** What an admitted call hands the spawn: the launch form, the profile it runs
+ *  under, the active session directory the form binds, and the evidence root. */
+export type SpawnPlan = {
+  /** The policy's wrapped form for the profile's capability: the launcher. */
+  form: Form;
+  profile: Profile;
+  session: string;
+  /** `<PI_MCP_SESSION_HOME>/<session>` — the form's one positional argument. */
+  sessionDir: string;
+  /** The canonical root: the child's cwd, and the directory it works in. */
+  root: string;
+  /** `PI_MCP_RUN_DIR`; this run's directory is allocated under it (EX-6). */
+  runDir: string;
+  /** The JSON-RPC id of the call, for the run directory's name. */
+  callId: CallId;
+  /** The effective tool set — the profile's, narrowed by the call. */
+  tools: readonly string[];
+  prompt: string;
+  /** sha256 of the policy bytes: on every audit line of this run. */
+  policyDigest: string;
+  /** sha256 of the start-up profile snapshot: on the `spawn` record. */
+  profileDigest: string;
+  /** A test's seam: an already-named run directory instead of a fresh one. */
+  layout?: RunLayout;
+};
+
+/** What drives a run: the one abort trigger, the grace, and the environment the
+ *  child's is derived from. */
+export type RunControl = {
+  signal: AbortSignal;
+  /** Defaults to `DEFAULT_GRACE_MS`. */
+  graceMs?: number;
+  /** Defaults to `process.env`; `childEnv` strips it down for the child. */
+  env?: Record<string, string | undefined>;
+};
+
+/**
+ * What the run was, reported rather than interpreted (EX-7): the child's exit
+ * status and the observed `agent_settled` are facts the result builder reads, and
+ * a nonzero exit is never success on its own. `lines` is the stream, in order, for
+ * the reducer; nothing here decides a state.
+ */
+export type RunOutcome = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  /** `agent_settled` was observed on the child's stream. */
+  settled: boolean;
+  /** Raw event records, in order, as the child wrote them. */
+  lines: string[];
+  /** The ladder's cause, when a trigger fired; null when the run ended itself. */
+  abort: Termination | null;
+  /** The executable could not be launched: no process ever ran. */
+  spawnFailed: boolean;
+  /** An audit append failed at any point — before spawn or after. */
+  auditFailed: boolean;
+  /** The `spawn` audit record failed, so nothing was launched and the run
+   *  directory was discarded: the call is a refusal, not a run (EX-6). */
+  auditFailedBeforeSpawn: boolean;
+  /** Where this run's evidence lives (or would have, for a discarded run). */
+  layout: RunLayout;
+};
+
+/**
+ * The launcher's argv: exactly one positional — the active session directory the
+ * form binds at run time — and then pi's options verbatim. No `pi` token, no
+ * `--`, no second positional, and no `-e` beyond `builtin:mcp` (design sec-3).
+ *
+ * `-e builtin:mcp` is passed exactly when the profile names an `mcp__*` tool,
+ * because `--no-extensions` also disables the MCP built-in: step 5 has already
+ * refused a profile that names such a tool while its form declines the extension,
+ * so the flag re-enables precisely what the profile requires and nothing else.
+ */
+export function buildArgv(plan: {
+  form: Form;
+  profile: Profile;
+  session: string;
+  sessionDir: string;
+  tools: readonly string[];
+}): string[] {
+  const argv = [
+    plan.sessionDir,
+    '--mode',
+    'json',
+    '--model',
+    plan.profile.model,
+    '--tools',
+    toolsArgument(plan.tools),
+    '--session-id',
+    plan.session,
+    '--session-dir',
+    plan.sessionDir,
+    '--no-extensions',
+  ];
+  if (plan.profile.tools.some((tool) => tool.startsWith(MCP_TOOL_PREFIX))) {
+    argv.push('-e', MCP_EXTENSION);
+  }
+  return argv;
+}
+
+/**
+ * The child's environment: the server's, minus every `PI_MCP_*` variable and minus
+ * any whose value names `PI_MCP_RUN_DIR` or one of this run's evidence files, so
+ * no environment member hands the run's evidence to the child (EX-5). PATH and the
+ * provider/gateway variables stay: the launch closure and the model call need
+ * them. No extra file descriptor is passed either — the child's table is exactly
+ * the three pipes.
+ */
+export function childEnv(
+  env: Record<string, string | undefined>,
+  runDir: string,
+  layout: RunLayout,
+): Record<string, string | undefined> {
+  const evidence = [
+    runDir,
+    attemptsPath(runDir),
+    layout.dir,
+    layout.events,
+    layout.stderr,
+    layout.transcript,
+    layout.status,
+    layout.audit,
+  ];
+  const child: Record<string, string | undefined> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (name.startsWith(SERVER_VAR_PREFIX)) continue;
+    if (typeof value === 'string' && evidence.some((path) => value.includes(path))) continue;
+    child[name] = value;
+  }
+  return child;
+}
+
+/**
+ * Launch the form, capture its streams and own its termination.
+ *
+ * The run directory is allocated here and nowhere earlier, so only a call that
+ * passed validation step 8 has one (EX-6). Inside, the order is the contract:
+ * the `spawn` audit record, the launch, the stream capture, then — on a trigger —
+ * the ladder, and after either ending, the reap, the drain and the `exit` record.
+ * The caller releases the session lock and answers only after this resolves.
+ */
+export async function runChild(plan: SpawnPlan, control: RunControl): Promise<RunOutcome> {
+  const layout = plan.layout ?? runLayout(plan.runDir, plan.callId);
+  const graceMs = control.graceMs ?? DEFAULT_GRACE_MS;
+  const argv = buildArgv(plan);
+  const env = childEnv(control.env ?? process.env, plan.runDir, layout);
+
+  const lines: string[] = [];
+  const tally = emptyTally();
+  let settled = false;
+  let abort: Termination | null = null;
+  let spawnFailed = false;
+  let auditFailed = false;
+  let auditFailedBeforeSpawn = false;
+  let exit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+
+  const outcome = (): RunOutcome => ({
+    exitCode: exit?.code ?? null,
+    signal: exit?.signal ?? null,
+    settled,
+    lines,
+    abort,
+    spawnFailed,
+    auditFailed,
+    auditFailedBeforeSpawn,
+    layout,
+  });
+
+  const audit = (record: AuditRecord): boolean => {
+    const ok = appendAudit(layout, { policy_digest: plan.policyDigest, session: plan.session, ...record });
+    if (!ok) auditFailed = true;
+    return ok;
+  };
+
+  try {
+    mkdirSync(layout.dir, { recursive: true });
+  } catch {
+    // Nowhere to put the evidence: nothing ran, so this is the same refusal as a
+    // failed `spawn` record below (design sec-6's unallocatable run directory).
+    auditFailed = true;
+    auditFailedBeforeSpawn = true;
+    return outcome();
+  }
+
+  // The decision before the act: an operator reading audit.jsonl sees what was
+  // launched, under which snapshot. A record that cannot be written means the run
+  // never starts and its directory is discarded (EX-6).
+  if (
+    !audit({
+      record: 'spawn',
+      root: plan.root,
+      form: plan.form.path,
+      profile: plan.profile.name,
+      profile_digest: plan.profileDigest,
+      argv,
+    })
+  ) {
+    auditFailedBeforeSpawn = true;
+    removeRun(layout);
+    return outcome();
+  }
+
+  const events = createWriteStream(layout.events);
+  const stderrLog = createWriteStream(layout.stderr);
+
+  const child: ChildProcess = spawn(plan.form.path, argv, {
+    cwd: plan.root,
+    env,
+    // One session of its own (`setsid`): the child leads a new process group, so
+    // `process.kill(-pid)` reaches it and everything it starts, and nothing else.
+    detached: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', (code, signal) => {
+      exit = { code, signal };
+      resolve();
+    });
+    child.once('error', (error) => {
+      // A pre-exec failure (ENOENT, EACCES) has no pid, so `exit` never arrives:
+      // the run is `failed` with termination `spawn`, not a success with no
+      // evidence (EX-7).
+      if (child.pid === undefined) {
+        spawnFailed = true;
+        exit = { code: null, signal: null };
+      }
+      process.stderr.write(`pi-mcp: the launch form ${plan.form.path} failed: ${error.message}\n`);
+      resolve();
+    });
+  });
+
+  // stdout is the event stream: captured verbatim into events.jsonl and split on
+  // LF for the record list (pi's json.md framing — split on LF, strip a CR, no
+  // `readline`). The count runs through the reducer's own accumulator, so the
+  // audit's usage snapshot and PHASE-07's gate cannot disagree about a record.
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  const observe = (record: string): void => {
+    if (record.trim().length === 0) return;
+    lines.push(record);
+    let event: unknown;
+    try {
+      event = JSON.parse(record);
+    } catch {
+      return; // malformed: the reducer counts it, this only watches for settling
+    }
+    countRecord(event, tally);
+    if ((event as { type?: unknown }).type === 'agent_settled') settled = true;
+  };
+  const stdout = child.stdout!;
+  stdout.on('data', (chunk: Buffer) => {
+    events.write(chunk);
+    pending += decoder.write(chunk);
+    let newline = pending.indexOf('\n');
+    while (newline >= 0) {
+      let record = pending.slice(0, newline);
+      pending = pending.slice(newline + 1);
+      if (record.endsWith('\r')) record = record.slice(0, -1);
+      observe(record);
+      newline = pending.indexOf('\n');
+    }
+  });
+
+  // The evidence streams end exactly once, whatever ended them: a stream `end`, a
+  // destroyed pipe (a launch that never happened) or the drain below. A trailing
+  // fragment without LF is not a record — the same framing rule the server's own
+  // reader follows — and it stays in events.jsonl verbatim.
+  let eventsEnded = false;
+  const finishEvents = (): void => {
+    if (eventsEnded) return;
+    eventsEnded = true;
+    events.end();
+  };
+  stdout.on('end', finishEvents);
+  stdout.on('close', finishEvents);
+
+  let stderrEnded = false;
+  const finishStderr = (): void => {
+    if (stderrEnded) return;
+    stderrEnded = true;
+    stderrLog.end();
+  };
+  child.stderr!.on('data', (chunk: Buffer) => stderrLog.write(chunk));
+  child.stderr!.on('end', finishStderr);
+  child.stderr!.on('close', finishStderr);
+
+  // The prompt is the child's stdin, and the pipe closes after the write: pi
+  // reads its prompt from a stream that ends, never from the server's stdin.
+  const stdin = child.stdin!;
+  stdin.on('error', () => {
+    // The child exited before reading: EPIPE is the child's ending, not an
+    // evidence failure.
+  });
+  stdin.end(plan.prompt);
+
+  /**
+   * The one ladder. Idempotent: the first trigger's cause is the reported one, and
+   * a later trigger is not a second shutdown. The abort record is written where
+   * the decision is taken, so it carries the usage facts known at that moment.
+   */
+  const terminate = async (cause: Termination): Promise<void> => {
+    if (abort !== null) return;
+    abort = cause;
+    audit({ record: 'abort', cause, settled, usage: usageOf(tally) });
+    if (exit !== null) return; // already reaped: there is no group left to signal
+    const pid = child.pid;
+    // Never signal without a verified pid of our own child, and never `-0` or the
+    // server's own group: the child leads its group, the server leads another.
+    if (!signallable(pid)) return;
+    signalGroup(pid, 'SIGTERM');
+    if (await waitFor(exited, graceMs)) return;
+    signalGroup(pid, 'SIGKILL');
+    await exited;
+  };
+
+  // An evidence failure fails the run closed: a stream that cannot be recorded
+  // stops the run through the same ladder as every other trigger.
+  const evidenceFailure = (): void => {
+    auditFailed = true;
+    void terminate('audit');
+  };
+  events.on('error', evidenceFailure);
+  stderrLog.on('error', evidenceFailure);
+
+  const onAbort = (): void => {
+    void terminate(abortCauseOf(control.signal.reason));
+  };
+  control.signal.addEventListener('abort', onAbort, { once: true });
+  if (control.signal.aborted) onAbort();
+
+  // Reap: the exit status is the child's, whatever the trigger.
+  await exited;
+  control.signal.removeEventListener('abort', onAbort);
+
+  // Drain: the child's exit does not close stdout while a grandchild holds the
+  // pipe, and the `exit` record and the caller's answer both wait for the last
+  // byte. The ladder's SIGKILL to the group is what bounds this on the abort path.
+  await finished(stdout).catch(() => {});
+  await finished(child.stderr!).catch(() => {});
+  finishEvents();
+  finishStderr();
+  await finished(events).catch(() => {});
+  await finished(stderrLog).catch(() => {});
+
+  audit({ record: 'exit', code: exit?.code ?? null, signal: exit?.signal ?? null, settled, spawn_failed: spawnFailed });
+
+  return outcome();
+}
+
+/** An empty accumulator, shaped exactly like the reducer's. */
+function emptyTally(): Tally {
+  return {
+    requests: 0,
+    requests_unmeasured: 0,
+    tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
+    cost: null,
+    accounting: 'known',
+  };
+}
+
+/** The usage facts an audit record carries: the accumulator's units, verbatim. */
+function usageOf(tally: Tally): Record<string, unknown> {
+  return {
+    requests: tally.requests,
+    requests_unmeasured: tally.requests_unmeasured,
+    tokens: { ...tally.tokens },
+    cost_usd: tally.cost,
+    accounting: tally.accounting,
+  };
+}
+
+/** The cause a trigger asked for. An unrecognised reason is a cancellation: a
+ *  trigger fired, and the ladder needs a cause rather than none. */
+function abortCauseOf(reason: unknown): AbortCause {
+  return ABORT_CAUSES.find((cause) => cause === reason) ?? 'cancelled';
+}
+
+/** A pid this process may signal as a group: its own child's, positive, and never
+ *  the server's own. `-0` would signal the server's group; `-pid` must never be
+ *  built from anything but a verified positive pid. */
+function signallable(pid: number | undefined): pid is number {
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 && pid !== process.pid;
+}
+
+/** Signal the child's process group. `-pid` reaches the group leader and every
+ *  process it started — and, because the child leads its own session, cannot
+ *  reach the server or a concurrent call. */
+function signalGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // ESRCH: the group is already gone. Nothing to escalate against.
+  }
+}
+
+/** Resolve true when `settled` finishes within `ms`, false when the grace runs
+ *  out first. The timer is cleared either way. */
+function waitFor(done: Promise<void>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    void done.then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}

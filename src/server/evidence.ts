@@ -7,7 +7,7 @@
 // the child-view check consumes these paths rather than a bind list of its own.
 // A refusal is evidence, and evidence that cannot be written is reported on
 // stderr without changing the refusal the caller receives.
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -124,13 +124,14 @@ export function evidenceStores(runDir: string): EvidenceStores {
 /**
  * Append one attempt. Never throws and never alters the caller's verdict: an
  * unwritable ledger is reported on stderr, because a refusal is still the answer
- * the client must receive (`audit-unavailable` is PHASE-06's token, not this
- * module's).
+ * the client must receive. The boolean says whether the line landed, which is
+ * what an `audit-unavailable` decision is made of (PHASE-06); the callers that
+ * only record a refusal they have already decided ignore it.
  */
-export function appendAttempt(runDir: string | null, attempt: AttemptRecord): void {
+export function appendAttempt(runDir: string | null, attempt: AttemptRecord): boolean {
   if (runDir === null) {
     process.stderr.write(`pi-mcp: not recording ${attempt.reason}: no absolute PI_MCP_RUN_DIR\n`);
-    return;
+    return false;
   }
   const line: Record<string, unknown> = {
     ts: new Date().toISOString(),
@@ -147,9 +148,72 @@ export function appendAttempt(runDir: string | null, attempt: AttemptRecord): vo
   try {
     mkdirSync(runDir, { recursive: true });
     appendFileSync(attemptsPath(runDir), `${JSON.stringify(line)}\n`);
+    return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`pi-mcp: could not append ${attemptsPath(runDir)}: ${message}\n`);
+    return false;
+  }
+}
+
+/**
+ * Whether the server-level ledger can be appended to at all: open-append-close,
+ * no line written, so the probe leaves `attempts.jsonl` exactly as it found it.
+ * A run whose refusals could not be recorded must not start (design sec-6's
+ * `audit-unavailable`).
+ */
+export function writeAttemptProbe(runDir: string): boolean {
+  const ledger = attemptsPath(runDir);
+  try {
+    mkdirSync(runDir, { recursive: true });
+    closeSync(openSync(ledger, 'a'));
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`pi-mcp: ${ledger} cannot be appended to: ${message}\n`);
+    return false;
+  }
+}
+
+/** The control decisions a spawned run's audit records (design sec-6, EX-5). */
+export type AuditKind = 'spawn' | 'abort' | 'exit';
+
+/**
+ * One `<run>/audit.jsonl` line. A record rather than a closed union: the phases
+ * that add causes (PHASE-07's gate) add fields, not new files, and the audit is
+ * read by an operator rather than by a parser that would need the union.
+ */
+export type AuditRecord = Record<string, unknown> & { record: AuditKind };
+
+/**
+ * Append one control decision to a run's audit and report whether it landed. An
+ * audit that cannot be written fails the run closed (design sec-6): the caller
+ * decides what that means before spawn (a refusal, the directory discarded) and
+ * after (an `audit_failed` state), so this function only reports the fact.
+ */
+export function appendAudit(layout: RunLayout, record: AuditRecord): boolean {
+  try {
+    mkdirSync(layout.dir, { recursive: true });
+    appendFileSync(layout.audit, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`pi-mcp: could not append ${layout.audit}: ${message}\n`);
+    return false;
+  }
+}
+
+/**
+ * Discard a run directory: nothing ran in it, so its evidence would be a run that
+ * never happened. Best-effort — a directory that cannot be removed is reported
+ * on stderr, and the caller has already decided to refuse.
+ */
+export function removeRun(layout: RunLayout): void {
+  try {
+    rmSync(layout.dir, { recursive: true, force: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`pi-mcp: could not discard ${layout.dir}: ${message}\n`);
   }
 }
 

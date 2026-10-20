@@ -9,12 +9,13 @@
 // never read and nothing is spawned except the shim itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Readable, Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, SERVER_NAME, PI_AGENT_TOOL, serve } from './server.ts';
+import type { ServeOptions } from './server.ts';
 import { attemptsPath } from './evidence.ts';
 
 type Env = Record<string, string | undefined>;
@@ -59,13 +60,55 @@ const line = (message: Record<string, unknown>): string => JSON.stringify({ json
 
 type Transcript = { replies: Record<string, any>[]; stderr: string };
 
-/** Write LINES to a fresh `serve` and collect every reply it emits. */
-async function converse(lines: string[], env: Env, chunks?: string[]): Promise<Transcript> {
+/** How many answers the given records ask for: one per record that carries an
+ *  id, and none for a notification. */
+function expectedReplies(content: string): number {
+  let count = 0;
+  for (const raw of content.split('\n')) {
+    if (raw.trim().length === 0) continue;
+    try {
+      const message = JSON.parse(raw) as Record<string, unknown>;
+      if (message && typeof message === 'object' && Object.hasOwn(message, 'id')) count += 1;
+    } catch {
+      // an unparsable record answers nothing
+    }
+  }
+  return count;
+}
+
+/**
+ * Write LINES to a fresh `serve` and collect every reply it emits.
+ *
+ * The input stays open until the answers have arrived: `tools/call` is the one
+ * method that overlaps the reader (design sec-4), and stdin EOF is DEC-103's
+ * abort trigger — closing the channel first would abort the call rather than let
+ * it answer.
+ */
+async function converse(
+  lines: string[],
+  env: Env,
+  chunks?: string[],
+  options: ServeOptions = {},
+): Promise<Transcript> {
+  const content = (chunks ?? lines.map((l) => `${l}\n`)).join('');
+  const expected = expectedReplies(content);
   const out: string[] = [];
   const err: string[] = [];
+  const replies = (): Record<string, any>[] =>
+    out
+      .join('')
+      .split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => JSON.parse(l) as Record<string, any>);
+  let wake: (() => void) | null = null;
   const output = new Writable({
     write(chunk, _encoding, done) {
       out.push(String(chunk));
+      if (wake !== null && replies().length >= expected) {
+        const resolve = wake;
+        wake = null;
+        resolve();
+      }
       done();
     },
   });
@@ -75,14 +118,21 @@ async function converse(lines: string[], env: Env, chunks?: string[]): Promise<T
       done();
     },
   });
-  const input = chunks ? Readable.from(chunks) : Readable.from(lines.map((l) => `${l}\n`));
-  await serve(input, output, env, diagnostics);
-  const replies = out
-    .join('')
-    .split('\n')
-    .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l) as Record<string, any>);
-  return { replies, stderr: err.join('') };
+  const input = new PassThrough();
+  const serving = serve(input, output, env, diagnostics, options);
+  input.write(content);
+  if (expected > 0) {
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+      if (replies().length >= expected) {
+        wake = null;
+        resolve();
+      }
+    });
+  }
+  input.end();
+  await serving;
+  return { replies: replies(), stderr: err.join('') };
 }
 
 function attemptLines(runDir: string): Record<string, unknown>[] {
@@ -259,11 +309,13 @@ test('a request-invalid refusal reaches attempts.jsonl with the call id', async 
   assert.equal(lines[0].call_id, 42);
 });
 
-// ── The admitted-but-unbuilt seam (EX-2: a failure is `failed`) ─────────────
+// ── The run seam (EX-2: a failure is `failed`, never a JSON-RPC error) ─────
 
-// PHASE-03 moved the seam past steps 3-6, so this call now needs a root that
-// exists and is allowlisted; nothing else about the call changed.
-test('a call past steps 3-6 reports the spawn seam as failed, with isError', async () => {
+// PHASE-06 replaced the placeholder with the run: this call passes steps 1-8 and
+// reaches a launch form that does not exist, so the spawn itself fails — a
+// process failure after the run directory was allocated, not a refusal. Its
+// evidence is the run's audit; the refusal ledger stays empty (design sec-6).
+test('a launch form that cannot be executed reports failed with termination spawn, with the run audit beside it', async () => {
   const root = join(mkdtempSync(join(tmpdir(), 'pi-mcp-server-root-')), 'root');
   mkdirSync(root, { recursive: true });
   const { runDir, env } = workspace(validPolicy({ roots: [root] }));
@@ -280,16 +332,23 @@ test('a call past steps 3-6 reports the spawn seam as failed, with isError', asy
   // PHASE-04: step 7 precedes the seam, so an admitted call carries the session it
   // minted (sec-5: `session` is always present).
   assert.match(String(doc.session), /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/);
-  assert.equal(doc.status, null);
-  assert.equal(doc.artifacts, null);
   assert.equal(doc.result, null);
+  assert.equal(doc.final, false);
   assert.deepEqual(doc.refusal, null);
-  assert.match(doc.transcript, /not built|no run/i);
-
-  const lines = attemptLines(runDir);
-  assert.equal(lines.length, 1);
-  assert.equal(lines[0].reason, 'spawn');
-  assert.match(String(lines[0].policy_digest), /^[0-9a-f]{64}$/);
+  // The run directory exists — step 8 passed — so the outcome is the run's audit,
+  // not a ledger line: `spawn` before the launch and `exit` with no code.
+  const runs = readdirSync(runDir).filter((name) => name.startsWith('run-'));
+  assert.equal(runs.length, 1);
+  const audit = readFileSync(join(runDir, runs[0], 'audit.jsonl'), 'utf8')
+    .split('\n')
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l) as Record<string, any>);
+  assert.deepEqual(audit.map((line) => line.record), ['spawn', 'exit']);
+  assert.match(String(audit[0].policy_digest), /^[0-9a-f]{64}$/);
+  assert.match(String(audit[0].profile_digest), /^[0-9a-f]{64}$/);
+  assert.equal(audit[1].code, null);
+  assert.equal(audit[1].spawn_failed, true);
+  assert.equal(attemptLines(runDir).length, 0);
 });
 
 // ── A policy refusal is a tool result too (EX-3, EX-5) ─────────────────────

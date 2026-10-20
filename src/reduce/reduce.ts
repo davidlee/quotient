@@ -78,8 +78,13 @@ export type Reduced = {
 };
 
 /** The single usage accumulator. One instance per run; `countRecord` is the only
- *  writer of its units. */
-type Tally = {
+ *  writer of its units.
+ *
+ *  Exported so a second reader of the same stream can drive the same accumulator
+ *  instead of copying the arithmetic: the server's gate (PHASE-07) counts each
+ *  record as it arrives to enforce ceilings, and the returned status must be the
+ *  same arithmetic, not a lookalike. */
+export type Tally = {
   requests: number;
   requests_unmeasured: number;
   tokens: { input: number; output: number; cached: number; cache_write: number };
@@ -424,7 +429,7 @@ function terminalMessage(
  *  `summarization_retry_scheduled` — because a credential or model failure, a
  *  declined summarization and the overflow diagnostic all emit `compaction_end`
  *  with no `result` at all, never having reached a provider. */
-function countRecord(event: any, tally: Tally): void {
+export function countRecord(event: any, tally: Tally): void {
   switch (event.type) {
     case 'message_end': {
       const message = event.message ?? {};

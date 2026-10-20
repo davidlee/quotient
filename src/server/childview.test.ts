@@ -8,7 +8,7 @@
 // reads the ambient environment and nothing is spawned.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Readable, Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -361,21 +361,33 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
 
   for (const profile of ['read', 'write']) {
     const replies: string[] = [];
+    let answered = (): void => {};
+    const answer = new Promise<void>((resolve) => {
+      answered = resolve;
+    });
     const output = new Writable({
       write(chunk, _encoding, done) {
         replies.push(String(chunk));
+        answered();
         done();
       },
     });
-    const input = Readable.from([
+    // `tools/call` is answered asynchronously (design sec-4 lets it overlap the
+    // reader) and stdin EOF is DEC-103's abort trigger, so the channel stays open
+    // until this call has answered.
+    const input = new PassThrough();
+    const serving = serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => done() }));
+    input.write(
       `${JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
         method: 'tools/call',
         params: { name: 'pi_agent', arguments: { prompt: 'hi', profile, cwd: t.state } },
       })}\n`,
-    ]);
-    await serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => done() }));
+    );
+    await answer;
+    input.end();
+    await serving;
 
     const reply = JSON.parse(replies.join('').trim()) as Record<string, any>;
     assert.equal(reply.error, undefined);

@@ -12,19 +12,23 @@
 // never `readline` (it also splits on Unicode separators). The reader is
 // incremental and ends at stdin EOF — no timer, no poll, no child.
 import { StringDecoder } from 'node:string_decoder';
+import { writeFileSync } from 'node:fs';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { refusedResult, failedResult } from './result.ts';
-import type { AgentResult } from './result.ts';
+import { reduce } from '../reduce/reduce.ts';
+import type { Reduced } from '../reduce/reduce.ts';
+import { RESULT_SCHEMA, refusedResult, failedResult } from './result.ts';
+import type { AgentResult, Artifacts, ResultState, Termination } from './result.ts';
 import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm } from './policy.ts';
 import type { PostureState } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
-import type { Filesystem, SnapshotLoad } from './profiles.ts';
+import type { SnapshotLoad } from './profiles.ts';
 import { acquireSession } from './session.ts';
-import type { BindingRecord } from './session.ts';
 import { checkChildView } from './childview.ts';
-import { appendAttempt } from './evidence.ts';
-import type { CallId } from './evidence.ts';
+import { attemptsPath, appendAttempt, writeAttemptProbe } from './evidence.ts';
+import type { CallId, RunLayout } from './evidence.ts';
+import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
+import type { RunOutcome } from './spawn.ts';
 
 export const SERVER_NAME = 'pi-mcp';
 export const SERVER_VERSION = '0';
@@ -95,6 +99,11 @@ export type AgentRequest = {
 
 type WireId = string | number | null;
 type ToolResult = { content: { type: 'text'; text: string }[]; isError: boolean };
+
+/** One `tools/call` in flight: its own abort trigger, and the promise the reader
+ *  waits on at stdin EOF so no child outlives the server. */
+type InFlightCall = { controller: AbortController; done: Promise<void> };
+
 type Context = {
   output: Writable;
   diagnostics: Writable;
@@ -104,7 +113,18 @@ type Context = {
   profiles: SnapshotLoad;
   /** What an absent `cwd` resolves to, through the same allowlist as any root. */
   launchDir: string;
+  /** `tools/call` is the only method that overlaps the reader (design sec-4); a
+   *  cancellation names one of these by its request id. */
+  inFlight: Map<string, InFlightCall>;
+  /** stdin reached EOF: the client is gone, so nothing is admitted and no result
+   *  is written down the closed channel (DEC-103). */
+  closed: boolean;
+  /** SIGTERM-to-SIGKILL grace for the ladder; design sec-4's 2 s by default. */
+  graceMs: number;
 };
+
+/** A request id as a map key: `1` and `"1"` name different calls. */
+const callKey = (id: WireId): string => `${typeof id}:${String(id)}`;
 
 const CEILING_FIELDS = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
 const ARGUMENT_FIELDS = [
@@ -190,34 +210,122 @@ function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { 
   return readAgentRequest(params.arguments);
 }
 
+// ── The run: evidence, the ladder's outcome and the provisional result ─────
+//
+// The run replaces the seam PHASE-02..05 left here. Everything before it decided
+// that this call MAY run; from here the launcher is spawned, the ladder owns the
+// ending, and the evidence directory is the only place the outcome is recorded.
+// Only a call that passed step 8 reaches this point, so the run directory is
+// allocated after validation, not before (EX-6).
+
+/** Write the run's reduced transcript and status beside the stream they came
+ *  from. An evidence write that fails is reported as a failed append: a run whose
+ *  own evidence cannot be written must not be answered as a clean success. */
+function writeRunFiles(layout: RunLayout, reduced: Reduced): boolean {
+  try {
+    writeFileSync(layout.transcript, reduced.transcript);
+    writeFileSync(layout.status, `${JSON.stringify(reduced.status, null, 2)}\n`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`pi-mcp: could not write ${layout.transcript} / ${layout.status}: ${message}\n`);
+    return false;
+  }
+}
+
+/** The stop reasons design sec-5 names as terminal, verbatim (pi's tokens). */
+const TERMINAL_REASONS: readonly Termination[] = ['stop', 'length', 'error', 'aborted', 'toolUse', 'deferred'];
+
 /**
- * What step 7 hands the seam: the session this call owns, the directory a child
- * will be given, and the (root, capability) pair it is bound to. PHASE-05 checks
- * the child view against `sessionDir` and PHASE-06 spawns into it.
+ * The run's termination when nothing aborted it: what the stream's terminal reason
+ * and the child's exit status already say. Reported, not interpreted — PHASE-08
+ * owns the rest of the mapping (sec-5's table).
  */
-type AdmittedCall = {
+function runTermination(reduced: Reduced, outcome: RunOutcome): Termination {
+  if (outcome.spawnFailed) return 'spawn';
+  if (outcome.exitCode !== 0) return 'exit';
+  const reason = reduced.terminalReason;
+  const terminal = TERMINAL_REASONS.find((candidate) => candidate === reason);
+  return terminal ?? 'eof';
+}
+
+type ProvisionalInput = {
+  reduced: Reduced;
+  outcome: RunOutcome;
   session: string;
-  sessionDir: string;
-  root: string;
-  capability: Filesystem;
-  binding: BindingRecord;
+  /** An audit or evidence append failed after the child was launched. */
+  auditFailed: boolean;
 };
 
 /**
- * The seam: steps 1-8, the `tools` narrowing and the session lock passed, and
- * everything that turns an admitted call into a run does not exist in this build.
- * PHASE-06 adds the spawn itself, replacing this answer. The snapshot's digest is
- * what PHASE-06 records in the run's audit `spawn` record. Nothing here launches a
- * process, so there is no second launch path to fall back to; the session id it
- * answers with is the one this call minted or named (sec-5).
+ * The PROVISIONAL result builder. PHASE-08 replaces it with sec-5's precedence
+ * table, the abort latch and the enum-reachability claims; what stands here is
+ * only design sec-5 without a table.
+ *
+ * `completed` requires ALL of: `agent_settled` observed, exit status 0, a
+ * terminal reason that answers (`stop` / `length`), accounting known, and no
+ * abort cause — so a nonzero exit is never success, and an answer is never
+ * inferred from exit 0 (EX-7). Everything else is `failed`, or `cancelled` when
+ * DEC-103's cancel caused the abort, with `causes[0]` reported as the
+ * termination.
  */
-function admittedWithoutRun(admitted: AdmittedCall): AgentResult {
-  return failedResult(
-    'spawn',
-    ['spawn'],
-    `pi_agent admitted this call as session "${admitted.session}" with root ${admitted.root} and launched nothing: the spawn stage is not built yet (SL-029 PHASE-06).`,
-    admitted.session,
-  );
+function provisionalResult(input: ProvisionalInput): AgentResult {
+  const { reduced, outcome } = input;
+  const artifacts: Artifacts = {
+    dir: outcome.layout.dir,
+    events: outcome.layout.events,
+    transcript: outcome.layout.transcript,
+    status: outcome.layout.status,
+    audit: outcome.layout.audit,
+  };
+  const causes: Termination[] = [];
+  if (outcome.abort !== null) causes.push(outcome.abort);
+  if (outcome.spawnFailed) causes.push('spawn');
+  if (input.auditFailed) causes.push('audit');
+
+  const completed =
+    causes.length === 0 &&
+    outcome.exitCode === 0 &&
+    reduced.settled &&
+    (reduced.terminalReason === 'stop' || reduced.terminalReason === 'length') &&
+    reduced.accounting === 'known';
+
+  if (completed) {
+    const termination = reduced.terminalReason as Termination;
+    return {
+      schema: RESULT_SCHEMA,
+      state: 'completed',
+      termination,
+      causes: [termination],
+      session: input.session,
+      final: true,
+      truncated: reduced.truncated,
+      result: reduced.result,
+      transcript: reduced.transcript,
+      status: reduced.status,
+      artifacts,
+      refusal: null,
+    };
+  }
+
+  const termination = causes.length > 0 ? causes[0] : runTermination(reduced, outcome);
+  const reported = causes.length > 0 ? causes : [termination];
+  const state: ResultState =
+    termination === 'cancelled' ? 'cancelled' : termination === 'audit' ? 'audit_failed' : 'failed';
+  return {
+    schema: RESULT_SCHEMA,
+    state,
+    termination,
+    causes: reported,
+    session: input.session,
+    final: false,
+    truncated: false,
+    result: null,
+    transcript: reduced.transcript,
+    status: reduced.status,
+    artifacts,
+    refusal: null,
+  };
 }
 
 function toolResult(document: AgentResult): ToolResult {
@@ -235,11 +343,17 @@ function refused(context: Context, callId: CallId, reason: string, detail: strin
 
 /**
  * One `tools/call`: the start-up profile snapshot, the request's shape, steps
- * 1-6, the `tools` narrowing, step 7 (the session), then the seam. Every refusal
- * is a tool result, recorded in `attempts.jsonl` as it is decided. The session lock
- * is released last, after the answer is decided (design sec-6).
+ * 1-6, the `tools` narrowing, step 7 (the session), step 8 (the child view) and
+ * the run itself. Every refusal is a tool result, recorded in `attempts.jsonl` as
+ * it is decided. The session lock is released last, after the ladder, the reap,
+ * the drain and the run's final audit append (design sec-4, sec-6).
  */
-async function callTool(params: unknown, id: WireId, context: Context): Promise<ToolResult> {
+async function callTool(
+  params: unknown,
+  id: WireId,
+  context: Context,
+  signal: AbortSignal,
+): Promise<ToolResult> {
   // A snapshot that did not load is a start-up-refused server, not a per-call
   // discovery: every call answers the reason and the path, whatever its shape.
   if (!context.profiles.ok) {
@@ -251,6 +365,7 @@ async function callTool(params: unknown, id: WireId, context: Context): Promise<
     );
   }
 
+  const snapshot = context.profiles.snapshot;
   const parsed = readToolCall(params);
   if (!parsed.ok) return refused(context, id, 'request-invalid', parsed.detail);
   const request = parsed.request;
@@ -264,7 +379,7 @@ async function callTool(params: unknown, id: WireId, context: Context): Promise<
   };
 
   // Step 3: the profile, from the start-up snapshot only.
-  const profile = resolveProfile(context.profiles.snapshot, request.profile, admission.policy.profiles);
+  const profile = resolveProfile(snapshot, request.profile, admission.policy.profiles);
   if (!profile.ok) return refuse(profile.reason, profile.detail);
 
   // Step 4: the root, canonicalised and allowlisted by components.
@@ -323,18 +438,65 @@ async function callTool(params: unknown, id: WireId, context: Context): Promise<
     });
     if (!view.ok) return refuse(view.reason, view.detail);
 
-    const document = admittedWithoutRun({
+    // Design sec-6's failure policy: a server that cannot record a refusal must
+    // not start a run it also could not abort-audit. Decided before the run
+    // directory exists, so nothing has been allocated and nothing is spawned.
+    if (!writeAttemptProbe(admission.runDir)) {
+      return toolResult(
+        refusedResult(
+          'audit-unavailable',
+          `${attemptsPath(admission.runDir)} cannot be appended to: the server does not launch a run it cannot record`,
+        ),
+      );
+    }
+
+    const run = await runChild(
+      {
+        form: form.form,
+        profile: profile.profile,
+        session: session.session,
+        sessionDir: session.sessionDir,
+        root: root.root,
+        runDir: admission.runDir,
+        callId: id,
+        tools: tools.tools,
+        prompt: request.prompt,
+        policyDigest: admission.digest,
+        profileDigest: snapshot.digest,
+      },
+      { signal, graceMs: context.graceMs, env: context.env },
+    );
+
+    // Nothing ran: the run's own first audit record could not be written, so the
+    // directory was discarded and the call is a refusal (EX-6), recorded in the
+    // ledger that is still writable.
+    if (run.auditFailedBeforeSpawn) {
+      appendAttempt(admission.runDir, {
+        callId: id,
+        reason: 'audit-failed',
+        detail: `the run audit could not be written and the run directory was discarded: ${run.layout.audit}`,
+        policyDigest: admission.digest,
+      });
+      return toolResult(
+        refusedResult(
+          'audit-failed',
+          `the run's audit could not be written, so nothing ran: ${run.layout.audit}`,
+        ),
+      );
+    }
+
+    // The one reader (design sec-4): the stream this run captured, reduced by the
+    // reducer that owns the accounting, with the policy's transcript budget.
+    const reduced = reduce(run.lines, { budgetBytes: admission.policy.transcript_budget_bytes });
+    const wrote = writeRunFiles(run.layout, reduced);
+
+    // The child's exit status and the observed `agent_settled` are REPORTED to the
+    // builder, not interpreted here (EX-7).
+    const document = provisionalResult({
+      reduced,
+      outcome: run,
       session: session.session,
-      sessionDir: session.sessionDir,
-      root: root.root,
-      capability: profile.profile.filesystem,
-      binding: session.binding,
-    });
-    appendAttempt(admission.runDir, {
-      callId: id,
-      reason: document.termination,
-      detail: document.transcript,
-      policyDigest: admission.digest,
+      auditFailed: run.auditFailed || !wrote,
     });
     return toolResult(document);
   } finally {
@@ -371,9 +533,10 @@ async function handleLine(line: string, context: Context): Promise<void> {
     case 'notifications/initialized':
       return;
     case 'notifications/cancelled':
-      // Accepted and ignored: no call is in flight in this build. PHASE-06 gives
-      // it teeth, aborting exactly the request id it names.
-      return;
+      // DEC-103: a wire act with a defined outcome. The request id it names is
+      // aborted through the one ladder and reports `cancelled`; an id naming no
+      // in-flight call is ignored — never a protocol error, and never a guess.
+      return abortNamed(message.params, context);
   }
 
   if (!hasId) return; // a notification for a request method: nothing to answer
@@ -395,9 +558,31 @@ async function handleLine(line: string, context: Context): Promise<void> {
     case 'tools/list':
       reply(context, { id, result: { tools: [PI_AGENT_TOOL] } });
       return;
-    case 'tools/call':
-      reply(context, { id, result: await callTool(message.params, id, context) });
+    case 'tools/call': {
+      // The one method that overlaps the reader (design sec-4: "a blocking result
+      // never blocks cancellation"); everything else stays synchronous and in
+      // order. The call is answered when it settles.
+      const entry: InFlightCall = { controller: new AbortController(), done: Promise.resolve() };
+      const key = callKey(id);
+      // Registered before the call starts, so a cancellation arriving in the same
+      // tick finds it instead of racing the registration.
+      context.inFlight.set(key, entry);
+      entry.done = (async () => {
+        try {
+          const result = await callTool(message.params, id, context, entry.controller.signal);
+          if (!context.closed) reply(context, { id, result });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          context.diagnostics.write(`pi-mcp: call ${String(id)} failed while running: ${detail}\n`);
+          if (!context.closed) {
+            reply(context, { id, result: toolResult(failedResult('error', ['error'], `the server failed while running this call: ${detail}`)) });
+          }
+        } finally {
+          context.inFlight.delete(key);
+        }
+      })();
       return;
+    }
     default:
       reply(context, { id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
@@ -409,7 +594,22 @@ export type ServeOptions = {
   profilesDir?: string;
   /** The server's launch directory, which an absent `cwd` resolves to. */
   launchDir?: string;
+  /** SIGTERM-to-SIGKILL grace; `DEFAULT_GRACE_MS` (design sec-4's 2 s) unless a
+   *  test asks for less. */
+  graceMs?: number;
 };
+
+/**
+ * DEC-103's cancellation trigger: abort exactly the call the notification names
+ * and let the call answer itself. An unknown `requestId`, a missing one or a
+ * malformed params object aborts nothing and is not an error.
+ */
+function abortNamed(params: unknown, context: Context): void {
+  if (!isRecord(params)) return;
+  const requestId = params.requestId;
+  if (typeof requestId !== 'string' && typeof requestId !== 'number') return;
+  context.inFlight.get(callKey(requestId))?.controller.abort('cancelled');
+}
 
 /**
  * Serve one client over `input`/`output` until stdin EOF. Takes its streams, its
@@ -439,6 +639,9 @@ export async function serve(
     posture: createPostureState(),
     profiles,
     launchDir: options.launchDir ?? process.cwd(),
+    inFlight: new Map(),
+    closed: false,
+    graceMs: options.graceMs ?? DEFAULT_GRACE_MS,
   };
   const decoder = new StringDecoder('utf8');
   let pending = '';
@@ -456,4 +659,13 @@ export async function serve(
   }
   // EOF ends the loop. A trailing fragment without LF is not a record: JSONL
   // framing terminates every record with one.
+  //
+  // EOF is DEC-103's second trigger and a different act from a cancellation: the
+  // client is gone. Stop admitting, abort every in-flight run through the same
+  // ladder, wait for their cleanup and audit flush, and return — no result is
+  // written down the closed channel, and no child outlives the server.
+  context.closed = true;
+  const inFlight = [...context.inFlight.values()];
+  for (const call of inFlight) call.controller.abort('eof');
+  await Promise.all(inFlight.map((call) => call.done));
 }
