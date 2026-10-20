@@ -122,8 +122,12 @@ const invalid = (detail: string): PolicyCheck => ({ ok: false, reason: 'policy-i
  * Read, parse and validate the artefact. The digest is present whenever the
  * bytes were readable — an unparsable file still has an identity worth recording
  * (EX-3).
+ *
+ * One parse path, and it is the only one: the gate's switch re-reads the file
+ * through this function, so a policy the server would refuse at admission is the
+ * same policy its tick refuses mid-run.
  */
-function readPolicy(policyPath: string): { ok: true; policy: Policy; digest: string } | { ok: false; reason: RefusalReason; detail: string; digest: string | null } {
+export function readPolicy(policyPath: string): { ok: true; policy: Policy; digest: string } | { ok: false; reason: RefusalReason; detail: string; digest: string | null } {
   let raw: Buffer;
   try {
     raw = readFileSync(policyPath);

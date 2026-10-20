@@ -29,6 +29,7 @@ import { attemptsPath, appendAttempt, writeAttemptProbe } from './evidence.ts';
 import type { CallId, RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
 import type { RunOutcome } from './spawn.ts';
+import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
 
 export const SERVER_NAME = 'pi-mcp';
 export const SERVER_VERSION = '0';
@@ -121,6 +122,8 @@ type Context = {
   closed: boolean;
   /** SIGTERM-to-SIGKILL grace for the ladder; design sec-4's 2 s by default. */
   graceMs: number;
+  /** The gate's idle poll; design sec-4's "about a second" by default. */
+  gateIdleMs: number;
 };
 
 /** A request id as a map key: `1` and `"1"` name different calls. */
@@ -310,8 +313,20 @@ function provisionalResult(input: ProvisionalInput): AgentResult {
 
   const termination = causes.length > 0 ? causes[0] : runTermination(reduced, outcome);
   const reported = causes.length > 0 ? causes : [termination];
+  // The one provisional cause -> state map. PHASE-08 replaces it with DEC-093's
+  // table in result.ts; this is sec-5's row for each cause the gate can raise.
   const state: ResultState =
-    termination === 'cancelled' ? 'cancelled' : termination === 'audit' ? 'audit_failed' : 'failed';
+    termination === 'cancelled'
+      ? 'cancelled'
+      : termination === 'audit'
+        ? 'audit_failed'
+        : termination === 'ceiling'
+          ? 'ceiling_exceeded'
+          : termination === 'timeout'
+            ? 'timeout'
+            : termination === 'accounting'
+              ? 'accounting_unknown'
+              : 'failed';
   return {
     schema: RESULT_SCHEMA,
     state,
@@ -352,7 +367,7 @@ async function callTool(
   params: unknown,
   id: WireId,
   context: Context,
-  signal: AbortSignal,
+  controller: AbortController,
 ): Promise<ToolResult> {
   // A snapshot that did not load is a start-up-refused server, not a per-call
   // discovery: every call answers the reason and the path, whatever its shape.
@@ -420,6 +435,17 @@ async function callTool(
   });
   if (!session.ok) return refuse(session.reason, session.detail);
 
+  // The gate (design sec-4, PHASE-07): one tick evaluator over the clamped
+  // snapshot, aborting through this call's own controller so a crossing reaches
+  // the ladder exactly as a cancellation does. Created after the last refusal
+  // that precedes the run, so its idle poll never outlives a call.
+  const gate = createGate({
+    ceilings: ceilings.ceilings,
+    policyPath: admission.policyPath,
+    abort: (cause) => controller.abort(cause),
+    idleMs: context.gateIdleMs,
+  });
+
   try {
     // Step 8: the child view — the canonicalised union of {root, the active
     // session directory, the policy's fixed mounts} — must not reach a protected
@@ -464,7 +490,7 @@ async function callTool(
         policyDigest: admission.digest,
         profileDigest: snapshot.digest,
       },
-      { signal, graceMs: context.graceMs, env: context.env },
+      { signal: controller.signal, graceMs: context.graceMs, env: context.env, onRecord: gate.tick },
     );
 
     // Nothing ran: the run's own first audit record could not be written, so the
@@ -500,6 +526,7 @@ async function callTool(
     });
     return toolResult(document);
   } finally {
+    gate.close();
     session.release();
   }
 }
@@ -569,7 +596,7 @@ async function handleLine(line: string, context: Context): Promise<void> {
       context.inFlight.set(key, entry);
       entry.done = (async () => {
         try {
-          const result = await callTool(message.params, id, context, entry.controller.signal);
+          const result = await callTool(message.params, id, context, entry.controller);
           if (!context.closed) reply(context, { id, result });
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
@@ -597,6 +624,9 @@ export type ServeOptions = {
   /** SIGTERM-to-SIGKILL grace; `DEFAULT_GRACE_MS` (design sec-4's 2 s) unless a
    *  test asks for less. */
   graceMs?: number;
+  /** The gate's idle poll; `DEFAULT_IDLE_MS` (design sec-4's "about a second")
+   *  unless a test asks for less — no case may wait a second for a tick. */
+  gateIdleMs?: number;
 };
 
 /**
@@ -642,6 +672,7 @@ export async function serve(
     inFlight: new Map(),
     closed: false,
     graceMs: options.graceMs ?? DEFAULT_GRACE_MS,
+    gateIdleMs: options.gateIdleMs ?? DEFAULT_IDLE_MS,
   };
   const decoder = new StringDecoder('utf8');
   let pending = '';

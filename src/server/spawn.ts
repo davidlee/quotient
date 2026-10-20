@@ -85,6 +85,10 @@ export type RunControl = {
   graceMs?: number;
   /** Defaults to `process.env`; `childEnv` strips it down for the child. */
   env?: Record<string, string | undefined>;
+  /** The reader's hook (PHASE-07's gate): called once with the fresh tally and
+   *  again immediately after every `countRecord`, so a second consumer reads the
+   *  one accumulator instead of keeping its own. */
+  onRecord?: (tally: Tally) => void;
 };
 
 /**
@@ -206,6 +210,11 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   let auditFailedBeforeSpawn = false;
   let exit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
 
+  // The tally exists before the first byte does: the hook is told the run's
+  // starting state, so an idle poll has something to judge while the child is
+  // still silent.
+  control.onRecord?.(tally);
+
   const outcome = (): RunOutcome => ({
     exitCode: exit?.code ?? null,
     signal: exit?.signal ?? null,
@@ -298,6 +307,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
       return; // malformed: the reducer counts it, this only watches for settling
     }
     countRecord(event, tally);
+    control.onRecord?.(tally);
     if ((event as { type?: unknown }).type === 'agent_settled') settled = true;
   };
   const stdout = child.stdout!;
