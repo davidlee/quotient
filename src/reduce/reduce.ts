@@ -2,9 +2,9 @@
 // orchestrator actually needs: a budgeted transcript, a status record, and alert
 // lines for patterns the caller declared it cares about.
 //
-// Pure: lines in, { transcript, status } out. No I/O, no argv, no process. The
-// shell entry point (`bin/pi-run-reduce` → `cli.ts`) and the future pi-agent MCP
-// server both call this, so there is one reducer and one idea of what a run was.
+// Pure: lines in, `Reduced` out. No I/O, no argv, no process. The shell entry
+// point (`bin/pi-run-reduce` → `cli.ts`) and the future pi-agent MCP server both
+// call this, so there is one reducer and one idea of what a run was.
 //
 // Fidelity rules, in order of importance:
 //   1. The final assistant answer is always present and always last.
@@ -14,8 +14,20 @@
 //      ~72% of the raw stream and none of it is new information.
 //   5. Whatever the budget cannot hold is elided from the MIDDLE, so both the
 //      opening moves and the latest moves survive.
+//
+// Two contracts travel with that transcript, both from the slice-029 design:
+// sec-4's accounting (one request per provider send, one unit path, and
+// `unmeasured` / `unknown` never silently zero) and sec-5's answer (the terminal
+// assistant message, or nothing). `final` is NOT decided here — the reducer
+// never sees the child's exit — so it reports the stream-side inputs the server
+// derives it from: `terminalReason`, `settled`, and the accounting signal.
 
-export const SCHEMA = 'pi-run-status/1';
+export const SCHEMA = 'pi-run-status/2';
+
+/** Whether every counted request's usage was observed. A consumer must read this
+ *  rather than infer completeness from a zero: a cached read priced at zero is a
+ *  price, and a failed send's placeholder zeros are not. */
+export type Accounting = 'known' | 'unknown';
 
 export type ReduceOptions = {
   /** Byte ceiling for the transcript. 0 disables the ceiling. Default 8192. */
@@ -33,8 +45,14 @@ export type Status = {
   state: 'completed' | 'failed' | 'incomplete';
   turns: number;
   tool_calls: number;
-  tokens: { input: number; output: number; cached: number };
+  /** Provider sends this run made — one per counting record (design sec-4). */
+  requests: number;
+  /** Requests whose usage could not be measured: counted, disclosed, never zeroed. */
+  requests_unmeasured: number;
+  tokens: { input: number; output: number; cached: number; cache_write: number };
+  /** Sum of observed `usage.cost.total`; null when no cost was observed. */
   cost_usd: number | null;
+  accounting: Accounting;
   session_id: string | null;
   cwd: string | null;
   model: string | null;
@@ -43,7 +61,31 @@ export type Status = {
   transcript: { bytes: number; records: number; malformed: number; elided: number };
 };
 
-export type Reduced = { transcript: string; status: Status };
+export type Reduced = {
+  transcript: string;
+  status: Status;
+  /** The terminal assistant message's text, every block joined; null when it has
+   *  no text or its stop reason is not answer-bearing (design sec-5). */
+  result: string | null;
+  /** The last assistant message's `stopReason`, verbatim — pi's token, never
+   *  normalised. `result` is the narrower claim. */
+  terminalReason: string | null;
+  settled: boolean;
+  truncated: boolean;
+  requests: number;
+  requests_unmeasured: number;
+  accounting: Accounting;
+};
+
+/** The single usage accumulator. One instance per run; `countRecord` is the only
+ *  writer of its units. */
+type Tally = {
+  requests: number;
+  requests_unmeasured: number;
+  tokens: { input: number; output: number; cached: number; cache_write: number };
+  cost: number | null;
+  accounting: Accounting;
+};
 
 type Entry = {
   kind: 'prose' | 'call' | 'result' | 'error';
@@ -77,10 +119,19 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
   let turns = 0;
   let toolCalls = 0;
   let stopReason: string | null = null;
-  const usage = { input: 0, output: 0, cached: 0 };
-  let cost: number | null = null;
+  const tally: Tally = {
+    requests: 0,
+    requests_unmeasured: 0,
+    tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
+    cost: null,
+    accounting: 'known',
+  };
+  /** The last assistant message seen and where its own prose landed. A later
+   *  assistant `message_start` or `message_end` replaces it, so only a message
+   *  with none after it can be the terminal one. */
+  let candidate: { stopReason: string | null; texts: string[]; entryIndices: number[] } | null = null;
 
-  const add = (entry: Entry): void => {
+  const add = (entry: Entry): number => {
     entries.push(entry);
     for (const { pattern, re } of patterns) {
       if (alerts.length >= MAX_ALERTS) break;
@@ -88,6 +139,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
         alerts.push({ pattern, text: alertText(entry.text, re) });
       }
     }
+    return entries.length - 1;
   };
 
   for (const raw of lines) {
@@ -100,6 +152,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
       continue;
     }
     records += 1;
+    countRecord(event, tally);
 
     switch (event.type) {
       case 'session':
@@ -107,18 +160,31 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
         cwd = typeof event.cwd === 'string' ? event.cwd : null;
         break;
 
+      case 'message_start': {
+        // A message that has begun invalidates the earlier candidate: the answer
+        // is only known once the stream has no assistant message after it.
+        if (event.message?.role === 'assistant') candidate = null;
+        break;
+      }
+
       case 'message_end': {
         const message = event.message ?? {};
         if (message.role !== 'assistant') break; // context echo: system + user replays
         turns += 1;
         stopReason = typeof message.stopReason === 'string' ? message.stopReason : stopReason;
         model = typeof message.model === 'string' ? message.model : model;
-        absorb(usage, message.usage);
-        cost = (cost ?? 0) + (totalCost(message.usage) ?? 0);
+        const texts: string[] = [];
+        const entryIndices: number[] = [];
         for (const block of message.content ?? []) {
           if (block?.type !== 'text' || !block.text?.trim()) continue; // thinking and toolCalls render elsewhere
-          add({ kind: 'prose', line: block.text.trimEnd(), text: block.text });
+          texts.push(block.text.trimEnd());
+          entryIndices.push(add({ kind: 'prose', line: block.text.trimEnd(), text: block.text }));
         }
+        candidate = {
+          stopReason: typeof message.stopReason === 'string' ? message.stopReason : null,
+          texts,
+          entryIndices,
+        };
         break;
       }
 
@@ -155,16 +221,23 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
     }
   }
 
-  // The final prose entry IS the result: render it once, at the end, not inline.
+  // sec-5's answer: the terminal assistant message — the last one, with none
+  // after it, that stopped for a reason the contract calls terminal. Its text
+  // blocks are joined, and null is an answer too: an answerless terminal message
+  // yields no result rather than a backwards search for the last prose block.
+  const terminal = terminalMessage(candidate);
   let result: string | null = null;
-  for (let i = entries.length - 1; i >= 0; i--) {
-    if (entries[i].kind === 'prose') {
-      result = entries[i].line;
-      entries.splice(i, 1);
-      break;
-    }
+  if (terminal && terminal.texts.length > 0) {
+    result = terminal.texts.join('\n\n');
+    // Rendered once, in `## Result`: splice the terminal message's prose out of
+    // the body, descending so the earlier indices stay valid.
+    for (const index of [...terminal.entryIndices].sort((a, b) => b - a)) entries.splice(index, 1);
   }
 
+  // The stream's verdict, in the reducer's three-way vocabulary. Precedence among
+  // causes is the server's (design sec-5), so the stream-side facts it needs
+  // travel beside this rather than being folded into it: `terminalReason`,
+  // `settled`, `accounting`.
   const state: Status['state'] =
     stopReason === 'error' || stopReason === 'aborted'
       ? 'failed'
@@ -190,8 +263,11 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
       state,
       turns,
       tool_calls: toolCalls,
-      tokens: usage,
-      cost_usd: cost,
+      requests: tally.requests,
+      requests_unmeasured: tally.requests_unmeasured,
+      tokens: tally.tokens,
+      cost_usd: tally.cost,
+      accounting: tally.accounting,
       session_id: sessionId,
       cwd,
       model,
@@ -204,6 +280,13 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
         elided,
       },
     },
+    result,
+    terminalReason: stopReason,
+    settled,
+    truncated: stopReason === 'length',
+    requests: tally.requests,
+    requests_unmeasured: tally.requests_unmeasured,
+    accounting: tally.accounting,
   };
 }
 
@@ -311,19 +394,130 @@ function resultText(result: any): string {
   return '';
 }
 
-/** Each assistant message reports its own turn's usage; the run total is the sum.
- *  `input` counts prompt tokens per turn, so a cache hit still shows as a write
- *  of the same size — the number is scale, not billing. */
-function absorb(into: { input: number; output: number; cached: number }, usage: any): void {
-  if (!usage) return;
-  if (typeof usage.input === 'number') into.input += usage.input;
-  if (typeof usage.output === 'number') into.output += usage.output;
-  if (typeof usage.cacheRead === 'number') into.cached += usage.cacheRead;
+/** Stop reasons that accrue tokens; every other reason does not, though its cost
+ *  still does. pi's tokens, verbatim (`docs/message-types.md`). */
+const NO_TOKEN_STOP_REASONS = new Set(['error', 'aborted']);
+/** Stop reasons that answer. Everything else — `toolUse`, `deferred`, `error`,
+ *  `aborted`, `pending`, and any reason pi adds later — is counted and is not. */
+const ANSWER_STOP_REASONS = new Set(['stop', 'length']);
+
+/** The terminal assistant message, if the stream ended on one: the last assistant
+ *  `message_end`, with no later assistant message, stopped for a reason that
+ *  answers. `pending` is the in-flight marker, so it is not terminal; nor are
+ *  `error`, `aborted`, `toolUse`, `deferred`, or any reason pi adds later. */
+function terminalMessage(
+  candidate: { stopReason: string | null; texts: string[]; entryIndices: number[] } | null,
+): { texts: string[]; entryIndices: number[] } | null {
+  if (!candidate || candidate.stopReason === null) return null;
+  if (candidate.stopReason === 'pending') return null;
+  return ANSWER_STOP_REASONS.has(candidate.stopReason) ? candidate : null;
 }
 
-function totalCost(usage: any): number | null {
-  const total = usage?.cost?.total;
-  return typeof total === 'number' ? total : null;
+/** Design sec-4's counting table, and the only code that decides what counts as a
+ *  request, a token or a cost. Counting units are defined per record so two
+ *  readers of one stream count the same run the same way.
+ *
+ *  Assistant sends need no state: the agent loop emits exactly one `message_end`
+ *  per send, on its `done` and its `error` path alike, and `auto_retry_start`
+ *  marks the retry of an already-counted send. Summarization sends are counted
+ *  only on positive evidence — `result.usage`, a `result` without usage, or
+ *  `summarization_retry_scheduled` — because a credential or model failure, a
+ *  declined summarization and the overflow diagnostic all emit `compaction_end`
+ *  with no `result` at all, never having reached a provider. */
+function countRecord(event: any, tally: Tally): void {
+  switch (event.type) {
+    case 'message_end': {
+      const message = event.message ?? {};
+      if (message.role !== 'assistant') return; // context echo, not a send
+      tally.requests += 1;
+      if (NO_TOKEN_STOP_REASONS.has(message.stopReason)) {
+        countFailedSend(message.usage, tally);
+        return;
+      }
+      accrue(readUsage(message.usage), tally);
+      return;
+    }
+
+    case 'compaction_end': {
+      if (!event.result || typeof event.result !== 'object') return;
+      tally.requests += 1;
+      accrue(readUsage(event.result.usage), tally);
+      return;
+    }
+
+    case 'summarization_retry_scheduled':
+      // A send returned an error; its retry is the next `compaction_end`. There is
+      // no usage evidence for this one, so it is counted and disclosed.
+      tally.requests += 1;
+      tally.requests_unmeasured += 1;
+      return;
+  }
+}
+
+/** The one accrual path: observed usage adds tokens and cost; absent or invalid
+ *  usage marks the run's accounting unknown rather than adding a zero. */
+function accrue(usage: ObservedUsage | null, tally: Tally): void {
+  if (!usage) {
+    tally.accounting = 'unknown';
+    return;
+  }
+  tally.tokens.input += usage.input;
+  tally.tokens.output += usage.output;
+  tally.tokens.cached += usage.cached;
+  tally.tokens.cache_write += usage.cache_write;
+  tally.cost = (tally.cost ?? 0) + usage.cost;
+}
+
+/** A failed send was still paid for, so its cost accrues while its tokens do not —
+ *  the asymmetry design sec-4 states and the tests assert. Its usage is usually
+ *  `EMPTY_USAGE` — zeros, including `cost.total` — which is a placeholder rather
+ *  than an observation: the request is counted, disclosed as
+ *  `requests_unmeasured`, and contributes nothing (operator-accepted, DEC-097). */
+function countFailedSend(usage: any, tally: Tally): void {
+  const price = isEmptyUsage(usage) ? null : readPrice(usage);
+  if (price === null) {
+    tally.requests_unmeasured += 1;
+    return;
+  }
+  tally.cost = (tally.cost ?? 0) + price;
+}
+
+type ObservedUsage = {
+  input: number;
+  output: number;
+  cached: number;
+  cache_write: number;
+  cost: number;
+};
+
+/** One reader for a usage record, so nothing else can accrue a unit. Missing data
+ *  is never headroom: absent, non-finite or negative components, or an absent
+ *  `cost.total`, return null and the caller marks the run's accounting unknown. */
+function readUsage(usage: any): ObservedUsage | null {
+  const input = nonNegative(usage?.input);
+  const output = nonNegative(usage?.output);
+  const cached = nonNegative(usage?.cacheRead);
+  const cache_write = nonNegative(usage?.cacheWrite);
+  const cost = readPrice(usage);
+  if (input === null || output === null || cached === null || cache_write === null || cost === null) return null;
+  return { input, output, cached, cache_write, cost };
+}
+
+/** `EMPTY_USAGE`: every component zero, including `cost.total`. Reading it as
+ *  spend would understate; reading it as an accounting failure would make every
+ *  provider error and every retry fatal. */
+function isEmptyUsage(usage: any): boolean {
+  if (!usage || typeof usage !== 'object') return true;
+  const components = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.totalTokens, usage.cost?.total];
+  return components.every((value) => value === undefined || value === null || value === 0);
+}
+
+function readPrice(usage: any): number | null {
+  return nonNegative(usage?.cost?.total);
+}
+
+function nonNegative(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 /** A snippet of an alert's context, centred on the match. Clipping from the

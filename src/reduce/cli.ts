@@ -64,6 +64,9 @@ export function statusLine(status: Status, transcriptPath: string): string {
   return [
     status.state,
     `turns=${status.turns}`,
+    `requests=${status.requests}`,
+    `unmeasured=${status.requests_unmeasured}`,
+    `accounting=${status.accounting}`,
     `tools=${status.tool_calls}`,
     `tokens=${tokens.input}/${tokens.output}`,
     `cost=${money}`,
