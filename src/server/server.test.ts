@@ -277,7 +277,9 @@ test('a call past steps 3-6 reports the spawn seam as failed, with isError', asy
   assert.equal(doc.state, 'failed');
   assert.equal(doc.termination, 'spawn');
   assert.deepEqual(doc.causes, ['spawn']);
-  assert.equal(doc.session, null);
+  // PHASE-04: step 7 precedes the seam, so an admitted call carries the session it
+  // minted (sec-5: `session` is always present).
+  assert.match(String(doc.session), /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$/);
   assert.equal(doc.status, null);
   assert.equal(doc.artifacts, null);
   assert.equal(doc.result, null);

@@ -12,6 +12,23 @@ import { createHash } from 'node:crypto';
 /** The JSON-RPC id a call carried, or null when the call had none. */
 export type CallId = string | number | null;
 
+/**
+ * A reclaim's audit trail (design sec-6, EX-8): the stale ownership record that
+ * was replaced, the claim that serialised the reclaim, and the record installed
+ * over `<lock>`. Recorded so a recovery is auditable after the fact rather than
+ * inferred from a lock file's contents.
+ */
+export type ReclaimRecord = {
+  /** The lock path that was replaced. */
+  lock: string;
+  /** The `<lock>.claim` the reclaimer won. */
+  claim: string;
+  /** The ownership record the successor replaced, verbatim. */
+  stale: Record<string, unknown>;
+  /** The ownership record the reclaimer installed. */
+  successor: Record<string, unknown>;
+};
+
 /** One `attempts.jsonl` line: what was refused or failed, and why. */
 export type AttemptRecord = {
   /** The JSON-RPC id of the call, verbatim. */
@@ -21,6 +38,8 @@ export type AttemptRecord = {
   detail: string;
   /** sha256 of the policy bytes; absent when nothing was readable. */
   policyDigest?: string | null;
+  /** Present on a stale-lock reclaim: one line per reclaim, never inferred. */
+  reclaim?: ReclaimRecord;
 };
 
 /** The server-level attempts ledger, under the operator's `PI_MCP_RUN_DIR`. */
@@ -47,6 +66,9 @@ export function appendAttempt(runDir: string | null, attempt: AttemptRecord): vo
   };
   if (attempt.policyDigest !== undefined && attempt.policyDigest !== null) {
     line.policy_digest = attempt.policyDigest;
+  }
+  if (attempt.reclaim !== undefined) {
+    line.reclaim = attempt.reclaim;
   }
   try {
     mkdirSync(runDir, { recursive: true });

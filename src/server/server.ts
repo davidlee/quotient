@@ -19,7 +19,9 @@ import type { AgentResult } from './result.ts';
 import { admitCall, clampCeilings, createPostureState, knownRunDir, selectForm } from './policy.ts';
 import type { PostureState } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
-import type { SnapshotLoad } from './profiles.ts';
+import type { Filesystem, SnapshotLoad } from './profiles.ts';
+import { acquireSession } from './session.ts';
+import type { BindingRecord } from './session.ts';
 import { appendAttempt } from './evidence.ts';
 import type { CallId } from './evidence.ts';
 
@@ -124,7 +126,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * request is told about its request rather than about a policy it cannot see.
  * The order is: request shape (`request-invalid`) -> step 1 policy -> step 2
  * enabled -> step 3 profile -> step 4 root -> step 5 capability/form -> step 6
- * ceilings -> `tools` narrowing -> the seam.
+ * ceilings -> `tools` narrowing -> step 7 session -> the seam.
  */
 function readAgentRequest(value: Record<string, unknown>): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
   for (const field of Object.keys(value)) {
@@ -187,18 +189,33 @@ function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { 
 }
 
 /**
- * The seam: steps 1-6 and the `tools` narrowing passed, and everything that
- * turns an admitted call into a run does not exist in this build. PHASE-04 adds
- * sessions, PHASE-05 the child-view check and the evidence layout, PHASE-06 the
- * spawn itself — each replacing this answer from its own step. The snapshot's
- * digest is what PHASE-06 records in the run's audit `spawn` record. Nothing here
- * launches a process, so there is no second launch path to fall back to.
+ * What step 7 hands the seam: the session this call owns, the directory a child
+ * will be given, and the (root, capability) pair it is bound to. PHASE-05 checks
+ * the child view against `sessionDir` and PHASE-06 spawns into it.
  */
-function admittedWithoutRun(): AgentResult {
+type AdmittedCall = {
+  session: string;
+  sessionDir: string;
+  root: string;
+  capability: Filesystem;
+  binding: BindingRecord;
+};
+
+/**
+ * The seam: steps 1-7, the `tools` narrowing and the session lock passed, and
+ * everything that turns an admitted call into a run does not exist in this build.
+ * PHASE-05 adds the child-view check, PHASE-06 the spawn itself — each replacing
+ * this answer from its own step. The snapshot's digest is what PHASE-06 records in
+ * the run's audit `spawn` record. Nothing here launches a process, so there is no
+ * second launch path to fall back to; the session id it answers with is the one
+ * this call minted or named (sec-5).
+ */
+function admittedWithoutRun(admitted: AdmittedCall): AgentResult {
   return failedResult(
     'spawn',
     ['spawn'],
-    'pi_agent admitted this call and launched nothing: the session, child-view and spawn stages are not built yet (SL-029 PHASE-04..06).',
+    `pi_agent admitted this call as session "${admitted.session}" with root ${admitted.root} and launched nothing: the child-view and spawn stages are not built yet (SL-029 PHASE-05..06).`,
+    admitted.session,
   );
 }
 
@@ -217,8 +234,9 @@ function refused(context: Context, callId: CallId, reason: string, detail: strin
 
 /**
  * One `tools/call`: the start-up profile snapshot, the request's shape, steps
- * 1-6, the `tools` narrowing, then the seam. Every refusal is a tool result,
- * recorded in `attempts.jsonl` as it is decided.
+ * 1-6, the `tools` narrowing, step 7 (the session), then the seam. Every refusal
+ * is a tool result, recorded in `attempts.jsonl` as it is decided. The session lock
+ * is released last, after the answer is decided (design sec-6).
  */
 async function callTool(params: unknown, id: WireId, context: Context): Promise<ToolResult> {
   // A snapshot that did not load is a start-up-refused server, not a per-call
@@ -269,16 +287,41 @@ async function callTool(params: unknown, id: WireId, context: Context): Promise<
   if (!tools.ok) return refuse(tools.reason, tools.detail);
 
   // The admitted values (`root.root`, `form.form`, `ceilings.ceilings`,
-  // `tools.tools`) and the snapshot digest are what PHASE-06's spawn consumes;
-  // this build stops at the seam below.
-  const document = admittedWithoutRun();
-  appendAttempt(admission.runDir, {
+  // `tools.tools`) and the snapshot digest are what PHASE-06's spawn consumes.
+
+  // Step 7: the session — grammar, ownership, and the (root, capability) binding
+  // recorded in the same critical section as first use (design sec-2 step 7,
+  // sec-6). Ownership is conferred by an O_EXCL create and survives until the
+  // answer is decided, so it is released last.
+  const session = acquireSession({
+    sessionHome: admission.sessionHome,
+    runDir: admission.runDir,
+    session: request.session,
+    root: root.root,
+    capability: profile.profile.filesystem,
     callId: id,
-    reason: document.termination,
-    detail: document.transcript,
     policyDigest: admission.digest,
   });
-  return toolResult(document);
+  if (!session.ok) return refuse(session.reason, session.detail);
+
+  try {
+    const document = admittedWithoutRun({
+      session: session.session,
+      sessionDir: session.sessionDir,
+      root: root.root,
+      capability: profile.profile.filesystem,
+      binding: session.binding,
+    });
+    appendAttempt(admission.runDir, {
+      callId: id,
+      reason: document.termination,
+      detail: document.transcript,
+      policyDigest: admission.digest,
+    });
+    return toolResult(document);
+  } finally {
+    session.release();
+  }
 }
 
 function reply(context: Context, message: Record<string, unknown>): void {

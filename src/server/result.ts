@@ -91,17 +91,26 @@ export function refusedResult(reason: string, detail: string): AgentResult {
  * The failure arm: a pre-spawn process failure, or (PHASE-06 on) a run that
  * failed. `causes[0]` is the termination, per sec-5's precedence rule.
  *
+ * `session` is the id this call minted or named: a pre-spawn failure after a mint
+ * still carries it, because sec-5 makes the session always present for a call that
+ * got past step 7. A refusal carries none (`refusedResult`).
+ *
  * The caller-facing explanation travels in `transcript`: a non-refused result has
  * no `refusal` slot, and sec-5 gives it no other text field. PHASE-06 replaces it
  * with the run's own transcript.
  */
-export function failedResult(termination: Termination, causes: Termination[], detail: string): AgentResult {
+export function failedResult(
+  termination: Termination,
+  causes: Termination[],
+  detail: string,
+  session: string | null = null,
+): AgentResult {
   return {
     schema: RESULT_SCHEMA,
     state: 'failed',
     termination,
     causes,
-    session: null,
+    session,
     final: false,
     truncated: false,
     result: null,
