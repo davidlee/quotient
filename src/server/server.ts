@@ -22,6 +22,7 @@ import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, r
 import type { Filesystem, SnapshotLoad } from './profiles.ts';
 import { acquireSession } from './session.ts';
 import type { BindingRecord } from './session.ts';
+import { checkChildView } from './childview.ts';
 import { appendAttempt } from './evidence.ts';
 import type { CallId } from './evidence.ts';
 
@@ -126,7 +127,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * request is told about its request rather than about a policy it cannot see.
  * The order is: request shape (`request-invalid`) -> step 1 policy -> step 2
  * enabled -> step 3 profile -> step 4 root -> step 5 capability/form -> step 6
- * ceilings -> `tools` narrowing -> step 7 session -> the seam.
+ * ceilings -> `tools` narrowing -> step 7 session -> step 8 child view -> the
+ * seam.
  */
 function readAgentRequest(value: Record<string, unknown>): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
   for (const field of Object.keys(value)) {
@@ -202,19 +204,18 @@ type AdmittedCall = {
 };
 
 /**
- * The seam: steps 1-7, the `tools` narrowing and the session lock passed, and
+ * The seam: steps 1-8, the `tools` narrowing and the session lock passed, and
  * everything that turns an admitted call into a run does not exist in this build.
- * PHASE-05 adds the child-view check, PHASE-06 the spawn itself — each replacing
- * this answer from its own step. The snapshot's digest is what PHASE-06 records in
- * the run's audit `spawn` record. Nothing here launches a process, so there is no
- * second launch path to fall back to; the session id it answers with is the one
- * this call minted or named (sec-5).
+ * PHASE-06 adds the spawn itself, replacing this answer. The snapshot's digest is
+ * what PHASE-06 records in the run's audit `spawn` record. Nothing here launches a
+ * process, so there is no second launch path to fall back to; the session id it
+ * answers with is the one this call minted or named (sec-5).
  */
 function admittedWithoutRun(admitted: AdmittedCall): AgentResult {
   return failedResult(
     'spawn',
     ['spawn'],
-    `pi_agent admitted this call as session "${admitted.session}" with root ${admitted.root} and launched nothing: the child-view and spawn stages are not built yet (SL-029 PHASE-05..06).`,
+    `pi_agent admitted this call as session "${admitted.session}" with root ${admitted.root} and launched nothing: the spawn stage is not built yet (SL-029 PHASE-06).`,
     admitted.session,
   );
 }
@@ -305,6 +306,23 @@ async function callTool(params: unknown, id: WireId, context: Context): Promise<
   if (!session.ok) return refuse(session.reason, session.detail);
 
   try {
+    // Step 8: the child view — the canonicalised union of {root, the active
+    // session directory, the policy's fixed mounts} — must not reach a protected
+    // store more strongly than that store tolerates (design sec-2 step 8,
+    // sec-3). The refusal names the overlapping member and the store and stops;
+    // nothing is masked, and no run directory exists yet (PHASE-06 allocates one
+    // after this step).
+    const view = checkChildView({
+      root: root.root,
+      capability: profile.profile.filesystem,
+      sessionDir: session.sessionDir,
+      childBinds: admission.policy.child_binds,
+      sessionHome: admission.sessionHome,
+      runDir: admission.runDir,
+      policyPath: admission.policyPath,
+    });
+    if (!view.ok) return refuse(view.reason, view.detail);
+
     const document = admittedWithoutRun({
       session: session.session,
       sessionDir: session.sessionDir,

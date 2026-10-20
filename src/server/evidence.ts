@@ -1,13 +1,15 @@
 // The server-level evidence sinks. Design sec-6 names two: `attempts.jsonl` here
-// (one line per attempt that spawned nothing) and the per-run directory PHASE-05
-// lays out under the same run dir.
+// (one line per attempt that spawned nothing) and the per-run directory laid out
+// by `runLayout` under the same run dir.
 //
 // The attempts path is defined ONCE, in this module, so no writer invents a
-// second location. A refusal is evidence, and evidence that cannot be written is
-// reported on stderr without changing the refusal the caller receives.
+// second location, and the per-run layout is defined once for the same reason:
+// the child-view check consumes these paths rather than a bind list of its own.
+// A refusal is evidence, and evidence that cannot be written is reported on
+// stderr without changing the refusal the caller receives.
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 /** The JSON-RPC id a call carried, or null when the call had none. */
 export type CallId = string | number | null;
@@ -45,6 +47,78 @@ export type AttemptRecord = {
 /** The server-level attempts ledger, under the operator's `PI_MCP_RUN_DIR`. */
 export function attemptsPath(runDir: string): string {
   return join(runDir, 'attempts.jsonl');
+}
+
+/**
+ * The five files one run's evidence directory holds (design sec-6, EX-5). They
+ * are named once here so a reader, a writer and the child-view check cannot
+ * disagree about the layout.
+ */
+export const RUN_EVIDENCE_FILES = {
+  events: 'events.jsonl',
+  stderr: 'stderr.log',
+  transcript: 'transcript.md',
+  status: 'status.json',
+  audit: 'audit.jsonl',
+} as const;
+
+/** One run's evidence: its own directory and the five files inside it. */
+export type RunLayout = {
+  /** The run's directory, exactly one level under `PI_MCP_RUN_DIR`. */
+  dir: string;
+  events: string;
+  stderr: string;
+  transcript: string;
+  status: string;
+  audit: string;
+};
+
+/**
+ * A run directory's name: a UTC stamp, the call id reduced to a safe component
+ * and a fresh token. `../` and `/` cannot survive it, so a caller-controlled id
+ * cannot name a path outside the run dir, and two calls never share a run.
+ */
+function runName(callId: CallId): string {
+  const stamp = new Date().toISOString().replace(/[-:.]/g, '');
+  const id = String(callId ?? 'call')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 32);
+  const slug = id.length > 0 ? id : 'call';
+  return `run-${stamp}-${slug}-${randomBytes(6).toString('hex')}`;
+}
+
+/**
+ * Name one run's evidence directory and its five files (design sec-6, EX-5).
+ * Pure naming: nothing is created here, because the run directory is allocated
+ * only after validation step 8 and its allocation is PHASE-06's.
+ */
+export function runLayout(runDir: string, callId: CallId): RunLayout {
+  const dir = join(runDir, runName(callId));
+  return {
+    dir,
+    events: join(dir, RUN_EVIDENCE_FILES.events),
+    stderr: join(dir, RUN_EVIDENCE_FILES.stderr),
+    transcript: join(dir, RUN_EVIDENCE_FILES.transcript),
+    status: join(dir, RUN_EVIDENCE_FILES.status),
+    audit: join(dir, RUN_EVIDENCE_FILES.audit),
+  };
+}
+
+/**
+ * The server-owned evidence stores, as paths: the run dir every run's evidence
+ * directory lives under, and the attempts ledger beside them. The child-view
+ * check refuses a child view that reaches either (design sec-3).
+ */
+export type EvidenceStores = {
+  /** `PI_MCP_RUN_DIR` itself. */
+  runDir: string;
+  /** `attemptsPath(runDir)` — the same ledger, named once. */
+  attempts: string;
+};
+
+export function evidenceStores(runDir: string): EvidenceStores {
+  return { runDir, attempts: attemptsPath(runDir) };
 }
 
 /**
