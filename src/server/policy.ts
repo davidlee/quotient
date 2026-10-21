@@ -92,16 +92,16 @@ export function knownRunDir(env: Record<string, string | undefined>): string | n
   return absoluteVar(env, RUN_DIR_VAR);
 }
 
-const REQUIRED_FIELDS = ['mode', 'roots', 'maxima', 'profiles', 'forms', 'child_binds', 'enabled'];
-const OPTIONAL_FIELDS = ['transcript_budget_bytes'];
+export const REQUIRED_FIELDS: readonly string[] = ['mode', 'roots', 'maxima', 'profiles', 'forms', 'child_binds', 'enabled'];
+export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
 /**
  * Fields only the static posture declares. Their presence is a posture refusal,
  * not a schema one: this build must not drop them and pretend the policy asked
  * for what it serves (design sec-1, EX-4).
  */
-const STATIC_ONLY_FIELDS = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
-const MAXIMA_FIELDS = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
-const FORM_FIELDS: readonly string[] = ['read', 'write'];
+export const STATIC_ONLY_FIELDS: readonly string[] = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
+export const MAXIMA_FIELDS: readonly string[] = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
+export const FORM_FIELDS: readonly string[] = ['read', 'write'];
 const FORM_KEYS: readonly string[] = ['path', 'extensions'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };

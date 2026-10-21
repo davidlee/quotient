@@ -148,7 +148,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * `request-invalid` detail. The token is DEC-103's; DEC-103 names no position for
  * it, and this build puts the request's own shape first — a caller with a broken
  * request is told about its request rather than about a policy it cannot see.
- * The order is: request shape (`request-invalid`) -> step 1 policy -> step 2
+ * The order is: a start-up snapshot that did not load (`profile-invalid`, every
+ * call) -> request shape (`request-invalid`) -> step 1 policy -> step 2
  * enabled -> step 3 profile -> step 4 root -> step 5 capability/form -> step 6
  * ceilings -> `tools` narrowing -> step 7 session -> step 8 child view -> the
  * seam.
