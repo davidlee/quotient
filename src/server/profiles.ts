@@ -18,16 +18,21 @@
 //     <!-- pi-mcp-profile
 //     filesystem: read
 //     model: llm-gateway/deepseek-flash
+//     thinking: off
 //     tools: read, grep, find, ls, bash
 //     -->
 //
-// Exactly three fields, each declared once, no blank line inside the header and
-// no other key. `filesystem` is `read` or `write`; `model` is one non-empty
-// token; `tools` is a comma-separated list of tool names. The profile's name is
-// the file's base name and must match PROFILE_NAME. That is a strict grammar
-// `split` and one regular expression can parse, so the loader needs no YAML or
-// markdown dependency. Everything after the header is prose for a human and is
-// not parsed.
+// Three fields are required — `filesystem` (`read` or `write`), `model` (one
+// non-empty token) and `tools` (a comma-separated list of tool names) — and one
+// is optional: `thinking`, one of `off`, `minimal`, `low`, `medium`, `high`,
+// `xhigh` or `max` (THINKING_LEVELS). Each field is declared once, with a
+// non-empty value after a space or tab; there is no blank line inside the header
+// and no other key. `thinking` is the one place a level is set: a `model` ending
+// in pi's `:<level>` shorthand refuses, and an omitted `thinking` leaves the
+// child on its own default. The profile's name is the file's base name and
+// must match PROFILE_NAME. That is a strict grammar `split` and one regular
+// expression can parse, so the loader needs no YAML or markdown dependency.
+// Everything after the header is prose for a human and is not parsed.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -48,6 +53,14 @@ export const PROFILE_SUFFIX = '.md';
 /** The filesystem capability a profile grants (design sec-1's capability column). */
 export type Filesystem = 'read' | 'write';
 
+/** pi's `--thinking` levels: the optional header field's vocabulary. */
+export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/** One of pi's thinking levels. */
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+const isThinkingLevel = (value: string): value is ThinkingLevel => (THINKING_LEVELS as readonly string[]).includes(value);
+
 /** One validated profile document, frozen into a snapshot. */
 export type Profile = {
   readonly name: string;
@@ -55,6 +68,8 @@ export type Profile = {
   readonly path: string;
   readonly filesystem: Filesystem;
   readonly model: string;
+  /** The child's `--thinking` level; absent when the header omits it. */
+  readonly thinking?: ThinkingLevel;
   readonly tools: readonly string[];
 };
 
@@ -79,8 +94,9 @@ export type SnapshotLoad = { ok: true; snapshot: Snapshot } | { ok: false; path:
 
 const HEADER_OPEN = '<!-- pi-mcp-profile';
 const HEADER_CLOSE = '-->';
-const HEADER_FIELDS = ['filesystem', 'model', 'tools'];
-const HEADER_LINE = /^([a-z][a-z0-9_]*):[ \t]+(.+)$/;
+const REQUIRED_HEADER_FIELDS = ['filesystem', 'model', 'tools'];
+const HEADER_FIELDS = [...REQUIRED_HEADER_FIELDS, 'thinking'];
+const HEADER_LINE = /^([a-z][a-z0-9_]*):([ \t].*)?$/;
 const MODEL = /^\S+$/;
 const TOOL_NAME = /^[a-z][a-z0-9_-]*$/;
 
@@ -116,16 +132,20 @@ function parseDocument(
         detail: `${path}:${index + 1}: the header holds one "key: value" per line, and this line is neither`,
       };
     }
-    const [, key, value] = match;
+    const [, key, raw = ''] = match;
+    const value = raw.trim();
+    if (value.length === 0) {
+      return { ok: false, detail: `${path}:${index + 1}: the header field "${key}" has no value` };
+    }
     if (!HEADER_FIELDS.includes(key)) {
       return { ok: false, detail: `${path}:${index + 1}: unknown header field "${key}"` };
     }
     if (fields.has(key)) {
       return { ok: false, detail: `${path}:${index + 1}: the header field "${key}" is declared twice` };
     }
-    fields.set(key, value.trim());
+    fields.set(key, value);
   }
-  for (const key of HEADER_FIELDS) {
+  for (const key of REQUIRED_HEADER_FIELDS) {
     if (!fields.has(key)) return { ok: false, detail: `${path}: the header is missing "${key}"` };
   }
 
@@ -135,6 +155,23 @@ function parseDocument(
   }
   const model = fields.get('model') ?? '';
   if (!MODEL.test(model)) return { ok: false, detail: `${path}: model must be one non-empty token` };
+  const suffix = model.slice(model.lastIndexOf(':') + 1);
+  if (model.includes(':') && isThinkingLevel(suffix)) {
+    return {
+      ok: false,
+      detail: `${path}: model "${model}" carries the level ":${suffix}"; set it with the thinking field instead`,
+    };
+  }
+
+  let thinking: ThinkingLevel | undefined;
+  const declaredThinking = fields.get('thinking');
+  if (declaredThinking !== undefined) {
+    if (!isThinkingLevel(declaredThinking)) {
+      const valid = THINKING_LEVELS.map((candidate) => `"${candidate}"`).join(', ');
+      return { ok: false, detail: `${path}: thinking must be one of ${valid}, not "${declaredThinking}"` };
+    }
+    thinking = declaredThinking;
+  }
 
   const tools: string[] = [];
   for (const part of (fields.get('tools') ?? '').split(',')) {
@@ -146,7 +183,19 @@ function parseDocument(
     tools.push(tool);
   }
 
-  return { ok: true, profile: Object.freeze({ name, path, filesystem, model, tools: Object.freeze(tools) }) };
+  // An omitted `thinking` adds no key at all: a profile's shape stays exactly the
+  // fields its document declared.
+  return {
+    ok: true,
+    profile: Object.freeze({
+      name,
+      path,
+      filesystem,
+      model,
+      tools: Object.freeze(tools),
+      ...(thinking === undefined ? {} : { thinking }),
+    }),
+  };
 }
 
 /**
@@ -244,6 +293,7 @@ export function resolveProfile(
       filesystem: found.filesystem,
       model: found.model,
       tools: [...found.tools],
+      ...(found.thinking === undefined ? {} : { thinking: found.thinking }),
     },
   };
 }

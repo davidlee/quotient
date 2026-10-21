@@ -174,6 +174,33 @@ test('buildArgv: one positional (the active session dir), then pi options verbat
   assert.equal(argv.at(-1), '--no-extensions');
 });
 
+test('buildArgv: a profile with a thinking level passes `--thinking <level>` right after the model, exactly once', () => {
+  const thinkingProfile: Profile = { ...READ_PROFILE, thinking: 'high' };
+  const argv = buildArgv({
+    form: { path: '/launchers/pi-mcp-read', extensions: [] },
+    profile: thinkingProfile,
+    session: 'sess-1',
+    sessionDir: '/sessions/sess-1',
+    tools: ['read', 'grep'],
+  });
+  const model = argv.indexOf('--model');
+  assert.deepEqual(
+    argv.slice(model, model + 4),
+    ['--model', 'llm-gateway/deepseek-flash', '--thinking', 'high'],
+    'the level follows the model pair immediately',
+  );
+  assert.equal(argv.filter((arg) => arg === '--thinking').length, 1, 'exactly one --thinking');
+
+  const plain = buildArgv({
+    form: { path: '/launchers/pi-mcp-read', extensions: [] },
+    profile: READ_PROFILE,
+    session: 'sess-1',
+    sessionDir: '/sessions/sess-1',
+    tools: ['read', 'grep'],
+  });
+  assert.ok(!plain.includes('--thinking'), 'a profile with no level passes no --thinking');
+});
+
 test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__* tool, and no other -e ever', () => {
   const mcpProfile: Profile = { ...READ_PROFILE, tools: ['read', 'mcp__doctrine__search'] };
   const withMcp = buildArgv({

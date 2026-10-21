@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import {
   MCP_EXTENSION,
   PROFILE_NAME,
+  THINKING_LEVELS,
   checkProfileExtensions,
   effectiveTools,
   loadProfiles,
@@ -29,11 +30,14 @@ import type { Env } from './test-rig.ts';
 const TRACKED_PROFILES = new URL('./profiles/', import.meta.url).pathname;
 
 /** One profile document in the header format the loader documents. */
-function document(overrides: { filesystem?: string; model?: string; tools?: string } = {}): string {
+function document(
+  overrides: { filesystem?: string; model?: string; thinking?: string; tools?: string } = {},
+): string {
   return [
     '<!-- pi-mcp-profile',
     `filesystem: ${overrides.filesystem ?? 'read'}`,
     `model: ${overrides.model ?? 'llm-gateway/deepseek-flash'}`,
+    ...(overrides.thinking === undefined ? [] : [`thinking: ${overrides.thinking}`]),
     `tools: ${overrides.tools ?? 'read, grep, find, ls, bash'}`,
     '-->',
     '',
@@ -55,6 +59,15 @@ function snapshotOf(policyDocuments: Record<string, string>) {
   const loaded = loadProfiles(profileDir(policyDocuments));
   if (!loaded.ok) assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);
   return loaded.snapshot;
+}
+
+/** Load one `read` document that must refuse at start-up; the detail it names. */
+function refuseDocument(text: string, detail: RegExp): void {
+  const dir = profileDir({ read: text });
+  const loaded = loadProfiles(dir);
+  if (loaded.ok) assert.fail(`expected a start-up refusal matching ${detail}`);
+  assert.equal(loaded.path, join(dir, 'read.md'));
+  assert.match(loaded.detail, detail);
 }
 
 function refuseProfile(
@@ -92,14 +105,62 @@ test('every tracked document loads from the real pi/mcp/profiles/ directory', ()
   if (read === undefined) assert.fail('the read profile is missing');
   assert.equal(read.filesystem, 'read');
   assert.equal(read.model, 'llm-gateway/deepseek-flash');
+  assert.equal(read.thinking, 'off');
   assert.ok(read.tools.includes('bash'), 'read-only is an OS claim, not a tool list');
 
   const write = snapshot.profiles.get('write');
   if (write === undefined) assert.fail('the write profile is missing');
   assert.equal(write.filesystem, 'write');
   assert.equal(write.model, 'llm-gateway/deepseek-flash');
+  assert.equal(write.thinking, 'off');
   assert.ok(write.tools.includes('bash'));
   assert.ok(write.tools.includes('write'));
+
+  const research = snapshot.profiles.get('research');
+  if (research === undefined) assert.fail('the research profile is missing');
+  assert.equal(research.filesystem, 'read');
+  assert.equal(research.thinking, 'low');
+  assert.deepEqual(research.tools, ['read', 'grep', 'find', 'ls', 'bash']);
+});
+
+// ── The optional thinking field ────────────────────────────────────────────
+
+test('every thinking level parses, and an omitted field leaves no thinking key', () => {
+  for (const level of THINKING_LEVELS) {
+    const snapshot = snapshotOf({ read: document({ thinking: level }) });
+    const profile = snapshot.profiles.get('read');
+    if (profile === undefined) assert.fail('the fixture profile is missing');
+    assert.equal(profile.thinking, level);
+
+    // The accessor copies the field like the rest of the profile.
+    const resolved = resolveProfile(snapshot, 'read', ['read']);
+    if (!resolved.ok) assert.fail(`expected the profile, got ${resolved.reason}: ${resolved.detail}`);
+    assert.equal(resolved.profile.thinking, level);
+  }
+
+  const snapshot = snapshotOf({ read: document() });
+  const profile = snapshot.profiles.get('read');
+  if (profile === undefined) assert.fail('the fixture profile is missing');
+  assert.equal('thinking' in profile, false, 'an omitted field is no key at all, not undefined');
+  const resolved = resolveProfile(snapshot, 'read', ['read']);
+  if (!resolved.ok) assert.fail(`expected the profile, got ${resolved.reason}: ${resolved.detail}`);
+  assert.equal('thinking' in resolved.profile, false, 'the copy keeps the key absent');
+});
+
+test('an invalid, empty or duplicated thinking field refuses at start-up, naming the path', () => {
+  const levels = THINKING_LEVELS.map((level) => `"${level}"`).join(', ');
+  refuseDocument(document({ thinking: 'turbo' }), new RegExp(`thinking must be one of ${levels}, not "turbo"`));
+  refuseDocument(document({ thinking: '' }), /the header field "thinking" has no value/);
+  refuseDocument(document({ thinking: 'low' }).replace('tools:', 'thinking: high\ntools:'), /"thinking" is declared twice/);
+});
+
+test("a model carrying pi's :<level> shorthand refuses: the thinking field is the one place a level is set", () => {
+  refuseDocument(document({ model: 'llm-gateway/deepseek-flash:high' }), /model.*:high.*thinking/);
+  refuseDocument(document({ model: 'llm-gateway/deepseek-flash:off', thinking: 'low' }), /model.*:off.*thinking/);
+
+  // A colon that names no level is part of the model id.
+  const snapshot = snapshotOf({ read: document({ model: 'ollama/llama3:8b' }) });
+  assert.equal(snapshot.profiles.get('read')?.model, 'ollama/llama3:8b');
 });
 
 // ── The start-up snapshot (EX-1, EX-2) ─────────────────────────────────────

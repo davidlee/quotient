@@ -136,6 +136,10 @@ export type RunOutcome = {
  * because `--no-extensions` also disables the MCP built-in: step 5 has already
  * refused a profile that names such a tool while its form declines the extension,
  * so the flag re-enables precisely what the profile requires and nothing else.
+ *
+ * `--thinking <level>` follows the `--model` pair only when the profile names a
+ * level, so a profile that omits it produces the child's own default and an argv
+ * byte-identical to one built before the field existed.
  */
 export function buildArgv(plan: {
   form: Form;
@@ -150,6 +154,7 @@ export function buildArgv(plan: {
     'json',
     '--model',
     plan.profile.model,
+    ...(plan.profile.thinking === undefined ? [] : ['--thinking', plan.profile.thinking]),
     '--tools',
     toolsArgument(plan.tools),
     '--session-id',

@@ -1,6 +1,7 @@
 <!-- pi-mcp-profile
 filesystem: write
 model: llm-gateway/deepseek-flash
+thinking: off
 tools: read, grep, find, ls, edit, write, bash
 -->
 
@@ -21,16 +22,7 @@ beyond the default of no extensions (design sec-3, "Executable contract").
 
 ## Document format
 
-The server parses the header above and nothing else. It is read once, at
-start-up, into a snapshot held for the server's lifetime — editing this file
-takes effect only when the server restarts, which is a deployment act.
-
-- The first non-empty line opens the header: `<!-- pi-mcp-profile`.
-- Then one `key: value` line per field, with exactly one space or tab after the
-  colon: `filesystem` (`read` or `write`), `model` (one non-empty token), and
-  `tools` (comma-separated tool names). Each field exactly once, no others, no
-  blank line inside the header.
-- A line holding `-->` closes it. Everything after that is prose for a human.
-
-The profile's name is this file's base name (`write`), which must match
-`^[a-z][a-z0-9-]{0,31}$`. The grammar is what `pi/mcp/profiles.ts` documents.
+The grammar is specified in the header comment of `pi/mcp/profiles.ts`. The
+server parses this header and nothing else, once at start-up, into a snapshot
+held for its lifetime — editing this file takes effect only when the server
+restarts, which is a deployment act.
