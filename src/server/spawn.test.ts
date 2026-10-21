@@ -1,44 +1,45 @@
 // Tests for the spawn (design sec-3's executable contract, sec-4's spawn and
 // termination ladder) and for the evidence it captures.
 //
-// Every case runs against a stub launcher: a bash script this file writes into
-// its own temp tree. The stub records what it was given — argv, environment, file
-// descriptors, stdin — into a marker directory OUTSIDE the run dir, so the run's
-// evidence is never a place the test looks for the child's own notes. Nothing
-// touches the network. Every test that spawns anything registers a teardown that
+// Every case runs against a stub launcher from `test-rig.ts`: a bash script that
+// module writes into the rig's temp tree. The stub records what it was given —
+// argv, environment, file descriptors, stdin — into a marker directory OUTSIDE the
+// run dir, so the run's evidence is never a place the test looks for the child's
+// own notes. Nothing touches the network. Every rig registers a teardown that
 // SIGKILLs the groups its stubs reported, so a stub that ignores SIGTERM cannot be
 // orphaned by a failed assertion.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { PassThrough, Writable } from 'node:stream';
 import { spawn as spawnProcess } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { buildArgv, childEnv, runChild } from './spawn.ts';
 import type { SpawnPlan } from './spawn.ts';
-import { serve } from './server.ts';
-import type { ServeOptions } from './server.ts';
 import { runLayout } from './evidence.ts';
 import type { RunLayout } from './evidence.ts';
 import type { Profile } from './profiles.ts';
-
-type Env = Record<string, string | undefined>;
+import {
+  callLine,
+  document,
+  emit,
+  isAlive,
+  jsonLines,
+  line,
+  marker,
+  markerPids,
+  newRig,
+  openServer,
+  patchPolicy,
+  pause,
+  readText,
+  SETTLED,
+  waitForPath,
+  waitForReplies,
+} from './test-rig.ts';
+import type { Env, Rig } from './test-rig.ts';
 
 const REPO_ROOT = new URL('../..', import.meta.url).pathname;
-
-const line = (message: Record<string, unknown>): string => JSON.stringify({ jsonrpc: '2.0', ...message });
-const callLine = (id: number | string, args: Record<string, unknown>): string =>
-  line({ id, method: 'tools/call', params: { name: 'pi_agent', arguments: args } });
-
-/** A bash line that writes one event record on stdout, newline-terminated. */
-function emit(record: Record<string, unknown>): string {
-  return `printf '%s\\n' '${JSON.stringify(record)}'`;
-}
-
-/** `agent_settled`: the stream's own statement that the run came to rest. */
-const SETTLED = emit({ type: 'agent_settled' });
 
 /** A usage-bearing assistant message with a terminal stop reason: a send that
  *  paid for itself, so the run's accounting stays known. */
@@ -62,117 +63,6 @@ const READ_PROFILE: Profile = {
   tools: ['read', 'grep', 'bash'],
 };
 
-/** A stub launcher: a bash script in the test's own tree, `@MARKER@` replaced by
- *  the marker directory the stub records into (never the run dir). */
-function stubLauncher(dir: string, name: string, body: string, markerDir: string): string {
-  const path = join(dir, `${name}.sh`);
-  writeFileSync(path, `#!/usr/bin/env bash\nset -u\n${body.replaceAll('@MARKER@', markerDir)}\n`);
-  chmodSync(path, 0o755);
-  return path;
-}
-
-/** The default second form: a stub that settles and exits 0. */
-const QUIET_WRITE = `${SETTLED}\nexit 0`;
-
-type Rig = {
-  dir: string;
-  /** Outside the run dir, so evidence and the child's own notes never mix. */
-  markerDir: string;
-  runDir: string;
-  sessionHome: string;
-  root: string;
-  policyPath: string;
-  profilesDir: string;
-  readLauncher: string;
-  writeLauncher: string;
-  /** The server's environment: the process's own plus this deployment's three. */
-  env: Env;
-};
-
-/** Kill every group a stub reported, ignoring one that is already gone. */
-function killSurvivors(markerDir: string): void {
-  for (const name of readdirSync(markerDir)) {
-    if (!name.endsWith('pid') && !name.endsWith('pids')) continue;
-    for (const raw of readText(join(markerDir, name)).split('\n')) {
-      const pid = Number(raw.trim());
-      if (!Number.isInteger(pid) || pid <= 0) continue;
-      try {
-        process.kill(-pid, 'SIGKILL');
-      } catch {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // already gone
-        }
-      }
-    }
-  }
-}
-
-/**
- * A deployment: a root, a run dir, a session home, a policy naming two stub
- * launchers, and a marker directory outside all of it.
- */
-function newRig(
-  t: TestContext,
-  readBody: string,
-  writeBody: string = QUIET_WRITE,
-  policyExtra: Record<string, unknown> = {},
-): Rig {
-  const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-spawn-'));
-  const markerDir = join(dir, 'markers');
-  mkdirSync(markerDir);
-  const root = join(dir, 'root');
-  mkdirSync(root);
-  const runDir = join(dir, 'run');
-  const sessionHome = join(dir, 'sessions');
-  const profilesDir = join(dir, 'profiles');
-  mkdirSync(profilesDir);
-  const readLauncher = stubLauncher(dir, 'pi-mcp-read', readBody, markerDir);
-  const writeLauncher = stubLauncher(dir, 'pi-mcp-write', writeBody, markerDir);
-  const policyPath = join(dir, 'policy.json');
-  writeFileSync(
-    policyPath,
-    `${JSON.stringify(
-      {
-        mode: 'per-call',
-        roots: [root],
-        maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-        profiles: ['read', 'write'],
-        forms: { read: readLauncher, write: writeLauncher },
-        child_binds: [],
-        enabled: true,
-        transcript_budget_bytes: 4096,
-        ...policyExtra,
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  const rig: Rig = {
-    dir,
-    markerDir,
-    runDir,
-    sessionHome,
-    root,
-    policyPath,
-    profilesDir,
-    readLauncher,
-    writeLauncher,
-    env: {
-      ...process.env,
-      PI_MCP_POLICY: policyPath,
-      PI_MCP_RUN_DIR: runDir,
-      PI_MCP_SESSION_HOME: sessionHome,
-    },
-  };
-  t.after(() => {
-    killSurvivors(markerDir);
-    rmSync(dir, { recursive: true, force: true });
-  });
-  return rig;
-}
-
 /** The plan an admitted call hands the spawn, for the direct cases. */
 function planFor(rig: Rig, overrides: Partial<SpawnPlan> = {}): SpawnPlan {
   return {
@@ -194,18 +84,6 @@ function planFor(rig: Rig, overrides: Partial<SpawnPlan> = {}): SpawnPlan {
 /** A signal that never fires: the run must end itself. */
 const noAbort = (): AbortController => new AbortController();
 
-async function waitForPath(path: string, what = path, timeoutMs = 10000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!existsSync(path)) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
-
-function readText(path: string): string {
-  return existsSync(path) ? readFileSync(path, 'utf8') : '';
-}
-
 /** Every `run-*` directory under a run dir, in directory order. */
 function runDirs(runDir: string): string[] {
   if (!existsSync(runDir)) return [];
@@ -224,78 +102,9 @@ async function waitForRunDir(runDir: string): Promise<string> {
   const deadline = Date.now() + 10000;
   while (runDirs(runDir).length === 0) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for a run directory under ${runDir}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await pause(5);
   }
   return onlyRunDir(runDir);
-}
-
-/** A JSONL file as records: the audit, the attempts ledger. */
-function jsonLines(path: string): Record<string, any>[] {
-  return readText(path)
-    .split('\n')
-    .filter((raw) => raw.length > 0)
-    .map((raw) => JSON.parse(raw) as Record<string, any>);
-}
-
-function marker(rig: Rig, name: string): string {
-  return readText(join(rig.markerDir, name)).trim();
-}
-
-function markerPids(rig: Rig, name = 'pid'): number[] {
-  return marker(rig, name)
-    .split('\n')
-    .map((entry) => Number(entry.trim()))
-    .filter((pid) => Number.isInteger(pid) && pid > 0);
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-/** A server in this process, with an input channel the test can write to and
- *  close: stdin EOF is a trigger here, so the test owns when it fires. */
-type Session = {
-  replies: () => Record<string, any>[];
-  write: (record: string) => void;
-  end: () => void;
-  done: Promise<void>;
-  stderr: () => string;
-};
-
-function openServer(env: Env, options: ServeOptions = {}): Session {
-  const out: string[] = [];
-  const err: string[] = [];
-  const output = new Writable({
-    write(chunk, _encoding, done) {
-      out.push(String(chunk));
-      done();
-    },
-  });
-  const diagnostics = new Writable({
-    write(chunk, _encoding, done) {
-      err.push(String(chunk));
-      done();
-    },
-  });
-  const input = new PassThrough();
-  const done = serve(input, output, env, diagnostics, options);
-  return {
-    replies: () =>
-      out
-        .join('')
-        .split('\n')
-        .filter((raw) => raw.length > 0)
-        .map((raw) => JSON.parse(raw) as Record<string, any>),
-    write: (record) => input.write(`${record}\n`),
-    end: () => input.end(),
-    done,
-    stderr: () => err.join(''),
-  };
 }
 
 /**
@@ -320,7 +129,7 @@ async function oneShot(t: TestContext, env: Env, request: string): Promise<Recor
       child.kill('SIGKILL');
       throw new Error(`no answer from pi-mcp: ${err.join('')}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await pause(5);
   }
   child.stdin.end();
   assert.equal(await exited, 0, err.join(''));
@@ -331,21 +140,6 @@ async function oneShot(t: TestContext, env: Env, request: string): Promise<Recor
     .map((raw) => JSON.parse(raw) as Record<string, any>);
   assert.equal(replies.length, 1, out.join(''));
   return replies[0];
-}
-
-async function waitForReplies(session: Session, count: number, timeoutMs = 10000): Promise<Record<string, any>[]> {
-  const deadline = Date.now() + timeoutMs;
-  while (session.replies().length < count) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} replies`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  return session.replies();
-}
-
-/** The pi-agent-result/1 document inside one tool result. */
-function document(reply: Record<string, any>): Record<string, any> {
-  assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
-  return JSON.parse(reply.result.content[0].text) as Record<string, any>;
 }
 
 // ── EX-1: the launcher argv (VT-1) ─────────────────────────────────────────
@@ -408,10 +202,9 @@ test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__*
 });
 
 test('the launcher receives the argv head and the tail separately: the session dir, then pi options', async (t) => {
-  const rig = newRig(
-    t,
-    `for a in "$@"; do printf '%s\n' "$a"; done > "@MARKER@/argv"\n${SETTLED}\nexit 0`,
-  );
+  const rig = newRig(t, {
+    read: `for a in "$@"; do printf '%s\n' "$a"; done > "@MARKER@/argv"\n${SETTLED}\nexit 0`,
+  });
   const plan = planFor(rig);
   const outcome = await runChild(plan, { signal: noAbort().signal, env: rig.env });
   assert.equal(outcome.spawnFailed, false);
@@ -429,18 +222,15 @@ test('the launcher receives the argv head and the tail separately: the session d
 });
 
 test('a profile that needs the MCP built-in makes the launcher receive -e builtin:mcp', async (t) => {
-  const rig = newRig(
-    t,
-    `for a in "$@"; do printf '%s\n' "$a"; done > "@MARKER@/argv"\n${answer('stop')}\n${SETTLED}\nexit 0`,
-  );
+  const rig = newRig(t, {
+    read: `for a in "$@"; do printf '%s\n' "$a"; done > "@MARKER@/argv"\n${answer('stop')}\n${SETTLED}\nexit 0`,
+  });
   writeFileSync(
     join(rig.profilesDir, 'mcp-read.md'),
     '<!-- pi-mcp-profile\nfilesystem: read\nmodel: llm-gateway/deepseek-flash\ntools: read, mcp__doctrine__search\n-->\n\n# mcp-read\n',
   );
-  const policy = JSON.parse(readFileSync(rig.policyPath, 'utf8')) as Record<string, any>;
-  policy.profiles = ['mcp-read'];
-  policy.forms.read = { path: rig.readLauncher, extensions: ['builtin:mcp'] };
-  writeFileSync(rig.policyPath, JSON.stringify(policy));
+  patchPolicy(rig, 'profiles', ['mcp-read']);
+  patchPolicy(rig, 'forms', { read: { path: rig.readLauncher, extensions: ['builtin:mcp'] }, write: rig.writeLauncher });
 
   const session = openServer(rig.env, { profilesDir: rig.profilesDir, graceMs: 200 });
   session.write(callLine(7, { prompt: 'search', profile: 'mcp-read', cwd: rig.root }));
@@ -459,16 +249,15 @@ test('a profile that needs the MCP built-in makes the launcher receive -e builti
 // ── EX-2: stream capture (VT-2) ────────────────────────────────────────────
 
 test('stdout lands in events.jsonl as JSONL, stderr in its own file, never merged; the prompt rides the child\'s stdin, closed after the write', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       'cat > "@MARKER@/prompt"',
       emit({ type: 'message_start', message: { role: 'assistant' } }),
       SETTLED,
       'printf \'diagnostic: not an event\\n\' >&2',
       'exit 0',
     ].join('\n'),
-  );
+  });
   const plan = planFor(rig, { prompt: 'review this diff\nplease\n' });
   const outcome = await runChild(plan, { signal: noAbort().signal, env: rig.env });
 
@@ -500,10 +289,9 @@ test('stdout lands in events.jsonl as JSONL, stderr in its own file, never merge
 // ── EX-3: the termination domain (VT-3) ────────────────────────────────────
 
 test('the ladder signals the child\'s own group: SIGTERM, then SIGKILL after the 2 s grace when it is ignored', async (t) => {
-  const rig = newRig(
-    t,
-    ['trap \'\' TERM', 'printf \'%s\\n\' $$ > "@MARKER@/pid"', 'printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'sleep 60'].join('\n'),
-  );
+  const rig = newRig(t, {
+    read: ['trap \'\' TERM', 'printf \'%s\\n\' $$ > "@MARKER@/pid"', 'printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'sleep 60'].join('\n'),
+  });
   const controller = noAbort();
   const running = runChild(planFor(rig), { signal: controller.signal, env: rig.env });
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher pid');
@@ -526,9 +314,8 @@ test('the ladder signals the child\'s own group: SIGTERM, then SIGKILL after the
 });
 
 test('detached: the child leads its own process group, so -pid reaches it and nothing else', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       'printf \'%s\\n\' $$ > "@MARKER@/pid"',
       // /proc/<pid>/stat: field 5 is the process-group id. The leader's equals its
       // own pid; a child of the server's group would carry the server's.
@@ -539,7 +326,7 @@ test('detached: the child leads its own process group, so -pid reaches it and no
       SETTLED,
       'exit 0',
     ].join('\n'),
-  );
+  });
   // The spawn's `detached: true` is `setsid` semantics: a new session whose leader
   // is the child, which is what lets the ladder signal `-pid`.
   const outcome = await runChild(planFor(rig), { signal: noAbort().signal, env: rig.env });
@@ -549,9 +336,8 @@ test('detached: the child leads its own process group, so -pid reaches it and no
 });
 
 test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one leaves the other and the server alive, and the cancelled subtree is gone after the grace (EX-3)', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       // The read form: a TERM-ignoring launcher whose grandchild also ignores TERM
       // and holds stdout, so only a group signal can end either.
       'trap \'\' TERM',
@@ -561,7 +347,7 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
       emit({ type: 'message_start', message: { role: 'assistant' } }),
       'wait',
     ].join('\n'),
-    [
+    write: [
       // The write form: a cooperative run that outlives the other call's cancel.
       'printf \'%s\\n\' $$ > "@MARKER@/write.pid"',
       'sleep 0.5',
@@ -569,7 +355,7 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
       SETTLED,
       'exit 0',
     ].join('\n'),
-  );
+  });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(1, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'cancelme' }));
   session.write(callLine(2, { prompt: 'keep going', profile: 'write', cwd: rig.root, session: 'keeper' }));
@@ -618,9 +404,8 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
 // ── EX-5 / VT-4: non-exposure ──────────────────────────────────────────────
 
 test('the child inherits no fd, environment variable or argv member naming PI_MCP_RUN_DIR or the run\'s evidence files', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       'printf \'%s\\n\' $$ > "@MARKER@/pid"',
       'env > "@MARKER@/env"',
       'for a in "$@"; do printf \'%s\\n\' "$a"; done > "@MARKER@/argv"',
@@ -631,7 +416,7 @@ test('the child inherits no fd, environment variable or argv member naming PI_MC
       SETTLED,
       'exit 0',
     ].join('\n'),
-  );
+  });
   const layout: RunLayout = runLayout(rig.runDir, 1);
   // The child's environment is the server's minus every PI_MCP_* variable and
   // minus any whose value names the run dir or one of its files; PATH and the
@@ -677,16 +462,15 @@ test('the child inherits no fd, environment variable or argv member naming PI_MC
 });
 
 test('an audit append that fails after the child was launched fails the call closed: audit_failed, with the captured evidence intact', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       'printf \'%s\\n\' $$ > "@MARKER@/pid"',
       'sleep 0.4',
       answer('stop', 'done'),
       SETTLED,
       'exit 0',
     ].join('\n'),
-  );
+  });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(11, { prompt: 'work', profile: 'read', cwd: rig.root }));
 
@@ -719,7 +503,7 @@ test('an audit append that fails after the child was launched fails the call clo
 });
 
 test('an audit record that cannot be written never blocks the ladder: the child is still killed and the failure joins the causes', async (t) => {
-  const rig = newRig(t, ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n'));
+  const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(16, { prompt: 'work', profile: 'read', cwd: rig.root }));
   const auditPath = join(await waitForRunDir(rig.runDir), 'audit.jsonl');
@@ -749,7 +533,7 @@ test('an audit record that cannot be written never blocks the ladder: the child 
 const LAUNCH_MARKER = `printf '%s\\n' $$ > "@MARKER@/launched"\n${SETTLED}\nexit 0`;
 
 test('an unwritable attempts.jsonl refuses audit-unavailable without spawning anything', async (t) => {
-  const rig = newRig(t, LAUNCH_MARKER);
+  const rig = newRig(t, { read: LAUNCH_MARKER });
   // The ledger path is a directory, so the server can append nothing to it — and
   // a server that cannot record a run must not launch one.
   mkdirSync(join(rig.runDir, 'attempts.jsonl'), { recursive: true });
@@ -769,7 +553,7 @@ test('an unwritable attempts.jsonl refuses audit-unavailable without spawning an
 });
 
 test('an audit append failing before spawn discards the run directory and refuses audit-failed', async (t) => {
-  const rig = newRig(t, LAUNCH_MARKER);
+  const rig = newRig(t, { read: LAUNCH_MARKER });
   // The ledger stays writable (so the probe passes) while the run dir cannot gain
   // a child directory: the run's own `spawn` record is the append that fails.
   mkdirSync(rig.runDir, { recursive: true });
@@ -807,7 +591,7 @@ test('an audit append failing before spawn discards the run directory and refuse
 });
 
 test('an audit append that fails after the run directory was allocated discards it before anything is launched', async (t) => {
-  const rig = newRig(t, LAUNCH_MARKER);
+  const rig = newRig(t, { read: LAUNCH_MARKER });
   // The directory is there and cannot take the `spawn` record: nothing ran, so the
   // directory goes rather than standing as evidence of a run that did not happen.
   const layout: RunLayout = runLayout(rig.runDir, 1);
@@ -824,10 +608,8 @@ test('an audit append that fails after the run directory was allocated discards 
 });
 
 test('a pre-exec spawn failure after the run directory exists reports failed with termination spawn', async (t) => {
-  const rig = newRig(t, LAUNCH_MARKER);
-  const policy = JSON.parse(readFileSync(rig.policyPath, 'utf8')) as Record<string, any>;
-  policy.forms.read = join(rig.dir, 'no-such-launcher');
-  writeFileSync(rig.policyPath, JSON.stringify(policy));
+  const rig = newRig(t, { read: LAUNCH_MARKER });
+  patchPolicy(rig, 'forms', { read: join(rig.dir, 'no-such-launcher'), write: rig.writeLauncher });
 
   const session = openServer(rig.env);
   session.write(callLine(14, { prompt: 'work', profile: 'read', cwd: rig.root }));
@@ -878,10 +660,9 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
   ];
   for (const testCase of cases) {
     await t.test(testCase.name, async (inner) => {
-      const rig = newRig(
-        inner,
-        [...stream(testCase.stop), `exit ${testCase.exit}`].join('\n'),
-      );
+      const rig = newRig(inner, {
+        read: [...stream(testCase.stop), `exit ${testCase.exit}`].join('\n'),
+      });
       const session = openServer(rig.env);
       session.write(callLine(15, { prompt: 'work', profile: 'read', cwd: rig.root }));
       const [reply] = await waitForReplies(session, 1);
@@ -904,9 +685,8 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
 // ── EX-4: ordering — result and release last ───────────────────────────────
 
 test('the session lock is released only after the drain and the final audit append: another process is refused session-busy while a grandchild holds stdout, and the ladder is what ends the drain', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       'printf \'%s\\n\' $$ >> "@MARKER@/pids"',
       'if [ -z "${FAST:-}" ]; then',
       // A grandchild keeps the stdout pipe open past the child's own exit, so the
@@ -919,7 +699,7 @@ test('the session lock is released only after the drain and the final audit appe
       SETTLED,
       'exit 0',
     ].join('\n'),
-  );
+  });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(21, { prompt: 'slow drain', profile: 'read', cwd: rig.root, session: 'drain' }));
   await waitForPath(join(rig.markerDir, 'child-done'), 'the child to exit');
@@ -963,10 +743,9 @@ test('the session lock is released only after the drain and the final audit appe
 // ── EX-9: no child on the losing side of a session ─────────────────────────
 
 test('two server processes on one session: the loser is refused session-busy and its stub launcher never runs', async (t) => {
-  const rig = newRig(
-    t,
-    [`printf '%s\\n' $$ >> "@MARKER@/pids"`, 'sleep 1.2', answer('stop'), SETTLED, 'exit 0'].join('\n'),
-  );
+  const rig = newRig(t, {
+    read: [`printf '%s\\n' $$ >> "@MARKER@/pids"`, 'sleep 1.2', answer('stop'), SETTLED, 'exit 0'].join('\n'),
+  });
   const winner = spawnProcess(join(REPO_ROOT, 'bin', 'pi-mcp'), [], { env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => winner.kill('SIGKILL'));
   const winnerOut: string[] = [];
@@ -986,7 +765,7 @@ test('two server processes on one session: the loser is refused session-busy and
   const deadline = Date.now() + 20000;
   while (!winnerOut.join('').includes('\n')) {
     if (Date.now() > deadline) throw new Error('the winner never answered');
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await pause(5);
   }
   winner.stdin.end();
   assert.equal(await exited, 0);
@@ -997,7 +776,7 @@ test('two server processes on one session: the loser is refused session-busy and
 // ── EX-10 / EX-11 / VT-7: the two triggers, one ladder ─────────────────────
 
 test('notifications/cancelled aborts exactly the requestId it names; an unknown requestId is ignored and is not a protocol error', async (t) => {
-  const rig = newRig(t, ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n'));
+  const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(51, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'victim' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
@@ -1029,9 +808,8 @@ test('notifications/cancelled aborts exactly the requestId it names; an unknown 
 });
 
 test('a cancellation arriving after the leader was reaped still bounds the drain: the group that holds stdout is killed, so the call answers instead of waiting on a grandchild', async (t) => {
-  const rig = newRig(
-    t,
-    [
+  const rig = newRig(t, {
+    read: [
       'printf \'%s\\n\' $$ > "@MARKER@/pid"',
       // The leader ends itself with its stream written; the grandchild, alone in the
       // group now, keeps the stdout pipe open past the leader's exit.
@@ -1042,7 +820,7 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
       'printf \'%s\\n\' done > "@MARKER@/leader-exited"',
       'exit 0',
     ].join('\n'),
-  );
+  });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(53, { prompt: 'the tail is held open', profile: 'read', cwd: rig.root, session: 'tail' }));
   await waitForPath(join(rig.markerDir, 'leader-exited'), 'the leader to exit');
@@ -1076,7 +854,7 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
 });
 
 test('two tools/calls carrying one id are both in the index: a cancellation naming it aborts both, and each run records its abort', async (t) => {
-  const rig = newRig(t, ['printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'trap \'\' TERM', 'sleep 60'].join('\n'));
+  const rig = newRig(t, { read: ['printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
   const session = openServer(rig.env, { graceMs: 200 });
   // The same wire id twice: the id is the client's, and neither call may drop out of
   // the index the cancellation and the EOF sweep read.
@@ -1085,7 +863,7 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
   const started = Date.now() + 10000;
   while (markerPids(rig, 'pids').length < 2) {
     if (Date.now() > started) throw new Error('timed out waiting for both launchers');
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await pause(5);
   }
 
   session.write(line({ method: 'notifications/cancelled', params: { requestId: 71 } }));
@@ -1109,7 +887,7 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
 });
 
 test('stdin EOF aborts every in-flight run through the same ladder, writes no result and leaves no child behind', async (t) => {
-  const rig = newRig(t, ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n'));
+  const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
   const session = openServer(rig.env, { graceMs: 200 });
   session.write(callLine(61, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'eof' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
