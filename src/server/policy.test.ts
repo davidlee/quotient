@@ -6,56 +6,13 @@
 // to `admitCall`; the ambient process environment is never read.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { admitCall, clampCeilings, selectForm, transcriptBudget } from './policy.ts';
 import type { Admission } from './policy.ts';
-import { attemptsPath, sha256Hex } from './evidence.ts';
-
-type Env = Record<string, string | undefined>;
-
-type Workspace = { env: Env; dir: string; policyPath: string; runDir: string };
-
-/** A temp tree with a policy file and the three launch-env paths. */
-function workspace(policy: unknown, options: { raw?: boolean } = {}): Workspace {
-  const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-policy-'));
-  const policyPath = join(dir, 'policy.json');
-  writeFileSync(policyPath, options.raw ? String(policy) : JSON.stringify(policy, null, 2));
-  const runDir = join(dir, 'run');
-  return {
-    env: {
-      PI_MCP_POLICY: policyPath,
-      PI_MCP_RUN_DIR: runDir,
-      PI_MCP_SESSION_HOME: join(dir, 'sessions'),
-    },
-    dir,
-    policyPath,
-    runDir,
-  };
-}
-
-/** A policy with every declared field present, per the schema in EX-6. */
-function validPolicy(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    mode: 'per-call',
-    roots: ['/work/one'],
-    maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-    profiles: ['read', 'write'],
-    forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
-    child_binds: ['/home/operator/.pi'],
-    enabled: true,
-    transcript_budget_bytes: 8192,
-    ...overrides,
-  };
-}
-
-function attemptLines(runDir: string): Record<string, unknown>[] {
-  return readFileSync(attemptsPath(runDir), 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-}
+import { sha256Hex } from './evidence.ts';
+import { attempts, validPolicy, workspace } from './test-rig.ts';
+import type { Env } from './test-rig.ts';
 
 function refuse(verdict: Admission, reason: string, detail: RegExp): void {
   if (verdict.ok) assert.fail(`expected a ${reason} refusal, got an admission`);
@@ -116,7 +73,7 @@ test('an absent policy file refuses policy-unavailable and records an attempt wi
   const env: Env = { ...ws.env, PI_MCP_POLICY: join(ws.dir, 'missing.json') };
   refuse(admitCall(env, 7), 'policy-unavailable', /missing\.json/);
 
-  const lines = attemptLines(ws.runDir);
+  const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'policy-unavailable');
   assert.equal(lines[0].call_id, 7);
@@ -127,7 +84,7 @@ test('an unparsable policy refuses policy-invalid and records the readable diges
   const ws = workspace('{"mode": "per-call",', { raw: true });
   refuse(admitCall(ws.env, 2), 'policy-invalid', /not valid JSON/);
 
-  const lines = attemptLines(ws.runDir);
+  const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'policy-invalid');
   assert.equal(lines[0].policy_digest, sha256Hex(readFileSync(ws.policyPath)));
@@ -137,7 +94,7 @@ test('an unparsable policy refuses policy-invalid and records the readable diges
 test('an unknown policy key refuses policy-invalid, naming it', () => {
   const ws = workspace(validPolicy({ speed: 'fast' }));
   refuse(admitCall(ws.env, 3), 'policy-invalid', /speed/);
-  assert.equal(attemptLines(ws.runDir)[0].reason, 'policy-invalid');
+  assert.equal(attempts(ws.runDir)[0].reason, 'policy-invalid');
 });
 
 test('a wrong-typed policy value refuses policy-invalid, naming the field', () => {
@@ -209,7 +166,7 @@ test('mode = static refuses posture-unsupported instead of being downgraded', ()
   const ws = workspace(validPolicy({ mode: 'static' }));
   const verdict = admitCall(ws.env, 8);
   refuse(verdict, 'posture-unsupported', /static/);
-  assert.equal(attemptLines(ws.runDir)[0].reason, 'posture-unsupported');
+  assert.equal(attempts(ws.runDir)[0].reason, 'posture-unsupported');
 });
 
 test('any static-only field refuses posture-unsupported, with no field drop', () => {
@@ -225,7 +182,7 @@ test('any static-only field refuses posture-unsupported, with no field drop', ()
     const ws = workspace(validPolicy({ [field]: value }));
     refuse(admitCall(ws.env, 9), 'posture-unsupported', new RegExp(field));
     // Nothing was spawned, so the ledger is the only sink that can hold it.
-    assert.equal(attemptLines(ws.runDir)[0].reason, 'posture-unsupported');
+    assert.equal(attempts(ws.runDir)[0].reason, 'posture-unsupported');
   }
 });
 
@@ -243,7 +200,7 @@ test('a mode change between calls is refused at the next call by the schema re-v
   writeFileSync(ws.policyPath, JSON.stringify(validPolicy({ mode: 'static' })));
   refuse(admitCall(ws.env, 12), 'posture-unsupported', /static/);
 
-  const lines = attemptLines(ws.runDir);
+  const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1, 'the admitted call records no refusal; the refused one does');
   assert.equal(lines[0].reason, 'posture-unsupported');
   assert.equal(lines[0].call_id, 12);
@@ -256,7 +213,7 @@ test('enabled = false refuses disabled and records it in attempts.jsonl', () => 
   const ws = workspace(validPolicy({ enabled: false }));
   refuse(admitCall(ws.env, 13), 'disabled', /enabled/);
 
-  const lines = attemptLines(ws.runDir);
+  const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'disabled');
   assert.equal(lines[0].call_id, 13);

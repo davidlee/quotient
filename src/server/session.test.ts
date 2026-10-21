@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SESSION_GRAMMAR, acquireSession, isSessionId, mintSessionId, processStartTime, releaseSession, sessionPaths } from './session.ts';
 import type { SessionPaths } from './session.ts';
-import { attemptsPath } from './evidence.ts';
+import { attempts } from './test-rig.ts';
 
 const SESSION_MODULE = new URL('./session.ts', import.meta.url).href;
 
@@ -210,14 +210,6 @@ function writeLock(home: string, session: string, record: Record<string, unknown
 
 function readRecord(path: string): Record<string, any> {
   return JSON.parse(readFileSync(path, 'utf8')) as Record<string, any>;
-}
-
-function attemptLines(runDir: string): Record<string, any>[] {
-  if (!existsSync(attemptsPath(runDir))) return [];
-  return readFileSync(attemptsPath(runDir), 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, any>);
 }
 
 function mode(path: string): number {
@@ -576,7 +568,7 @@ test('every reclaim leaves an attempts.jsonl line naming the replaced record, th
   assert.equal(acquisition.ok, true);
   if (!acquisition.ok) return;
 
-  const lines = attemptLines(runDir);
+  const lines = attempts(runDir);
   assert.equal(lines.length, 1, 'one line per reclaim');
   const [line] = lines;
   assert.equal(line.reason, 'session-reclaimed');
@@ -591,7 +583,7 @@ test('every reclaim leaves an attempts.jsonl line naming the replaced record, th
   assert.equal(reclaim.successor.root, '/work/one');
 
   acquisition.release();
-  assert.equal(attemptLines(runDir).length, 1, 'a plain acquire/release records no reclaim');
+  assert.equal(attempts(runDir).length, 1, 'a plain acquire/release records no reclaim');
 });
 
 // ── Release never deletes a successor (sec-6) ──────────────────────────────

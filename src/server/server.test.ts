@@ -9,138 +9,16 @@
 // never read and nothing is spawned except the shim itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PassThrough, Writable } from 'node:stream';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, SERVER_NAME, PI_AGENT_TOOL, serve } from './server.ts';
-import type { ServeOptions } from './server.ts';
-import { attemptsPath } from './evidence.ts';
-
-type Env = Record<string, string | undefined>;
+import { PROTOCOL_VERSION, SERVER_NAME, PI_AGENT_TOOL } from './server.ts';
+import { attempts, converse, jsonLines, line, validPolicy, workspace } from './test-rig.ts';
+import type { Env } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
 const repoRoot = new URL('../..', import.meta.url).pathname;
-
-/** A policy with every declared field present, per the schema in EX-6. */
-function validPolicy(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    mode: 'per-call',
-    roots: ['/work/one'],
-    maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-    profiles: ['read', 'write'],
-    forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
-    child_binds: ['/home/operator/.pi'],
-    enabled: true,
-    transcript_budget_bytes: 8192,
-    ...overrides,
-  };
-}
-
-type Workspace = { env: Env; policyPath: string; runDir: string };
-
-function workspace(policy: unknown = validPolicy()): Workspace {
-  const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-server-'));
-  const policyPath = join(dir, 'policy.json');
-  writeFileSync(policyPath, JSON.stringify(policy, null, 2));
-  const runDir = join(dir, 'run');
-  return {
-    env: {
-      PI_MCP_POLICY: policyPath,
-      PI_MCP_RUN_DIR: runDir,
-      PI_MCP_SESSION_HOME: join(dir, 'sessions'),
-    },
-    policyPath,
-    runDir,
-  };
-}
-
-const line = (message: Record<string, unknown>): string => JSON.stringify({ jsonrpc: '2.0', ...message });
-
-type Transcript = { replies: Record<string, any>[]; stderr: string };
-
-/** How many answers the given records ask for: one per record that carries an
- *  id, and none for a notification. */
-function expectedReplies(content: string): number {
-  let count = 0;
-  for (const raw of content.split('\n')) {
-    if (raw.trim().length === 0) continue;
-    try {
-      const message = JSON.parse(raw) as Record<string, unknown>;
-      if (message && typeof message === 'object' && Object.hasOwn(message, 'id')) count += 1;
-    } catch {
-      // an unparsable record answers nothing
-    }
-  }
-  return count;
-}
-
-/**
- * Write LINES to a fresh `serve` and collect every reply it emits.
- *
- * The input stays open until the answers have arrived: `tools/call` is the one
- * method that overlaps the reader (design sec-4), and stdin EOF is DEC-103's
- * abort trigger — closing the channel first would abort the call rather than let
- * it answer.
- */
-async function converse(
-  lines: string[],
-  env: Env,
-  chunks?: string[],
-  options: ServeOptions = {},
-): Promise<Transcript> {
-  const content = (chunks ?? lines.map((l) => `${l}\n`)).join('');
-  const expected = expectedReplies(content);
-  const out: string[] = [];
-  const err: string[] = [];
-  const replies = (): Record<string, any>[] =>
-    out
-      .join('')
-      .split('\n')
-      .filter((l) => l.length > 0)
-      .map((l) => JSON.parse(l) as Record<string, any>);
-  let wake: (() => void) | null = null;
-  const output = new Writable({
-    write(chunk, _encoding, done) {
-      out.push(String(chunk));
-      if (wake !== null && replies().length >= expected) {
-        const resolve = wake;
-        wake = null;
-        resolve();
-      }
-      done();
-    },
-  });
-  const diagnostics = new Writable({
-    write(chunk, _encoding, done) {
-      err.push(String(chunk));
-      done();
-    },
-  });
-  const input = new PassThrough();
-  const serving = serve(input, output, env, diagnostics, options);
-  input.write(content);
-  if (expected > 0) {
-    await new Promise<void>((resolve) => {
-      wake = resolve;
-      if (replies().length >= expected) {
-        wake = null;
-        resolve();
-      }
-    });
-  }
-  input.end();
-  await serving;
-  return { replies: replies(), stderr: err.join('') };
-}
-
-function attemptLines(runDir: string): Record<string, unknown>[] {
-  return readFileSync(attemptsPath(runDir), 'utf8')
-    .split('\n')
-    .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l) as Record<string, unknown>);
-}
 
 /** The pi-agent-result/1 document inside a tool result, plus its isError flag. */
 function payload(reply: Record<string, any>): { doc: Record<string, any>; isError: boolean } {
@@ -231,7 +109,7 @@ test('LF framing: several records in one chunk and a CRLF record are all read', 
     `${line({ id: 6, method: 'ping' })}\n` +
     `${line({ id: 7, method: 'ping' })}\r\n` +
     `${line({ id: 8, method: 'ping' })}\n`;
-  const { replies } = await converse([], workspace().env, [chunk]);
+  const { replies } = await converse([], workspace().env, { chunks: [chunk] });
   assert.deepEqual(
     replies.map((r) => r.id),
     [6, 7, 8],
@@ -303,7 +181,7 @@ test('a malformed params object is refused request-invalid, naming the field', a
 test('a request-invalid refusal reaches attempts.jsonl with the call id', async () => {
   const { runDir, env } = workspace();
   await call(callTool({ prompt: 'hi', profile: 'read', speed: 'fast' }), env);
-  const lines = attemptLines(runDir);
+  const lines = attempts(runDir);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'request-invalid');
   assert.equal(lines[0].call_id, 42);
@@ -339,16 +217,13 @@ test('a launch form that cannot be executed reports failed with termination spaw
   // not a ledger line: `spawn` before the launch and `exit` with no code.
   const runs = readdirSync(runDir).filter((name) => name.startsWith('run-'));
   assert.equal(runs.length, 1);
-  const audit = readFileSync(join(runDir, runs[0], 'audit.jsonl'), 'utf8')
-    .split('\n')
-    .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l) as Record<string, any>);
+  const audit = jsonLines(join(runDir, runs[0], 'audit.jsonl'));
   assert.deepEqual(audit.map((line) => line.record), ['spawn', 'exit']);
   assert.match(String(audit[0].policy_digest), /^[0-9a-f]{64}$/);
   assert.match(String(audit[0].profile_digest), /^[0-9a-f]{64}$/);
   assert.equal(audit[1].code, null);
   assert.equal(audit[1].spawn_failed, true);
-  assert.equal(attemptLines(runDir).length, 0);
+  assert.equal(attempts(runDir).length, 0);
 });
 
 // ── A policy refusal is a tool result too (EX-3, EX-5) ─────────────────────
@@ -360,7 +235,7 @@ test('a policy refusal reaches the caller as a tool result and the ledger', asyn
   assert.equal(isError, true);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'disabled');
-  const lines = attemptLines(runDir);
+  const lines = attempts(runDir);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'disabled');
 });

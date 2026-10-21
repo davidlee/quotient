@@ -12,7 +12,6 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PassThrough, Writable } from 'node:stream';
 import {
   MCP_EXTENSION,
   PROFILE_NAME,
@@ -23,10 +22,8 @@ import {
   resolveRoot,
   toolsArgument,
 } from './profiles.ts';
-import { serve } from './server.ts';
-import { attemptsPath } from './evidence.ts';
-
-type Env = Record<string, string | undefined>;
+import { attempts, callLine, converse, launchEnv, validPolicy } from './test-rig.ts';
+import type { Env } from './test-rig.ts';
 
 /** The tracked directory the server actually ships and loads. */
 const TRACKED_PROFILES = new URL('./profiles/', import.meta.url).pathname;
@@ -160,7 +157,7 @@ test('an invalid document refuses at start-up, naming the path, and never per ca
   // token the design names, naming the path (EX-2).
   const wire = mintWire();
   const { replies, stderr } = await converse(
-    [toolCall({ prompt: 'hi', profile: 'read', cwd: wire.root })],
+    [callLine(1, { prompt: 'hi', profile: 'read', cwd: wire.root })],
     wire.env,
     { profilesDir: dir, launchDir: wire.root },
   );
@@ -323,19 +320,6 @@ function refuseTools(
 
 type Wire = { env: Env; runDir: string; root: string; profilesDir: string };
 
-function basePolicy(root: string): Record<string, unknown> {
-  return {
-    mode: 'per-call',
-    roots: [root],
-    maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-    profiles: ['read', 'write'],
-    forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
-    child_binds: ['/home/operator/.pi'],
-    enabled: true,
-    transcript_budget_bytes: 8192,
-  };
-}
-
 /** A temp tree with a profile directory, a policy, a run dir and one real root. */
 function mintWire(options: { documents?: Record<string, string>; policy?: Record<string, unknown> } = {}): Wire {
   const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-wire-'));
@@ -347,79 +331,24 @@ function mintWire(options: { documents?: Record<string, string>; policy?: Record
   const root = join(dir, 'root');
   mkdirSync(root);
   const policyPath = join(dir, 'policy.json');
-  writeFileSync(policyPath, JSON.stringify({ ...basePolicy(root), ...(options.policy ?? {}) }, null, 2));
+  writeFileSync(policyPath, JSON.stringify(validPolicy({ roots: [root], ...(options.policy ?? {}) }), null, 2));
   const runDir = join(dir, 'run');
   return {
-    env: {
-      PI_MCP_POLICY: policyPath,
-      PI_MCP_RUN_DIR: runDir,
-      PI_MCP_SESSION_HOME: join(dir, 'sessions'),
-    },
+    env: launchEnv(dir),
     runDir,
     root,
     profilesDir,
   };
 }
 
-const toolCall = (args: unknown): string =>
-  JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'pi_agent', arguments: args } });
-
-async function converse(
-  lines: string[],
-  env: Env,
-  options: { profilesDir?: string; launchDir?: string } = {},
-): Promise<{ replies: Record<string, any>[]; stderr: string }> {
-  const out: string[] = [];
-  const err: string[] = [];
-  let answered = (): void => {};
-  const answer = new Promise<void>((resolve) => {
-    answered = resolve;
-  });
-  const output = new Writable({
-    write(chunk, _encoding, done) {
-      out.push(String(chunk));
-      answered();
-      done();
-    },
-  });
-  const diagnostics = new Writable({
-    write(chunk, _encoding, done) {
-      err.push(String(chunk));
-      done();
-    },
-  });
-  // `tools/call` is answered asynchronously (design sec-4 lets it overlap the
-  // reader), and stdin EOF is DEC-103's abort trigger: the channel stays open
-  // until the call has answered, so the reply is a reply and not an abort.
-  const input = new PassThrough();
-  const serving = serve(input, output, env, diagnostics, options);
-  input.write(lines.map((line) => `${line}\n`).join(''));
-  await answer;
-  input.end();
-  await serving;
-  const replies = out
-    .join('')
-    .split('\n')
-    .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l) as Record<string, any>);
-  return { replies, stderr: err.join('') };
-}
-
 async function drive(args: Record<string, unknown>, wire: Wire): Promise<Record<string, any>> {
-  const { replies } = await converse([toolCall(args)], wire.env, {
+  const { replies } = await converse([callLine(1, args)], wire.env, {
     profilesDir: wire.profilesDir,
     launchDir: wire.root,
   });
   assert.equal(replies.length, 1);
   assert.equal(replies[0].error, undefined, 'a refusal is a tool result, never a JSON-RPC error');
   return JSON.parse(replies[0].result.content[0].text);
-}
-
-function attemptLines(runDir: string): Record<string, unknown>[] {
-  return readFileSync(attemptsPath(runDir), 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 test('a call that clears steps 3-6 reaches the run, with an absent cwd taken from the launch directory', async () => {
@@ -511,7 +440,7 @@ test('a widening tools request is refused tools-not-allowed before the seam, nam
   assert.match(doc.refusal.detail, /"write"/);
   assert.match(doc.refusal.detail, /read/, 'the detail names the profile so the operator can find it');
 
-  const lines = attemptLines(wire.runDir);
+  const lines = attempts(wire.runDir);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'tools-not-allowed');
   assert.match(String(lines[0].policy_digest), /^[0-9a-f]{64}$/);

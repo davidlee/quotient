@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from './server.ts';
 import type { ServeOptions } from './server.ts';
+import { attemptsPath } from './evidence.ts';
 
 export type Env = Record<string, string | undefined>;
 
@@ -35,6 +36,46 @@ export const SETTLED = emit({ type: 'agent_settled' });
 
 /** The default stub for either form: a stub that settles and exits 0. */
 const QUIET = `${SETTLED}\nexit 0`;
+
+/** A policy with every declared field present, per the schema in EX-6. */
+export function validPolicy(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    mode: 'per-call',
+    roots: ['/work/one'],
+    maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
+    profiles: ['read', 'write'],
+    forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
+    child_binds: ['/home/operator/.pi'],
+    enabled: true,
+    transcript_budget_bytes: 8192,
+    ...overrides,
+  };
+}
+
+/** The three launch-env paths a temp tree holds, named as the server reads them. */
+export function launchEnv(dir: string): Env {
+  return {
+    PI_MCP_POLICY: join(dir, 'policy.json'),
+    PI_MCP_RUN_DIR: join(dir, 'run'),
+    PI_MCP_SESSION_HOME: join(dir, 'sessions'),
+  };
+}
+
+export type Workspace = { env: Env; dir: string; policyPath: string; runDir: string };
+
+/** A temp tree with a policy file and the three launch-env paths. */
+export function workspace(policy: unknown = validPolicy(), options: { raw?: boolean } = {}): Workspace {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-ws-'));
+  const policyPath = join(dir, 'policy.json');
+  writeFileSync(policyPath, options.raw ? String(policy) : JSON.stringify(policy, null, 2));
+  const runDir = join(dir, 'run');
+  return {
+    env: launchEnv(dir),
+    dir,
+    policyPath,
+    runDir,
+  };
+}
 
 /** A stub launcher: a bash script in the test's own tree, `@MARKER@` replaced by
  *  the marker directory the stub records into (never the run dir). */
@@ -112,17 +153,13 @@ export function newRig(
   writeFileSync(
     policyPath,
     `${JSON.stringify(
-      {
-        mode: 'per-call',
+      validPolicy({
         roots: [root],
-        maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-        profiles: ['read', 'write'],
         forms: { read: readLauncher, write: writeLauncher },
         child_binds: [],
-        enabled: true,
         transcript_budget_bytes: 4096,
         ...options.policy,
-      },
+      }),
       null,
       2,
     )}\n`,
@@ -139,9 +176,7 @@ export function newRig(
     writeLauncher,
     env: {
       ...process.env,
-      PI_MCP_POLICY: policyPath,
-      PI_MCP_RUN_DIR: runDir,
-      PI_MCP_SESSION_HOME: sessionHome,
+      ...launchEnv(dir),
     },
   };
   t.after(() => {
@@ -163,12 +198,17 @@ export function jsonLines(path: string): Record<string, any>[] {
     .map((raw) => JSON.parse(raw) as Record<string, any>);
 }
 
-export function marker(rig: Rig, name: string): string {
+/** The attempts ledger as records; a missing ledger reads as none. */
+export function attempts(runDir: string): Record<string, any>[] {
+  return jsonLines(attemptsPath(runDir));
+}
+
+export function markerText(rig: Rig, name: string): string {
   return readText(join(rig.markerDir, name)).trim();
 }
 
 export function markerPids(rig: Rig, name = 'pid'): number[] {
-  return marker(rig, name)
+  return markerText(rig, name)
     .split('\n')
     .map((entry) => Number(entry.trim()))
     .filter((pid) => Number.isInteger(pid) && pid > 0);
@@ -198,15 +238,18 @@ export async function waitForPath(path: string, what = path, timeoutMs = 10000):
 
 /** A server in this process, with an input channel the test can write to and
  *  close: stdin EOF is a trigger here, so the test owns when it fires. */
-export type Session = {
+export type LiveServer = {
   replies: () => Record<string, any>[];
+  /** One record, newline-framed. */
   write: (record: string) => void;
+  /** Raw bytes, exactly as given: for framing cases. */
+  send: (bytes: string) => void;
   end: () => void;
   done: Promise<void>;
   stderr: () => string;
 };
 
-export function openServer(env: Env, options: ServeOptions = {}): Session {
+export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
   const out: string[] = [];
   const err: string[] = [];
   const output = new Writable({
@@ -231,29 +274,69 @@ export function openServer(env: Env, options: ServeOptions = {}): Session {
         .filter((raw) => raw.length > 0)
         .map((raw) => JSON.parse(raw) as Record<string, any>),
     write: (record) => input.write(`${record}\n`),
+    send: (bytes) => input.write(bytes),
     end: () => input.end(),
     done,
     stderr: () => err.join(''),
   };
 }
 
-export async function waitForReplies(session: Session, count: number, timeoutMs = 10000): Promise<Record<string, any>[]> {
+export async function waitForReplies(server: LiveServer, count: number, timeoutMs = 10000): Promise<Record<string, any>[]> {
   const deadline = Date.now() + timeoutMs;
-  while (session.replies().length < count) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} replies: ${session.stderr()}`);
+  while (server.replies().length < count) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} replies: ${server.stderr()}`);
     await pause(5);
   }
-  return session.replies();
+  return server.replies();
 }
 
 /** End one server after its answers, and wait for its cleanup. */
-export async function closeServer(session: Session): Promise<void> {
-  session.end();
-  await session.done;
+export async function closeServer(server: LiveServer): Promise<void> {
+  server.end();
+  await server.done;
+}
+
+/** How many answers the given records ask for: one per record that carries an
+ *  id, and none for a notification. */
+function expectedReplies(content: string): number {
+  let count = 0;
+  for (const raw of content.split('\n')) {
+    if (raw.trim().length === 0) continue;
+    try {
+      const message = JSON.parse(raw) as Record<string, unknown>;
+      if (message && typeof message === 'object' && Object.hasOwn(message, 'id')) count += 1;
+    } catch {
+      // an unparsable record answers nothing
+    }
+  }
+  return count;
+}
+
+/**
+ * Write LINES to a fresh `serve` and collect every reply it emits.
+ *
+ * The input stays open until the answers have arrived: `tools/call` is the one
+ * method that overlaps the reader (design sec-4), and stdin EOF is DEC-103's
+ * abort trigger — closing the channel first would abort the call rather than let
+ * it answer.
+ */
+export async function converse(
+  lines: string[],
+  env: Env,
+  options: ServeOptions & { chunks?: string[] } = {},
+): Promise<{ replies: Record<string, any>[]; stderr: string }> {
+  const { chunks, ...serveOptions } = options;
+  const content = (chunks ?? lines.map((l) => `${l}\n`)).join('');
+  const expected = expectedReplies(content);
+  const server = openServer(env, serveOptions);
+  server.send(content);
+  if (expected > 0) await waitForReplies(server, expected);
+  await closeServer(server);
+  return { replies: server.replies(), stderr: server.stderr() };
 }
 
 /** The pi-agent-result/1 document inside one tool result. */
-export function document(reply: Record<string, any>): Record<string, any> {
+export function resultDocument(reply: Record<string, any>): Record<string, any> {
   assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
   return JSON.parse(reply.result.content[0].text) as Record<string, any>;
 }

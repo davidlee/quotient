@@ -23,7 +23,6 @@ import type { Gate, GateConfig } from './gate.ts';
 import {
   callLine,
   closeServer,
-  document,
   emit,
   isAlive,
   jsonLines,
@@ -33,6 +32,7 @@ import {
   openServer,
   patchPolicy,
   pause,
+  resultDocument,
   SETTLED,
   waitForPath,
   waitForReplies,
@@ -336,13 +336,13 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
     read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, emit(messageEnd('stop')), SETTLED, 'exit 0'].join('\n'),
     policy: { maxima: { requests: 20, tokens: 100000, cost_usd: 0.005, wall_clock_s: 600 } },
   });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'spend', profile: 'read', cwd: rig.root, session: 'ceiling1' }));
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'spend', profile: 'read', cwd: rig.root, session: 'ceiling1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
-  const [reply] = await waitForReplies(session, 1);
-  await closeServer(session);
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'ceiling_exceeded', JSON.stringify(doc));
   assert.equal(doc.termination, 'ceiling');
   assert.deepEqual(doc.causes, ['ceiling']);
@@ -366,16 +366,16 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
 
 test('switch: flipping enabled to false halts an in-flight run through the ladder, and the next call is refused (EX-3, VT-3)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'switch1' }));
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'switch1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
   // No driver cooperation: the child is asleep, and the operator's flip is the
   // only thing that happened.
   patchPolicy(rig, 'enabled', false);
-  const [reply] = await waitForReplies(session, 1);
+  const [reply] = await waitForReplies(server, 1);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'cancelled', 'a switch flips the run to cancelled, not a counting verdict');
   assert.equal(doc.termination, 'switch');
   assert.deepEqual(doc.causes, ['switch']);
@@ -384,10 +384,10 @@ test('switch: flipping enabled to false halts an in-flight run through the ladde
   assert.equal(isAlive(markerPids(rig)[0]), false, 'no child left behind');
 
   // The flip also refuses the next call at admission.
-  session.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'switch2' }));
-  const [, refused] = await waitForReplies(session, 2);
-  await closeServer(session);
-  const next = document(refused);
+  server.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'switch2' }));
+  const [, refused] = await waitForReplies(server, 2);
+  await closeServer(server);
+  const next = resultDocument(refused);
   assert.equal(next.state, 'refused');
   assert.equal(next.refusal.reason, 'disabled');
 });
@@ -396,42 +396,42 @@ test('switch: flipping enabled to false halts an in-flight run through the ladde
 
 test('switch: a policy deleted during an idle run aborts it, and the next call is refused policy-unavailable (EX-4, VT-4)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'lost1' }));
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'lost1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
   rmSync(rig.policyPath);
-  const [reply] = await waitForReplies(session, 1);
-  const doc = document(reply);
+  const [reply] = await waitForReplies(server, 1);
+  const doc = resultDocument(reply);
   assert.equal(doc.termination, 'switch');
   const abort = jsonLines(doc.artifacts.audit).find((record) => record.record === 'abort');
   assert.equal(abort?.cause, 'switch', 'a source that cannot be read is not evidence the switch is off');
   assert.equal(isAlive(markerPids(rig)[0]), false, 'no child left behind');
 
-  session.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'lost2' }));
-  const [, refused] = await waitForReplies(session, 2);
-  await closeServer(session);
-  assert.equal(document(refused).refusal.reason, 'policy-unavailable');
+  server.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'lost2' }));
+  const [, refused] = await waitForReplies(server, 2);
+  await closeServer(server);
+  assert.equal(resultDocument(refused).refusal.reason, 'policy-unavailable');
 });
 
 test('switch: a policy corrupted during an idle run aborts it, and the next call is refused policy-invalid (EX-4, VT-4)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'broken1' }));
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'broken1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
   writeFileSync(rig.policyPath, '{"mode": "per-call", "roots": [');
-  const [reply] = await waitForReplies(session, 1);
-  const doc = document(reply);
+  const [reply] = await waitForReplies(server, 1);
+  const doc = resultDocument(reply);
   assert.equal(doc.termination, 'switch');
   const abort = jsonLines(doc.artifacts.audit).find((record) => record.record === 'abort');
   assert.equal(abort?.cause, 'switch', 'an unparsable source fails closed');
   assert.equal(isAlive(markerPids(rig)[0]), false, 'no child left behind');
 
-  session.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'broken2' }));
-  const [, refused] = await waitForReplies(session, 2);
-  await closeServer(session);
-  assert.equal(document(refused).refusal.reason, 'policy-invalid');
+  server.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'broken2' }));
+  const [, refused] = await waitForReplies(server, 2);
+  await closeServer(server);
+  assert.equal(resultDocument(refused).refusal.reason, 'policy-invalid');
 });
 
 // ── EX-6: the wall clock, and a clean run's empty audit ───────────────────
@@ -441,13 +441,13 @@ test('timeout: the wall clock halts a stalled run with cause timeout and its own
     read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n'),
     policy: { maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 0.2 } },
   });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'backstop1' }));
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'backstop1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
-  const [reply] = await waitForReplies(session, 1);
-  await closeServer(session);
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.termination, 'timeout');
   assert.equal(doc.state, 'timeout', 'the backstop has its own state row');
   assert.deepEqual(doc.causes, ['timeout']);
@@ -466,13 +466,13 @@ test('usage sanity live: an unpriced send halts the run as accounting_unknown (E
       'sleep 60',
     ].join('\n'),
   });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'unpriced', profile: 'read', cwd: rig.root, session: 'accounting1' }));
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'unpriced', profile: 'read', cwd: rig.root, session: 'accounting1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
-  const [reply] = await waitForReplies(session, 1);
-  await closeServer(session);
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'accounting_unknown', JSON.stringify(doc));
   assert.equal(doc.termination, 'accounting');
   assert.equal(doc.status.accounting, 'unknown');
@@ -483,12 +483,12 @@ test('usage sanity live: an unpriced send halts the run as accounting_unknown (E
 
 test('a run that hits no limit completes, and its audit has no abort record (EX-6)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, emit(messageEnd('stop')), SETTLED, 'exit 0'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'clean1' }));
-  const [reply] = await waitForReplies(session, 1);
-  await closeServer(session);
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'clean1' }));
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'completed', JSON.stringify(doc));
   assert.equal(doc.termination, 'stop');
   const records = jsonLines(doc.artifacts.audit).map((record) => record.record);
@@ -523,12 +523,12 @@ test('the transcript budget reaches a running call: the policy re-read at admiss
     ].join('\n'),
     policy: { transcript_budget_bytes: 10_000_000 },
   });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
 
-  session.write(callLine(1, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget1' }));
+  server.write(callLine(1, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
-  const [first] = await waitForReplies(session, 1);
-  const unbudgeted = document(first);
+  const [first] = await waitForReplies(server, 1);
+  const unbudgeted = resultDocument(first);
   assert.equal(unbudgeted.state, 'completed', JSON.stringify(unbudgeted));
   assert.equal(unbudgeted.status.transcript.elided, 0, 'an effectively unbudgeted transcript elides nothing');
   assert.ok(unbudgeted.status.transcript.bytes > 256, `the bulky stream is the point: ${unbudgeted.status.transcript.bytes} bytes`);
@@ -536,11 +536,11 @@ test('the transcript budget reaches a running call: the policy re-read at admiss
   // The operator's next write is a real 256-byte ceiling: the call reads the policy
   // per call, so it is the reducer of the NEXT run that it reaches.
   patchPolicy(rig, 'transcript_budget_bytes', 256);
-  session.write(callLine(2, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget2' }));
-  const [, second] = await waitForReplies(session, 2);
-  await closeServer(session);
+  server.write(callLine(2, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget2' }));
+  const [, second] = await waitForReplies(server, 2);
+  await closeServer(server);
 
-  const budgeted = document(second);
+  const budgeted = resultDocument(second);
   assert.equal(budgeted.state, 'completed', JSON.stringify(budgeted));
   assert.ok(budgeted.status.transcript.elided > 0, 'the budget reached this run\'s reducer: the middle was elided');
   assert.ok(
@@ -568,12 +568,12 @@ test('a nested figure named in a tool result is not attributed to the run: cost_
       'exit 0',
     ].join('\n'),
   });
-  const session = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
-  session.write(callLine(1, { prompt: 'call a nested agent', profile: 'read', cwd: rig.root, session: 'nested1' }));
-  const [reply] = await waitForReplies(session, 1);
-  await closeServer(session);
+  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'call a nested agent', profile: 'read', cwd: rig.root, session: 'nested1' }));
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'completed', JSON.stringify(doc));
   // One real send, priced at 0.01: the status describes this run's own sends.
   assert.equal(doc.status.cost_usd, 0.01, 'the run\'s own send is the whole of cost_usd');

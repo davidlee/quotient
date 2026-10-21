@@ -21,18 +21,18 @@ import type { RunLayout } from './evidence.ts';
 import type { Profile } from './profiles.ts';
 import {
   callLine,
-  document,
   emit,
   isAlive,
   jsonLines,
   line,
-  marker,
   markerPids,
+  markerText,
   newRig,
   openServer,
   patchPolicy,
   pause,
   readText,
+  resultDocument,
   SETTLED,
   waitForPath,
   waitForReplies,
@@ -209,7 +209,7 @@ test('the launcher receives the argv head and the tail separately: the session d
   const outcome = await runChild(plan, { signal: noAbort().signal, env: rig.env });
   assert.equal(outcome.spawnFailed, false);
 
-  const sawArgv = marker(rig, 'argv').split('\n');
+  const sawArgv = markerText(rig, 'argv').split('\n');
   // Head: the single positional the form binds at run time, then pi's own flags.
   assert.deepEqual(sawArgv.slice(0, 6), [plan.sessionDir, '--mode', 'json', '--model', 'llm-gateway/deepseek-flash', '--tools']);
   assert.equal(sawArgv[6], 'read,bash');
@@ -232,15 +232,15 @@ test('a profile that needs the MCP built-in makes the launcher receive -e builti
   patchPolicy(rig, 'profiles', ['mcp-read']);
   patchPolicy(rig, 'forms', { read: { path: rig.readLauncher, extensions: ['builtin:mcp'] }, write: rig.writeLauncher });
 
-  const session = openServer(rig.env, { profilesDir: rig.profilesDir, graceMs: 200 });
-  session.write(callLine(7, { prompt: 'search', profile: 'mcp-read', cwd: rig.root }));
-  const [reply] = await waitForReplies(session, 1);
-  session.end();
-  await session.done;
+  const server = openServer(rig.env, { profilesDir: rig.profilesDir, graceMs: 200 });
+  server.write(callLine(7, { prompt: 'search', profile: 'mcp-read', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  server.end();
+  await server.done;
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'completed', JSON.stringify(doc));
-  const sawArgv = marker(rig, 'argv').split('\n');
+  const sawArgv = markerText(rig, 'argv').split('\n');
   assert.deepEqual(sawArgv.slice(-2), ['-e', 'builtin:mcp']);
   assert.equal(sawArgv.filter((arg) => arg === '-e').length, 1);
   assert.equal(sawArgv.at(-3), '--no-extensions');
@@ -332,7 +332,7 @@ test('detached: the child leads its own process group, so -pid reaches it and no
   const outcome = await runChild(planFor(rig), { signal: noAbort().signal, env: rig.env });
   assert.equal(outcome.exitCode, 0);
   const [pid] = markerPids(rig);
-  assert.equal(Number(marker(rig, 'pgid')), pid, 'the child is its own process-group leader');
+  assert.equal(Number(markerText(rig, 'pgid')), pid, 'the child is its own process-group leader');
 });
 
 test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one leaves the other and the server alive, and the cancelled subtree is gone after the grace (EX-3)', async (t) => {
@@ -356,30 +356,30 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
       'exit 0',
     ].join('\n'),
   });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(1, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'cancelme' }));
-  session.write(callLine(2, { prompt: 'keep going', profile: 'write', cwd: rig.root, session: 'keeper' }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(1, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'cancelme' }));
+  server.write(callLine(2, { prompt: 'keep going', profile: 'write', cwd: rig.root, session: 'keeper' }));
   await waitForPath(join(rig.markerDir, 'grandchild.pid'), 'the ignoring grandchild');
 
   // The wire act: one call cancelled, and both the other call and the server
   // itself (this process) must survive — a signal to the server's group would end
   // the test.
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 1 } }));
-  const replies = await waitForReplies(session, 2);
-  session.write(line({ id: 3, method: 'ping' }));
-  const three = await waitForReplies(session, 3);
-  session.end();
-  await session.done;
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 1 } }));
+  const replies = await waitForReplies(server, 2);
+  server.write(line({ id: 3, method: 'ping' }));
+  const three = await waitForReplies(server, 3);
+  server.end();
+  await server.done;
 
   const cancelledReply = replies.find((reply) => reply.id === 1);
   const keptReply = replies.find((reply) => reply.id === 2);
   const afterPing = three.find((reply) => reply.id === 3);
   assert.ok(cancelledReply && keptReply && afterPing, JSON.stringify(three));
-  const cancelled = document(cancelledReply);
+  const cancelled = resultDocument(cancelledReply);
   assert.equal(cancelled.state, 'cancelled');
   assert.equal(cancelled.termination, 'cancelled');
   assert.deepEqual(cancelled.causes, ['cancelled']);
-  const kept = document(keptReply);
+  const kept = resultDocument(keptReply);
   assert.equal(kept.state, 'completed', JSON.stringify(kept));
   assert.equal(kept.result, 'kept');
   assert.equal(afterPing.id, 3, 'the server answered a ping after the cancel');
@@ -451,7 +451,7 @@ test('the child inherits no fd, environment variable or argv member naming PI_MC
     assert.match(fds, new RegExp(`^${fd} -> (pipe|socket):`, 'm'), `fd ${fd} is one of the three pipes`);
   }
 
-  assert.equal(realpathSync(marker(rig, 'cwd')), realpathSync(rig.root), 'cwd is the call\'s root');
+  assert.equal(realpathSync(markerText(rig, 'cwd')), realpathSync(rig.root), 'cwd is the call\'s root');
 
   // The derivation itself, so the rule is not only observed through a stub.
   const derived = childEnv(env, rig.runDir, layout);
@@ -471,8 +471,8 @@ test('an audit append that fails after the child was launched fails the call clo
       'exit 0',
     ].join('\n'),
   });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(11, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(11, { prompt: 'work', profile: 'read', cwd: rig.root }));
 
   // The audit is broken after the `spawn` record landed and before the `exit`
   // record: a run whose audit cannot be appended must not be answered as a clean
@@ -483,11 +483,11 @@ test('an audit append that fails after the child was launched fails the call clo
   mkdirSync(auditPath);
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
-  const [reply] = await waitForReplies(session, 1);
-  session.end();
-  await session.done;
+  const [reply] = await waitForReplies(server, 1);
+  server.end();
+  await server.done;
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'audit_failed', JSON.stringify(doc));
   assert.equal(doc.termination, 'audit');
   assert.deepEqual(doc.causes, ['audit']);
@@ -504,8 +504,8 @@ test('an audit append that fails after the child was launched fails the call clo
 
 test('an audit record that cannot be written never blocks the ladder: the child is still killed and the failure joins the causes', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(16, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(16, { prompt: 'work', profile: 'read', cwd: rig.root }));
   const auditPath = join(await waitForRunDir(rig.runDir), 'audit.jsonl');
   await waitForPath(auditPath, 'the run audit');
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
@@ -516,12 +516,12 @@ test('an audit record that cannot be written never blocks the ladder: the child 
   // silently dropped one (design sec-5's precedence).
   rmSync(auditPath);
   mkdirSync(auditPath);
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 16 } }));
-  const [reply] = await waitForReplies(session, 1);
-  session.end();
-  await session.done;
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 16 } }));
+  const [reply] = await waitForReplies(server, 1);
+  server.end();
+  await server.done;
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'cancelled');
   assert.equal(doc.termination, 'cancelled');
   assert.deepEqual(doc.causes, ['cancelled', 'audit']);
@@ -538,13 +538,13 @@ test('an unwritable attempts.jsonl refuses audit-unavailable without spawning an
   // a server that cannot record a run must not launch one.
   mkdirSync(join(rig.runDir, 'attempts.jsonl'), { recursive: true });
 
-  const session = openServer(rig.env);
-  session.write(callLine(12, { prompt: 'work', profile: 'read', cwd: rig.root }));
-  const [reply] = await waitForReplies(session, 1);
-  session.end();
-  await session.done;
+  const server = openServer(rig.env);
+  server.write(callLine(12, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  server.end();
+  await server.done;
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'audit-unavailable');
   assert.match(String(doc.refusal.detail), /attempts\.jsonl/);
@@ -567,14 +567,14 @@ test('an audit append failing before spawn discards the run directory and refuse
     }
   });
 
-  const session = openServer(rig.env);
-  session.write(callLine(13, { prompt: 'work', profile: 'read', cwd: rig.root }));
-  const [reply] = await waitForReplies(session, 1);
-  session.end();
-  await session.done;
+  const server = openServer(rig.env);
+  server.write(callLine(13, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  server.end();
+  await server.done;
   chmodSync(rig.runDir, 0o755);
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'audit-failed');
   assert.equal(doc.artifacts, null, 'nothing ran, so there is no run to point at');
@@ -611,13 +611,13 @@ test('a pre-exec spawn failure after the run directory exists reports failed wit
   const rig = newRig(t, { read: LAUNCH_MARKER });
   patchPolicy(rig, 'forms', { read: join(rig.dir, 'no-such-launcher'), write: rig.writeLauncher });
 
-  const session = openServer(rig.env);
-  session.write(callLine(14, { prompt: 'work', profile: 'read', cwd: rig.root }));
-  const [reply] = await waitForReplies(session, 1);
-  session.end();
-  await session.done;
+  const server = openServer(rig.env);
+  server.write(callLine(14, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  server.end();
+  await server.done;
 
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'failed');
   assert.equal(doc.termination, 'spawn');
   assert.deepEqual(doc.causes, ['spawn']);
@@ -663,12 +663,12 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
       const rig = newRig(inner, {
         read: [...stream(testCase.stop), `exit ${testCase.exit}`].join('\n'),
       });
-      const session = openServer(rig.env);
-      session.write(callLine(15, { prompt: 'work', profile: 'read', cwd: rig.root }));
-      const [reply] = await waitForReplies(session, 1);
-      session.end();
-      await session.done;
-      const doc = document(reply);
+      const server = openServer(rig.env);
+      server.write(callLine(15, { prompt: 'work', profile: 'read', cwd: rig.root }));
+      const [reply] = await waitForReplies(server, 1);
+      server.end();
+      await server.done;
+      const doc = resultDocument(reply);
       assert.equal(doc.state, testCase.state, JSON.stringify(doc));
       assert.equal(doc.termination, testCase.termination);
       assert.equal(doc.final, testCase.state === 'completed');
@@ -700,15 +700,15 @@ test('the session lock is released only after the drain and the final audit appe
       'exit 0',
     ].join('\n'),
   });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(21, { prompt: 'slow drain', profile: 'read', cwd: rig.root, session: 'drain' }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(21, { prompt: 'slow drain', profile: 'read', cwd: rig.root, session: 'drain' }));
   await waitForPath(join(rig.markerDir, 'child-done'), 'the child to exit');
-  assert.equal(session.replies().length, 0, 'the answer waits for the drain, not for the exit');
+  assert.equal(server.replies().length, 0, 'the answer waits for the drain, not for the exit');
   const [grandchildPid] = markerPids(rig, 'grandchild.pid');
   assert.ok(isAlive(grandchildPid), 'the grandchild is what holds the pipe open');
 
   const rival = async (extra: Env = {}): Promise<Record<string, any>> =>
-    document(await oneShot(t, { ...rig.env, ...extra }, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' })));
+    resultDocument(await oneShot(t, { ...rig.env, ...extra }, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' })));
 
   const busy = await rival();
   assert.equal(busy.state, 'refused');
@@ -719,12 +719,12 @@ test('the session lock is released only after the drain and the final audit appe
   // still owed. The ladder is what ends it: the cancellation kills the group the
   // grandchild is in, so the run settles in the grace rather than in 30 seconds.
   const cancelledAt = Date.now();
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 21 } }));
-  const [reply] = await waitForReplies(session, 1, 5000);
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 21 } }));
+  const [reply] = await waitForReplies(server, 1, 5000);
   const elapsed = Date.now() - cancelledAt;
-  session.end();
-  await session.done;
-  assert.equal(document(reply).state, 'cancelled');
+  server.end();
+  await server.done;
+  assert.equal(resultDocument(reply).state, 'cancelled');
   assert.ok(elapsed < 2000, `the ladder bounded the drain: ${elapsed} ms`);
   assert.equal(isAlive(grandchildPid), false, 'the drain was not outlived by the member holding the pipe');
   // The final audit append is the `exit` record, written after the drain.
@@ -755,7 +755,7 @@ test('two server processes on one session: the loser is refused session-busy and
   winner.stdin.write(`${callLine(41, { prompt: 'winner', profile: 'read', cwd: rig.root, session: 'shared' })}\n`);
 
   await waitForPath(join(rig.markerDir, 'pids'), 'the winner\'s child');
-  const loserDoc = document(await oneShot(t, rig.env, callLine(42, { prompt: 'loser', profile: 'read', cwd: rig.root, session: 'shared' })));
+  const loserDoc = resultDocument(await oneShot(t, rig.env, callLine(42, { prompt: 'loser', profile: 'read', cwd: rig.root, session: 'shared' })));
   assert.equal(loserDoc.state, 'refused');
   assert.equal(loserDoc.refusal.reason, 'session-busy');
   assert.equal(readFileSync(join(rig.markerDir, 'pids'), 'utf8').trim().split('\n').length, 1, 'the loser created no child');
@@ -769,7 +769,7 @@ test('two server processes on one session: the loser is refused session-busy and
   }
   winner.stdin.end();
   assert.equal(await exited, 0);
-  const winnerDoc = document(JSON.parse(winnerOut.join('').trim()) as Record<string, any>);
+  const winnerDoc = resultDocument(JSON.parse(winnerOut.join('').trim()) as Record<string, any>);
   assert.equal(winnerDoc.state, 'completed', JSON.stringify(winnerDoc));
 });
 
@@ -777,24 +777,24 @@ test('two server processes on one session: the loser is refused session-busy and
 
 test('notifications/cancelled aborts exactly the requestId it names; an unknown requestId is ignored and is not a protocol error', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(51, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'victim' }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(51, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'victim' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [pid] = markerPids(rig);
 
   // An id that names no in-flight call aborts nothing and answers nothing.
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 999 } }));
-  session.write(line({ id: 52, method: 'ping' }));
-  const first = await waitForReplies(session, 1);
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 999 } }));
+  server.write(line({ id: 52, method: 'ping' }));
+  const first = await waitForReplies(server, 1);
   assert.equal(first[0].id, 52, 'the unknown cancellation produced no frame of its own');
   assert.deepEqual(first[0].result, { pong: true });
 
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 51 } }));
-  const replies = await waitForReplies(session, 2);
-  session.end();
-  await session.done;
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 51 } }));
+  const replies = await waitForReplies(server, 2);
+  server.end();
+  await server.done;
 
-  const cancelled = document(replies[1]);
+  const cancelled = resultDocument(replies[1]);
   assert.equal(cancelled.state, 'cancelled');
   assert.equal(cancelled.termination, 'cancelled');
   assert.deepEqual(cancelled.causes, ['cancelled']);
@@ -821,25 +821,25 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
       'exit 0',
     ].join('\n'),
   });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(53, { prompt: 'the tail is held open', profile: 'read', cwd: rig.root, session: 'tail' }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(53, { prompt: 'the tail is held open', profile: 'read', cwd: rig.root, session: 'tail' }));
   await waitForPath(join(rig.markerDir, 'leader-exited'), 'the leader to exit');
   const [grandchildPid] = markerPids(rig, 'grandchild.pid');
   assert.ok(isAlive(grandchildPid), 'the grandchild holds the pipe while the leader is already reaped');
-  assert.equal(session.replies().length, 0, 'the answer waits for the drain');
+  assert.equal(server.replies().length, 0, 'the answer waits for the drain');
 
   // The trigger arrives with no leader left to TERM. The group is still there, and
   // the drain is bounded by the ladder rather than by the grandchild, so the answer
   // arrives within the grace however long the grandchild would have slept.
   const abortedAt = Date.now();
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 53 } }));
-  const [reply] = await waitForReplies(session, 1, 5000);
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 53 } }));
+  const [reply] = await waitForReplies(server, 1, 5000);
   const elapsed = Date.now() - abortedAt;
-  session.end();
-  await session.done;
+  server.end();
+  await server.done;
 
   assert.ok(elapsed < 2000, `the answer waits for the bounded drain, not for the grandchild: ${elapsed} ms`);
-  const doc = document(reply);
+  const doc = resultDocument(reply);
   assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
   assert.equal(doc.termination, 'cancelled');
   assert.deepEqual(doc.causes, ['cancelled']);
@@ -855,25 +855,25 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
 
 test('two tools/calls carrying one id are both in the index: a cancellation naming it aborts both, and each run records its abort', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 200 });
+  const server = openServer(rig.env, { graceMs: 200 });
   // The same wire id twice: the id is the client's, and neither call may drop out of
   // the index the cancellation and the EOF sweep read.
-  session.write(callLine(71, { prompt: 'first', profile: 'read', cwd: rig.root, session: 'dupe-one' }));
-  session.write(callLine(71, { prompt: 'second', profile: 'read', cwd: rig.root, session: 'dupe-two' }));
+  server.write(callLine(71, { prompt: 'first', profile: 'read', cwd: rig.root, session: 'dupe-one' }));
+  server.write(callLine(71, { prompt: 'second', profile: 'read', cwd: rig.root, session: 'dupe-two' }));
   const started = Date.now() + 10000;
   while (markerPids(rig, 'pids').length < 2) {
     if (Date.now() > started) throw new Error('timed out waiting for both launchers');
     await pause(5);
   }
 
-  session.write(line({ method: 'notifications/cancelled', params: { requestId: 71 } }));
-  const replies = await waitForReplies(session, 2);
-  session.end();
-  await session.done;
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 71 } }));
+  const replies = await waitForReplies(server, 2);
+  server.end();
+  await server.done;
 
   for (const reply of replies) {
     assert.equal(reply.id, 71);
-    const doc = document(reply);
+    const doc = resultDocument(reply);
     assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
     assert.deepEqual(doc.causes, ['cancelled']);
   }
@@ -888,17 +888,17 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
 
 test('stdin EOF aborts every in-flight run through the same ladder, writes no result and leaves no child behind', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const session = openServer(rig.env, { graceMs: 200 });
-  session.write(callLine(61, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'eof' }));
+  const server = openServer(rig.env, { graceMs: 200 });
+  server.write(callLine(61, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'eof' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [pid] = markerPids(rig);
 
   // The client is gone: the server stops admitting, aborts in flight, flushes the
   // audit and exits. Nothing is written down the closed channel.
-  session.end();
-  await session.done;
+  server.end();
+  await server.done;
 
-  assert.deepEqual(session.replies(), [], 'no result is written after stdin EOF');
+  assert.deepEqual(server.replies(), [], 'no result is written after stdin EOF');
   assert.equal(isAlive(pid), false, 'the run was aborted, not left behind');
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
