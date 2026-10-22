@@ -11,7 +11,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reduce } from '../reduce/reduce.ts';
-import type { Reduced } from '../reduce/reduce.ts';
+import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD } from './test-rig.ts';
+import type { RunInput } from './test-rig.ts';
 import {
   CAUSE_STATE,
   createLatch,
@@ -26,68 +27,7 @@ import {
   validateAgentResult,
 } from './result.ts';
 import { transcriptBudget } from './policy.ts';
-import type { AgentResult, Artifacts, LatchCause, Reachability, ResultState, RunFacts, Termination } from './result.ts';
-
-/** pi's `Usage` shape with every component present: missing data is then missing
- *  rather than a zero, which is the distinction accounting turns on. */
-const usage = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  input: 100,
-  output: 10,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 110,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
-  ...overrides,
-});
-
-/** A terminal assistant `message_end`, with pi's stop-reason token verbatim (sec-4:
- *  the token is `toolUse`, never `tool_use`). */
-function messageEnd(stop: string, text: string | null = 'the answer', usageOverrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    type: 'message_end',
-    message: {
-      role: 'assistant',
-      stopReason: stop,
-      content: text === null ? [] : [{ type: 'text', text }],
-      usage: usage(usageOverrides),
-    },
-  });
-}
-
-/** `agent_settled`: the stream's own statement that the run came to rest. */
-const SETTLED = JSON.stringify({ type: 'agent_settled' });
-
-const ARTIFACTS: Artifacts = {
-  dir: '/state/runs/run-1',
-  events: '/state/runs/run-1/events.jsonl',
-  transcript: '/state/runs/run-1/transcript.md',
-  status: '/state/runs/run-1/status.json',
-  audit: '/state/runs/run-1/audit.jsonl',
-};
-
-type RunInput = {
-  lines?: string[];
-  /** The child's exit status; `null` means it never exited (a failed launch). */
-  exitCode?: number | null;
-  spawnFailed?: boolean;
-  /** The latch's committed snapshot, as the server hands it over. */
-  causes?: LatchCause[];
-  budgetBytes?: number;
-};
-
-/** One run: the real reducer, then the one builder. */
-function run(input: RunInput = {}): { doc: AgentResult; reduced: Reduced } {
-  const reduced = reduce(input.lines ?? [], input.budgetBytes === undefined ? {} : { budgetBytes: input.budgetBytes });
-  const outcome: RunFacts = {
-    exitCode: input.exitCode === undefined ? 0 : input.exitCode,
-    spawnFailed: input.spawnFailed ?? false,
-    layout: ARTIFACTS,
-  };
-  return {
-    doc: resultFor({ reduced, outcome, causes: input.causes ?? [], session: 'sess-1' }),
-    reduced,
-  };
-}
+import type { AgentResult, LatchCause, Reachability, ResultState, Termination } from './result.ts';
 
 /** Every mapped outcome must satisfy the advertised schema, and `termination` must
  *  always be `causes[0]` (sec-5, EX-4). */
@@ -114,7 +54,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
   const cases: Settlement[] = [
     {
       name: 'stop, settled, exit 0',
-      lines: [messageEnd('stop'), SETTLED],
+      lines: [messageEnd('stop'), SETTLED_RECORD],
       state: 'completed',
       termination: 'stop',
       final: true,
@@ -123,7 +63,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'length, settled, exit 0: complete as far as the provider produced it',
-      lines: [messageEnd('length'), SETTLED],
+      lines: [messageEnd('length'), SETTLED_RECORD],
       state: 'completed',
       termination: 'length',
       final: true,
@@ -143,7 +83,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'stop, settled, nonzero exit',
-      lines: [messageEnd('stop'), SETTLED],
+      lines: [messageEnd('stop'), SETTLED_RECORD],
       exitCode: 3,
       state: 'failed',
       termination: 'exit',
@@ -153,7 +93,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'settled, nonzero exit, no terminal message',
-      lines: [SETTLED],
+      lines: [SETTLED_RECORD],
       exitCode: 3,
       state: 'failed',
       termination: 'exit',
@@ -163,7 +103,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'a terminal stopReason error is a failure, never an answer',
-      lines: [messageEnd('error'), SETTLED],
+      lines: [messageEnd('error'), SETTLED_RECORD],
       state: 'failed',
       termination: 'error',
       final: false,
@@ -172,7 +112,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'a terminal stopReason aborted is a failure',
-      lines: [messageEnd('aborted'), SETTLED],
+      lines: [messageEnd('aborted'), SETTLED_RECORD],
       state: 'failed',
       termination: 'aborted',
       final: false,
@@ -181,7 +121,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'a terminal stopReason toolUse issued a call; it did not answer',
-      lines: [messageEnd('toolUse'), SETTLED],
+      lines: [messageEnd('toolUse'), SETTLED_RECORD],
       state: 'incomplete',
       termination: 'toolUse',
       final: false,
@@ -190,7 +130,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'a terminal stopReason deferred did not answer either',
-      lines: [messageEnd('deferred'), SETTLED],
+      lines: [messageEnd('deferred'), SETTLED_RECORD],
       state: 'incomplete',
       termination: 'deferred',
       final: false,
@@ -199,7 +139,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'pending at a message_end is malformed, not merely unfinished',
-      lines: [messageEnd('pending'), SETTLED],
+      lines: [messageEnd('pending'), SETTLED_RECORD],
       state: 'incomplete',
       termination: 'eof',
       final: false,
@@ -208,7 +148,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'settled, exit 0, no terminal message at all',
-      lines: [SETTLED],
+      lines: [SETTLED_RECORD],
       state: 'incomplete',
       termination: 'eof',
       final: false,
@@ -219,7 +159,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
     },
     {
       name: 'a usage-bearing message with no price leaves accounting unknown',
-      lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED],
+      lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED_RECORD],
       state: 'accounting_unknown',
       termination: 'accounting',
       final: false,
@@ -241,7 +181,7 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
 
   for (const settlement of cases) {
     await t.test(settlement.name, () => {
-      const { doc, reduced } = run(settlement);
+      const { doc, reduced } = buildResult(settlement);
       assert.equal(doc.state, settlement.state, JSON.stringify(doc));
       assert.equal(doc.termination, settlement.termination);
       assert.equal(doc.final, settlement.final, 'final is derived here, from the predicate');
@@ -259,13 +199,13 @@ test('exit 0 is never evidence of success (EX-1)', async (t) => {
   // Every exit-0 run with no answer-bearing terminal message, and every one whose
   // stream never settled, is a non-success — the exit status decides nothing.
   await t.test('exit 0 with no stream at all', () => {
-    const { doc } = run({ lines: [], exitCode: 0 });
+    const { doc } = buildResult({ lines: [], exitCode: 0 });
     assert.equal(doc.state, 'incomplete');
     assert.equal(doc.final, false);
     assert.equal(doc.result, null);
   });
   await t.test('exit 0, settled, toolUse: counted and paid for, not an answer', () => {
-    const { doc } = run({ lines: [messageEnd('toolUse'), SETTLED], exitCode: 0 });
+    const { doc } = buildResult({ lines: [messageEnd('toolUse'), SETTLED_RECORD], exitCode: 0 });
     assert.equal(doc.final, false);
     assert.equal(doc.result, null);
     assert.equal(doc.status!.requests, 1, 'the send was counted; it just was not an answer');
@@ -275,7 +215,7 @@ test('exit 0 is never evidence of success (EX-1)', async (t) => {
 // ── EX-2 / VT-2: the latch, the commit point, the full ordered list ────────
 
 test('the abort latch defeats provisional success: a cause recorded before the commit point decides the state (EX-2, VT-2)', async (t) => {
-  const answering = [messageEnd('stop'), SETTLED];
+  const answering = [messageEnd('stop'), SETTLED_RECORD];
 
   for (const [name, causes, state] of [
     ['a run the backstop stopped cannot report success', ['timeout'], 'timeout'],
@@ -285,7 +225,7 @@ test('the abort latch defeats provisional success: a cause recorded before the c
     ['a failed evidence append decides the state', ['audit'], 'audit_failed'],
   ] as [string, LatchCause[], ResultState][]) {
     await t.test(name, () => {
-      const { doc } = run({ lines: answering, causes });
+      const { doc } = buildResult({ lines: answering, causes });
       assert.equal(doc.state, state, JSON.stringify(doc));
       assert.equal(doc.termination, causes[0]);
       assert.deepEqual(doc.causes, causes);
@@ -297,13 +237,13 @@ test('the abort latch defeats provisional success: a cause recorded before the c
   }
 
   await t.test('concurrent causes: termination is causes[0] and the whole ordered list is returned', () => {
-    const { doc } = run({ lines: answering, causes: ['timeout', 'audit'] });
+    const { doc } = buildResult({ lines: answering, causes: ['timeout', 'audit'] });
     assert.equal(doc.termination, 'timeout', 'discovery order decides; the earliest cause wins');
     assert.deepEqual(doc.causes, ['timeout', 'audit'], 'the later cause is never hidden behind the earlier one');
     assert.equal(doc.state, 'timeout');
     assertConforms(doc, 'timeout then audit');
 
-    const cancelled = run({ lines: answering, causes: ['cancelled', 'audit'] }).doc;
+    const cancelled = buildResult({ lines: answering, causes: ['cancelled', 'audit'] }).doc;
     assert.equal(cancelled.termination, 'cancelled');
     assert.deepEqual(cancelled.causes, ['cancelled', 'audit']);
     assert.equal(cancelled.state, 'cancelled');
@@ -330,7 +270,7 @@ test('the abort latch defeats provisional success: a cause recorded before the c
 
   await t.test('an empty latch lets the stream decide, and causes names what decided it', () => {
     assert.deepEqual(createLatch().commit(), []);
-    const { doc } = run({ lines: answering, causes: [] });
+    const { doc } = buildResult({ lines: answering, causes: [] });
     assert.equal(doc.state, 'completed');
     assert.deepEqual(doc.causes, ['stop'], 'a completed run still reports the cause it completed on');
   });
@@ -339,7 +279,7 @@ test('the abort latch defeats provisional success: a cause recorded before the c
     // A types-only vocabulary does not survive a cast, so `resultFor` filters the
     // list: a stream that never settled stays non-success no matter what the caller
     // claims to have latched.
-    const { doc } = run({ lines: [messageEnd('stop')], causes: ['stop'] as unknown as LatchCause[] });
+    const { doc } = buildResult({ lines: [messageEnd('stop')], causes: ['stop'] as unknown as LatchCause[] });
     assert.equal(doc.state, 'incomplete');
     assert.equal(doc.termination, 'eof');
     assert.equal(doc.final, false);
@@ -375,7 +315,7 @@ test('a refusal is the arm where nothing ran: status, artifacts, result and sess
     assert.equal(refused.artifacts, null, 'nothing ran, so there is no run directory');
     assert.equal(refused.refusal?.reason, 'audit-failed');
 
-    const spawned = run({ lines: [messageEnd('stop'), SETTLED], causes: ['audit'] }).doc;
+    const spawned = buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['audit'] }).doc;
     assert.equal(spawned.state, 'audit_failed');
     assert.equal(spawned.termination, 'audit');
     assert.equal(spawned.artifacts?.dir, ARTIFACTS.dir, 'a spawned run keeps its evidence even when an append failed');
@@ -384,7 +324,7 @@ test('a refusal is the arm where nothing ran: status, artifacts, result and sess
   });
 
   await t.test('a refusal carries no run evidence and a run carries no refusal', () => {
-    const runDoc = run({ lines: [messageEnd('stop'), SETTLED] }).doc;
+    const runDoc = buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD] }).doc;
     assert.equal(runDoc.refusal, null);
     assert.notEqual(runDoc.artifacts, null);
     assert.equal(validateAgentResult({ ...refusedResult('request-invalid', 'params is not an object'), status: {} }).ok, false);
@@ -396,21 +336,21 @@ test('a refusal is the arm where nothing ran: status, artifacts, result and sess
 /** One named path per termination token, shared by EX-4's schema sweep and EX-9's
  *  production table: the point is that a member is *produced*, not merely listed. */
 const PRODUCED: Record<Termination, () => AgentResult> = {
-  stop: () => run({ lines: [messageEnd('stop'), SETTLED] }).doc,
-  length: () => run({ lines: [messageEnd('length'), SETTLED] }).doc,
-  error: () => run({ lines: [messageEnd('error'), SETTLED] }).doc,
-  aborted: () => run({ lines: [messageEnd('aborted'), SETTLED] }).doc,
-  toolUse: () => run({ lines: [messageEnd('toolUse'), SETTLED] }).doc,
-  deferred: () => run({ lines: [messageEnd('deferred'), SETTLED] }).doc,
-  eof: () => run({ lines: [messageEnd('stop')] }).doc,
-  exit: () => run({ lines: [SETTLED], exitCode: 2 }).doc,
-  spawn: () => run({ lines: [], exitCode: null, spawnFailed: true }).doc,
-  timeout: () => run({ lines: [messageEnd('stop'), SETTLED], causes: ['timeout'] }).doc,
-  cancelled: () => run({ lines: [messageEnd('stop'), SETTLED], causes: ['cancelled'] }).doc,
-  switch: () => run({ lines: [messageEnd('stop'), SETTLED], causes: ['switch'] }).doc,
-  ceiling: () => run({ lines: [messageEnd('stop'), SETTLED], causes: ['ceiling'] }).doc,
-  accounting: () => run({ lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED] }).doc,
-  audit: () => run({ lines: [messageEnd('stop'), SETTLED], causes: ['audit'] }).doc,
+  stop: () => buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD] }).doc,
+  length: () => buildResult({ lines: [messageEnd('length'), SETTLED_RECORD] }).doc,
+  error: () => buildResult({ lines: [messageEnd('error'), SETTLED_RECORD] }).doc,
+  aborted: () => buildResult({ lines: [messageEnd('aborted'), SETTLED_RECORD] }).doc,
+  toolUse: () => buildResult({ lines: [messageEnd('toolUse'), SETTLED_RECORD] }).doc,
+  deferred: () => buildResult({ lines: [messageEnd('deferred'), SETTLED_RECORD] }).doc,
+  eof: () => buildResult({ lines: [messageEnd('stop')] }).doc,
+  exit: () => buildResult({ lines: [SETTLED_RECORD], exitCode: 2 }).doc,
+  spawn: () => buildResult({ lines: [], exitCode: null, spawnFailed: true }).doc,
+  timeout: () => buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['timeout'] }).doc,
+  cancelled: () => buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['cancelled'] }).doc,
+  switch: () => buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['switch'] }).doc,
+  ceiling: () => buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['ceiling'] }).doc,
+  accounting: () => buildResult({ lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED_RECORD] }).doc,
+  audit: () => buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['audit'] }).doc,
   refused: () => refusedResult('audit-unavailable', 'attempts.jsonl cannot be appended to'),
 };
 
@@ -469,21 +409,21 @@ test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every
   });
 
   await t.test('a cause token outside the enum fails the suite, not the reader', () => {
-    const outside = { ...run({ causes: ['timeout'] }).doc, termination: 'backstop', causes: ['backstop'] };
+    const outside = { ...buildResult({ causes: ['timeout'] }).doc, termination: 'backstop', causes: ['backstop'] };
     const check = validateAgentResult(outside);
     if (check.ok) assert.fail('a cause token outside the enum must be rejected');
     assert.match(check.detail, /backstop/);
   });
 
   await t.test('the precedence rule is part of the schema: causes[0] is the termination, and the state is its row', () => {
-    const completed = run({ lines: [messageEnd('stop'), SETTLED] }).doc;
+    const completed = buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD] }).doc;
     const wrongCause = validateAgentResult({ ...completed, causes: ['audit'] });
     assert.equal(wrongCause.ok, false, 'a list whose first cause is not the termination is a defect');
     const wrongState = validateAgentResult({ ...completed, state: 'failed' });
     assert.equal(wrongState.ok, false, 'a state that is not the cause\'s row is a defect');
     // A textless terminal message is a legitimate completion, so only a NON-completed
     // run holding an answer is the defect DEC-093 names.
-    const timedOut = run({ lines: [messageEnd('stop'), SETTLED], causes: ['timeout'] }).doc;
+    const timedOut = buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['timeout'] }).doc;
     assert.equal(validateAgentResult({ ...timedOut, result: 'the answer' }).ok, false, 'a non-completed run withdraws its answer');
   });
 });
@@ -514,22 +454,22 @@ function bulky(): string[] {
     );
     lines.push(messageEnd('stop', `step ${index} prose`));
   }
-  lines.push(SETTLED);
+  lines.push(SETTLED_RECORD);
   return lines;
 }
 
 test('the transcript budget is soft and wired through the policy clamp (EX-6, VT-5)', async (t) => {
   await t.test('the clamped budget is what reaches the reducer', () => {
     const lines = bulky();
-    const loose = run({ lines, budgetBytes: transcriptBudget(undefined, undefined) }).reduced;
-    const clamped = run({ lines, budgetBytes: transcriptBudget(0, 512) }).reduced;
+    const loose = buildResult({ lines, budgetBytes: transcriptBudget(undefined, undefined) }).reduced;
+    const clamped = buildResult({ lines, budgetBytes: transcriptBudget(0, 512) }).reduced;
     assert.ok(clamped.transcript.length < loose.transcript.length, 'the clamp reached the reducer');
     assert.ok(clamped.status.transcript.elided > loose.status.transcript.elided);
   });
 
   await t.test('mandatory sections may exceed the budget, by design and by test', () => {
     const budget = transcriptBudget(64, 64);
-    const { doc } = run({ lines: bulky(), budgetBytes: budget });
+    const { doc } = buildResult({ lines: bulky(), budgetBytes: budget });
     const bytes = Buffer.byteLength(doc.transcript);
     assert.ok(bytes > 64, `the header and the result block are mandatory: ${bytes} bytes`);
     const status = doc.status as { transcript: { bytes: number; elided: number } };
@@ -540,15 +480,15 @@ test('the transcript budget is soft and wired through the policy clamp (EX-6, VT
   });
 
   await t.test('truncated reports a length stop; a small budget never fakes one', () => {
-    const length = run({ lines: [messageEnd('length'), SETTLED], budgetBytes: 64 }).doc;
+    const length = buildResult({ lines: [messageEnd('length'), SETTLED_RECORD], budgetBytes: 64 }).doc;
     assert.equal(length.truncated, true);
     assert.equal(length.state, 'completed', 'length with the predicate is a completion that was cut');
-    const stop = run({ lines: [messageEnd('stop'), SETTLED], budgetBytes: 64 }).doc;
+    const stop = buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD], budgetBytes: 64 }).doc;
     assert.equal(stop.truncated, false, 'eliding the body does not truncate the answer');
   });
 
   await t.test('status is embedded verbatim and the artifacts name the run', () => {
-    const { doc, reduced } = run({ lines: [messageEnd('stop'), SETTLED] });
+    const { doc, reduced } = buildResult({ lines: [messageEnd('stop'), SETTLED_RECORD] });
     assert.equal(doc.status, reduced.status, 'the same object from reduce(), never rebuilt');
     assert.equal(doc.transcript, reduced.transcript);
     assert.deepEqual(doc.artifacts, ARTIFACTS);
@@ -562,21 +502,21 @@ test('status.state judges the stream and state judges the call (EX-5)', async (t
   const cases: { name: string; input: RunInput; state: ResultState; termination: Termination; stream: string }[] = [
     {
       name: 'an answer plus a nonzero exit',
-      input: { lines: [messageEnd('stop'), SETTLED], exitCode: 3 },
+      input: { lines: [messageEnd('stop'), SETTLED_RECORD], exitCode: 3 },
       state: 'failed',
       termination: 'exit',
       stream: 'completed',
     },
     {
       name: 'an answer the wall clock cut off',
-      input: { lines: [messageEnd('stop'), SETTLED], causes: ['timeout'] },
+      input: { lines: [messageEnd('stop'), SETTLED_RECORD], causes: ['timeout'] },
       state: 'timeout',
       termination: 'timeout',
       stream: 'completed',
     },
     {
       name: 'an answer whose spend is unknown',
-      input: { lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED] },
+      input: { lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED_RECORD] },
       state: 'accounting_unknown',
       termination: 'accounting',
       stream: 'completed',
@@ -591,7 +531,7 @@ test('status.state judges the stream and state judges the call (EX-5)', async (t
   ];
   for (const testCase of cases) {
     await t.test(testCase.name, () => {
-      const { doc, reduced } = run(testCase.input);
+      const { doc, reduced } = buildResult(testCase.input);
       assert.equal(doc.status, reduced.status, 'the status is the reducer\'s own object');
       assert.equal(doc.status.state, testCase.stream, 'the stream\'s verdict');
       assert.equal(doc.state, testCase.state, 'the call\'s verdict');
@@ -600,7 +540,7 @@ test('status.state judges the stream and state judges the call (EX-5)', async (t
   }
 
   await t.test('never two accounting stories', () => {
-    const { doc } = run({ lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED] });
+    const { doc } = buildResult({ lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED_RECORD] });
     assert.equal(doc.state, 'accounting_unknown');
     assert.equal(doc.status?.accounting, 'unknown', 'the call\'s state and the status\'s own field agree');
     assert.equal(doc.causes[0], 'accounting');

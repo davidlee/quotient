@@ -23,6 +23,10 @@ import { admitCall } from './policy.ts';
 import type { Admission } from './policy.ts';
 import type { CallId } from './evidence.ts';
 import { resolveLocations } from '../config.ts';
+import { reduce } from '../reduce/reduce.ts';
+import type { Reduced } from '../reduce/reduce.ts';
+import { resultFor } from './result.ts';
+import type { AgentResult, Artifacts, LatchCause, RunFacts } from './result.ts';
 
 export type Env = Record<string, string | undefined>;
 
@@ -257,6 +261,74 @@ export function onlyRunDir(runDir: string): string {
   const runs = runDirs(runDir);
   assert.equal(runs.length, 1, `expected exactly one run directory, saw ${runs.join(', ')}`);
   return join(runDir, runs[0]);
+}
+
+// ── Result fixtures: the real reducer and builder, no child ───────────────
+
+/** pi's `Usage` shape with every component present: missing data is then missing
+ *  rather than a zero, which is the distinction accounting turns on. */
+export const usage = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  input: 100,
+  output: 10,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 110,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+  ...overrides,
+});
+
+/** A terminal assistant `message_end`, with pi's stop-reason token verbatim (sec-4:
+ *  the token is `toolUse`, never `tool_use`). */
+export function messageEnd(stop: string, text: string | null = 'the answer', usageOverrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    type: 'message_end',
+    message: {
+      role: 'assistant',
+      stopReason: stop,
+      content: text === null ? [] : [{ type: 'text', text }],
+      usage: usage(usageOverrides),
+    },
+  });
+}
+
+/** `agent_settled` as a stream record (`SETTLED` is the stub's bash line for it). */
+export const SETTLED_RECORD = JSON.stringify({ type: 'agent_settled' });
+
+export const ARTIFACTS: Artifacts = {
+  dir: '/state/runs/run-1',
+  events: '/state/runs/run-1/events.jsonl',
+  transcript: '/state/runs/run-1/transcript.md',
+  status: '/state/runs/run-1/status.json',
+  audit: '/state/runs/run-1/audit.jsonl',
+};
+
+export type RunInput = {
+  lines?: string[];
+  /** The child's exit status; `null` means it never exited (a failed launch). */
+  exitCode?: number | null;
+  spawnFailed?: boolean;
+  /** The latch's committed snapshot, as the server hands it over. */
+  causes?: LatchCause[];
+  budgetBytes?: number;
+  /** Patterns the reducer warns about (`status.alerts`). */
+  alerts?: string[];
+};
+
+/** One run's result, offline: the real reducer, then the server's one builder. */
+export function buildResult(input: RunInput = {}): { doc: AgentResult; reduced: Reduced } {
+  const reduced = reduce(input.lines ?? [], {
+    ...(input.budgetBytes === undefined ? {} : { budgetBytes: input.budgetBytes }),
+    ...(input.alerts === undefined ? {} : { alerts: input.alerts }),
+  });
+  const outcome: RunFacts = {
+    exitCode: input.exitCode === undefined ? 0 : input.exitCode,
+    spawnFailed: input.spawnFailed ?? false,
+    layout: ARTIFACTS,
+  };
+  return {
+    doc: resultFor({ reduced, outcome, causes: input.causes ?? [], session: 'sess-1' }),
+    reduced,
+  };
 }
 
 export function readText(path: string): string {

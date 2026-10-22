@@ -23,7 +23,7 @@ through a read-only mount, and removing it would remove the delegate's ability
 to inspect a tree efficiently without making the tree any safer.
 
 This profile names no `mcp__*` tool, so the form it runs under passes no `-e`
-beyond the default of no extensions (design sec-3, "Executable contract").
+beyond the default of no extensions (`docs/contract/quotient-policy-1.md`, Fields).
 
 ## Document format
 
@@ -33,7 +33,6 @@ Copy it into one of those layers. The launch-dir copy wins per name. The
 policy's `profiles` map must list the name and pin the same `filesystem`, or
 calls refuse `profile-capability-mismatch`.
 
-The grammar is specified in the header comment of quotient's
-`src/server/profiles.ts`. The server parses this header and nothing else, once
-at start-up, into a snapshot held for its lifetime. An edit takes effect only
-when the server restarts, which is a deployment act.
+`quotient help profiles` specifies the grammar. The server parses this header
+and nothing else, once at start-up, into a snapshot held for its lifetime. An
+edit takes effect only when the server restarts, which is a deployment act.

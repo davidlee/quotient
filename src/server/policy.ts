@@ -99,7 +99,7 @@ export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
  */
 export const STATIC_ONLY_FIELDS: readonly string[] = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
 export const MAXIMA_FIELDS: readonly string[] = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
-const FORM_KEYS: readonly string[] = ['path', 'extensions', 'unconfined'];
+export const FORM_KEYS: readonly string[] = ['path', 'extensions', 'unconfined'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };
 

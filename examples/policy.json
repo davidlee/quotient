@@ -1,0 +1,19 @@
+{
+  "schema": "quotient-policy/1",
+  "mode": "per-call",
+  "enabled": true,
+  "roots": ["/home/operator/work"],
+  "maxima": {
+    "requests": 20,
+    "tokens": 200000,
+    "cost_usd": 1,
+    "wall_clock_s": 600
+  },
+  "profiles": { "read": "read", "research": "read", "write": "write" },
+  "forms": {
+    "read": "/home/operator/.local/state/quotient/forms/read/bin/quotient-read",
+    "write": "/home/operator/.local/state/quotient/forms/write/bin/quotient-write"
+  },
+  "exposure": [],
+  "transcript_budget_bytes": 8192
+}
