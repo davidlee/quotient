@@ -14,11 +14,10 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, SERVER_NAME, PI_AGENT_TOOL } from './server.ts';
-import { attempts, converse, jsonLines, line, validPolicy, workspace } from './test-rig.ts';
+import { attempts, converse, jsonLines, line, serverCommand, validPolicy, workspace } from './test-rig.ts';
 import type { Env } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
-const repoRoot = new URL('../..', import.meta.url).pathname;
 
 /** The pi-agent-result/1 document inside a tool result, plus its isError flag. */
 function payload(reply: Record<string, any>): { doc: Record<string, any>; isError: boolean } {
@@ -126,9 +125,9 @@ test('an unparsable line produces no response, only a stderr note, and the loop 
   assert.match(stderr, /unparsable/);
 });
 
-test('bin/pi-mcp starts, answers initialize and exits 0 on stdin EOF', () => {
+test('the server process starts, answers initialize and exits 0 on stdin EOF', () => {
   const { env } = workspace();
-  const child = spawnSync(join(repoRoot, 'bin', 'pi-mcp'), [], {
+  const child = spawnSync(...serverCommand, {
     input: `${line({ id: 1, method: 'initialize' })}\n`,
     env: { PATH: process.env.PATH, ...env },
     encoding: 'utf8',

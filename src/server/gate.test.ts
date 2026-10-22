@@ -191,7 +191,7 @@ test('the gate judges the numbers the status reports: a retry/compaction fixture
   assert.equal(trigger.observed, reduced.status.requests, 'the crossing names the status\'s request count');
 
   // The same for cost: the gate's observed cost is the status's cost_usd.
-  const byCost = unitGate(rig, { ceilings: { cost_usd: reduced.status.cost_usd - 0.001 } });
+  const byCost = unitGate(rig, { ceilings: { cost_usd: reduced.status.cost_usd! - 0.001 } });
   byCost.gate.tick(tally);
   byCost.gate.close();
   assert.deepEqual(byCost.causes, ['ceiling']);

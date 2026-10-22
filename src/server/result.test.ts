@@ -268,7 +268,7 @@ test('exit 0 is never evidence of success (EX-1)', async (t) => {
     const { doc } = run({ lines: [messageEnd('toolUse'), SETTLED], exitCode: 0 });
     assert.equal(doc.final, false);
     assert.equal(doc.result, null);
-    assert.equal(doc.status.requests, 1, 'the send was counted; it just was not an answer');
+    assert.equal(doc.status!.requests, 1, 'the send was counted; it just was not an answer');
   });
 });
 
@@ -532,8 +532,9 @@ test('the transcript budget is soft and wired through the policy clamp (EX-6, VT
     const { doc } = run({ lines: bulky(), budgetBytes: budget });
     const bytes = Buffer.byteLength(doc.transcript);
     assert.ok(bytes > 64, `the header and the result block are mandatory: ${bytes} bytes`);
-    assert.equal(doc.status.transcript.bytes, bytes, 'the status reports the honest byte count');
-    assert.ok(doc.status.transcript.elided > 0, 'the body was elided');
+    const status = doc.status as { transcript: { bytes: number; elided: number } };
+    assert.equal(status.transcript.bytes, bytes, 'the status reports the honest byte count');
+    assert.ok(status.transcript.elided > 0, 'the body was elided');
     assert.equal(doc.artifacts?.transcript, ARTIFACTS.transcript, 'the unbudgeted text is at artifacts.transcript');
     assert.ok(doc.result === 'step 39 prose', 'the answer survives the budget');
   });

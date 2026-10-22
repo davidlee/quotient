@@ -34,12 +34,12 @@ import {
   readText,
   resultDocument,
   SETTLED,
+  serverCommand,
   waitForPath,
   waitForReplies,
 } from './test-rig.ts';
 import type { Env, Rig } from './test-rig.ts';
 
-const REPO_ROOT = new URL('../..', import.meta.url).pathname;
 
 /** A usage-bearing assistant message with a terminal stop reason: a send that
  *  paid for itself, so the run's accounting stays known. */
@@ -108,12 +108,12 @@ async function waitForRunDir(runDir: string): Promise<string> {
 }
 
 /**
- * One real `bin/pi-mcp` process: send one request, wait for its answer, then close
+ * One real server process: send one request, wait for its answer, then close
  * stdin. The channel stays open until the answer arrives, because stdin EOF is
  * DEC-103's abort trigger and an aborted call is answered with nothing.
  */
 async function oneShot(t: TestContext, env: Env, request: string): Promise<Record<string, any>> {
-  const child = spawnProcess(join(REPO_ROOT, 'bin', 'pi-mcp'), [], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawnProcess(...serverCommand, { env, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => child.kill('SIGKILL'));
   const out: string[] = [];
   const err: string[] = [];
@@ -773,7 +773,7 @@ test('two server processes on one session: the loser is refused session-busy and
   const rig = newRig(t, {
     read: [`printf '%s\\n' $$ >> "@MARKER@/pids"`, 'sleep 1.2', answer('stop'), SETTLED, 'exit 0'].join('\n'),
   });
-  const winner = spawnProcess(join(REPO_ROOT, 'bin', 'pi-mcp'), [], { env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const winner = spawnProcess(...serverCommand, { env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => winner.kill('SIGKILL'));
   const winnerOut: string[] = [];
   winner.stdout.setEncoding('utf8');

@@ -245,7 +245,7 @@ test('the tracked profile documents are not protected as a store: a write root c
   // nothing.
   assert.deepEqual(checkChildView(view(t, { root: REPO_ROOT, capability: 'write' })), { ok: true });
   // …and the case is not vacuous: the documents really are inside that root.
-  const documents = join(REPO_ROOT, 'pi', 'mcp', 'profiles');
+  const documents = join(REPO_ROOT, 'src', 'server', 'profiles');
   assert.equal(existsSync(documents), true);
   assert.equal(within(REPO_ROOT, documents), true);
 });

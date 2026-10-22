@@ -8,7 +8,7 @@
 // teardown that SIGKILLs the groups its stubs reported, so a stub that ignores
 // SIGTERM cannot be orphaned by a failed assertion.
 //
-// This file is not a suite: the runner glob is `pi/mcp/*.test.ts`, so it never
+// This file is not a suite: the runner glob is `src/**/*.test.ts`, so it never
 // runs on its own.
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,6 +21,9 @@ import type { ServeOptions } from './server.ts';
 import { attemptsPath } from './evidence.ts';
 
 export type Env = Record<string, string | undefined>;
+
+/** The server as a real process: the command and argv that start it on stdio. */
+export const serverCommand: [string, string[]] = [process.execPath, [new URL('./main.ts', import.meta.url).pathname]];
 
 export const line = (message: Record<string, unknown>): string => JSON.stringify({ jsonrpc: '2.0', ...message });
 export const callLine = (id: number | string, args: Record<string, unknown>): string =>

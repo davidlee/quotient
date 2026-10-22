@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# pi-run-reduce — shim for the TS reducer. No build step: node >= 22.6 strips
-# types (the devshell pins v24). Swap the interpreter here and nothing else moves.
-set -euo pipefail
-here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-exec node "$here/pi/reduce/cli.ts" "$@"

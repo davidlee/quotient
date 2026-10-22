@@ -35,6 +35,7 @@
 // Everything after the header is prose for a human and is not parsed.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { canonicalPath, within } from './paths.ts';
 
@@ -205,7 +206,7 @@ function parseDocument(
  * checkouts of the same documents share one digest.
  */
 export function loadProfiles(dir: string): SnapshotLoad {
-  let entries: ReturnType<typeof readdirSync>;
+  let entries: Dirent<string>[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch (error) {

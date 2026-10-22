@@ -115,7 +115,7 @@ export type RunOutcome = {
   /** Raw event records, in order, as the child wrote them. */
   lines: string[];
   /** The ladder's cause, when a trigger fired; null when the run ended itself. */
-  abort: Termination | null;
+  abort: AbortCause | null;
   /** The executable could not be launched: no process ever ran. */
   spawnFailed: boolean;
   /** An audit append failed at any point — before spawn or after. */
@@ -219,7 +219,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   const lines: string[] = [];
   const tally = createTally();
   let settled = false;
-  let abort: Termination | null = null;
+  let abort: AbortCause | null = null;
   let spawnFailed = false;
   let auditFailed = false;
   let auditFailedBeforeSpawn = false;
@@ -386,7 +386,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
    * last, one grace past the signal actually sent, so the drain never gives up
    * before the ladder has finished with the leader.
    */
-  const terminate = async (cause: Termination, crossing: Crossing | null = null): Promise<void> => {
+  const terminate = async (cause: AbortCause, crossing: Crossing | null = null): Promise<void> => {
     if (abort !== null) return;
     abort = cause;
     // Additive evidence, never a new cause: only a gate rung names a crossing, so
@@ -472,7 +472,10 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   await finished(events).catch(() => {});
   await finished(stderrLog).catch(() => {});
 
-  audit({ record: 'exit', code: exit?.code ?? null, signal: exit?.signal ?? null, settled, spawn_failed: spawnFailed });
+  // Read through outcome(): `exit` is assigned in the `exited` callback, which
+  // TypeScript's narrowing cannot see, so a direct read here types as `never`.
+  const { exitCode, signal } = outcome();
+  audit({ record: 'exit', code: exitCode, signal, settled, spawn_failed: spawnFailed });
 
   // The `exit` record is the last thing a trigger could usefully precede: from
   // here the run is over and a late trigger has no bound left to move.
@@ -540,7 +543,7 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
 
 /** Resolve true when `settled` finishes within `ms`, false when the grace runs
  *  out first. The timer is cleared either way. */
-function waitFor(done: Promise<void>, ms: number): Promise<boolean> {
+function waitFor(done: Promise<unknown>, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), ms);
     void done.then(() => {

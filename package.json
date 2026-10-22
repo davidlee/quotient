@@ -1,0 +1,17 @@
+{
+  "name": "@davidlee/quotient",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "quotient": "dist/cli.js" },
+  "files": ["dist", "help", "docs", "examples"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "tsc -p tsconfig.build.json",
+    "test": "node --test 'src/**/*.test.ts'"
+  },
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7"
+  }
+}

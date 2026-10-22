@@ -170,7 +170,9 @@ async function callers(context: Cleanup, helperPath: string, count: number): Pro
         }),
       ),
   );
-  context.after(() => Promise.all(forked.map(dispose)));
+  context.after(async () => {
+    await Promise.all(forked.map(dispose));
+  });
   await Promise.all(forked.map((caller) => caller.next()));
   return forked;
 }
@@ -427,7 +429,7 @@ test('two callers presented with one stale lock: exactly one reclaims under <loc
 
   assert.equal(answers.filter((answer) => answer.ok === true).length, 1, 'exactly one caller reclaims and proceeds');
   assert.equal(answers.filter((answer) => answer.ok === false).length, 1);
-  assert.equal(answers.find((answer) => answer.ok === false).reason, 'session-busy');
+  assert.equal(answers.find((answer) => answer.ok === false)!.reason, 'session-busy');
 
   const winnerIndex = answers.findIndex((answer) => answer.ok === true);
   // The successor record replaced the stale one in a single atomic rename over
