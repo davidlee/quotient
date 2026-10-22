@@ -13,6 +13,7 @@
 // incremental and ends at stdin EOF — no timer, no poll, no child.
 import { StringDecoder } from 'node:string_decoder';
 import { writeFileSync } from 'node:fs';
+import { addAbortSignal } from 'node:stream';
 import type { Readable, Writable } from 'node:stream';
 import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
@@ -572,6 +573,9 @@ export type ServeOptions = {
   /** The gate's idle poll; `DEFAULT_IDLE_MS` (design sec-4's "about a second")
    *  unless a test asks for less — no case may wait a second for a tick. */
   gateIdleMs?: number;
+  /** Shutdown: ends the input as EOF would. `src/cli.ts` aborts it on SIGTERM
+   *  and SIGINT (DEC-118). */
+  signal?: AbortSignal;
 };
 
 /**
@@ -589,7 +593,8 @@ function abortNamed(params: unknown, context: Context): void {
 }
 
 /**
- * Serve one client over `input`/`output` until stdin EOF. Takes its streams, its
+ * Serve one client over `input`/`output` until stdin EOF, a failed input or
+ * `options.signal`. Takes its streams, its
  * environment and its two deployment locations, so the protocol is driven
  * in-process by the tests; `src/cli.ts` wires the process's own.
  *
@@ -626,22 +631,31 @@ export async function serve(
   const decoder = new StringDecoder('utf8');
   let pending = '';
 
-  for await (const chunk of input) {
-    pending += typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer);
-    let newline = pending.indexOf('\n');
-    while (newline >= 0) {
-      let record = pending.slice(0, newline);
-      pending = pending.slice(newline + 1);
-      if (record.endsWith('\r')) record = record.slice(0, -1);
-      await handleLine(record, context);
-      newline = pending.indexOf('\n');
+  // The signal destroys the input, so the loop below ends with an AbortError
+  // rather than by a second exit beside it.
+  if (options.signal) addAbortSignal(options.signal, input);
+  try {
+    for await (const chunk of input) {
+      pending += typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer);
+      let newline = pending.indexOf('\n');
+      while (newline >= 0) {
+        let record = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        if (record.endsWith('\r')) record = record.slice(0, -1);
+        await handleLine(record, context);
+        newline = pending.indexOf('\n');
+      }
     }
+  } catch (error) {
+    // A failed input is the client gone, as EOF is; the signal's AbortError is
+    // the operator's shutdown and needs no note.
+    if (!options.signal?.aborted) diagnostics.write(`quotient: the input failed: ${(error as Error).message}\n`);
   }
-  // EOF ends the loop. A trailing fragment without LF is not a record: JSONL
-  // framing terminates every record with one.
+  // EOF, a failed input or the signal ends the loop. A trailing fragment without
+  // LF is not a record: JSONL framing terminates every record with one.
   //
-  // EOF is DEC-103's second trigger and a different act from a cancellation: the
-  // client is gone. Stop admitting, abort every in-flight run through the same
+  // All three are DEC-103's second trigger, a different act from a cancellation:
+  // the client is gone. Stop admitting, abort every in-flight run through the same
   // ladder, wait for their cleanup and audit flush, and return — no result is
   // written down the closed channel, and no child outlives the server.
   context.closed = true;

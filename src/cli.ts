@@ -31,12 +31,24 @@ function help(section: string | undefined): number {
   return 0;
 }
 
+/** SIGTERM and SIGINT shut the server down the way stdin EOF does (DEC-118), so
+ *  a client's timeout cannot orphan a child group. Each is handled once: a second
+ *  signal takes the default action, the operator's way out of a stuck shutdown. */
+function shutdownSignal(): AbortSignal {
+  const shutdown = new AbortController();
+  for (const name of ['SIGTERM', 'SIGINT'] as const) process.once(name, () => shutdown.abort(name));
+  return shutdown.signal;
+}
+
 async function run(argv: string[]): Promise<number> {
   const [verb, ...rest] = argv;
   switch (verb) {
     case undefined:
       if (process.stdin.isTTY) process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client\n');
-      await serve(process.stdin, process.stdout, process.env, process.stderr, { launchDir: process.cwd() });
+      await serve(process.stdin, process.stdout, process.env, process.stderr, {
+        launchDir: process.cwd(),
+        signal: shutdownSignal(),
+      });
       return 0;
     case 'reduce':
       return reduce(rest);

@@ -22,6 +22,8 @@ import type { Profile } from './profiles.ts';
 import {
   callLine,
   closeServer,
+  onlyRunDir,
+  runDirs,
   emit,
   isAlive,
   jsonLines,
@@ -85,19 +87,6 @@ function planFor(rig: Rig, overrides: Partial<SpawnPlan> = {}): SpawnPlan {
 
 /** A signal that never fires: the run must end itself. */
 const noAbort = (): AbortController => new AbortController();
-
-/** Every `run-*` directory under a run dir, in directory order. */
-function runDirs(runDir: string): string[] {
-  if (!existsSync(runDir)) return [];
-  return readdirSync(runDir).filter((name) => name.startsWith('run-'));
-}
-
-/** The one run directory under a run dir, once the run has allocated it. */
-function onlyRunDir(runDir: string): string {
-  const runs = runDirs(runDir);
-  assert.equal(runs.length, 1, `expected exactly one run directory, saw ${runs.join(', ')}`);
-  return join(runDir, runs[0]);
-}
 
 /** The one run directory's path, waiting for the run to allocate it. */
 async function waitForRunDir(runDir: string): Promise<string> {

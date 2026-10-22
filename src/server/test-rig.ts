@@ -246,6 +246,19 @@ export function newRig(
   return rig;
 }
 
+/** Every `run-*` directory under a run dir, in directory order. */
+export function runDirs(runDir: string): string[] {
+  if (!existsSync(runDir)) return [];
+  return readdirSync(runDir).filter((name) => name.startsWith('run-'));
+}
+
+/** The one run directory under a run dir, once the run has allocated it. */
+export function onlyRunDir(runDir: string): string {
+  const runs = runDirs(runDir);
+  assert.equal(runs.length, 1, `expected exactly one run directory, saw ${runs.join(', ')}`);
+  return join(runDir, runs[0]);
+}
+
 export function readText(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 }
@@ -305,6 +318,8 @@ export type LiveServer = {
   /** Raw bytes, exactly as given: for framing cases. */
   send: (bytes: string) => void;
   end: () => void;
+  /** The input fails, as a broken stdin pipe would. */
+  fail: (error: Error) => void;
   done: Promise<void>;
   stderr: () => string;
 };
@@ -342,6 +357,7 @@ export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
     write: (record) => input.write(`${record}\n`),
     send: (bytes) => input.write(bytes),
     end: () => input.end(),
+    fail: (error) => input.destroy(error),
     done,
     stderr: () => err.join(''),
   };

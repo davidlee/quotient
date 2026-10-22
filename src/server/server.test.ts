@@ -2,21 +2,37 @@
 // for the pi-agent-result/1 payload every tools/call answers with.
 //
 // In-process: `serve(input, output, env)` takes streams, so the protocol is
-// driven without a child. One real subprocess test proves the bin starts,
-// answers `initialize`, and exits 0 on stdin EOF.
+// driven without a child. Real subprocess tests prove the bin starts, answers
+// `initialize`, exits 0 on stdin EOF, and shuts down on SIGTERM.
 //
 // Hermetic: every test mints its own temp tree; the ambient environment is
-// never read and nothing is spawned except the shim itself.
+// never read and nothing is spawned except the server and the rig's stubs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
 import { packageVersion } from '../root.ts';
-import { attempts, converse, jsonLines, line, serverCommand, validPolicy, workspace, xdgProfileLayer } from './test-rig.ts';
-import type { Env } from './test-rig.ts';
+import {
+  attempts,
+  callLine,
+  converse,
+  isAlive,
+  jsonLines,
+  line,
+  markerPids,
+  newRig,
+  onlyRunDir,
+  serveRig,
+  serverCommand,
+  validPolicy,
+  waitForPath,
+  workspace,
+  xdgProfileLayer,
+} from './test-rig.ts';
+import type { Env, Rig } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
 
@@ -144,6 +160,83 @@ test('the server process starts, answers initialize and exits 0 on stdin EOF', (
   assert.equal(replies[0].result.protocolVersion, '2025-06-18');
 });
 
+// ── Shutdown: EOF, the AbortSignal and the process's signals (DEC-118) ──────
+
+/** A stub that reports its pid, ignores SIGTERM and sleeps: only the group
+ *  SIGKILL at the end of the ladder ends it. */
+const STUBBORN = ['printf \'%s\\n\' $$ > "@MARKER@/pid"', "trap '' TERM", 'sleep 60'].join('\n');
+
+/** The shutdown path's evidence: the stub is gone, and its run audited an abort
+ *  with cause eof followed by the group SIGKILL's exit. */
+function assertShutDown(rig: Rig, pid: number): void {
+  assert.equal(isAlive(pid), false, 'the run was aborted, not left behind');
+  const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
+  assert.deepEqual(
+    records.map((record) => record.record),
+    ['spawn', 'abort', 'exit'],
+  );
+  assert.equal(records[1].cause, 'eof');
+  assert.equal(records[2].signal, 'SIGKILL');
+}
+
+test('the AbortSignal runs the stdin-EOF shutdown path: abort in flight with cause eof, await the ladder, return', async (t) => {
+  const rig = newRig(t, { read: STUBBORN });
+  const shutdown = new AbortController();
+  const server = serveRig(rig, { graceMs: 200, signal: shutdown.signal });
+  server.write(callLine(61, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
+  const [pid] = markerPids(rig);
+
+  // The input stays open: only the signal ends the server.
+  shutdown.abort();
+  await server.done;
+
+  assert.deepEqual(server.replies(), [], 'no result is written once shutdown begins');
+  assertShutDown(rig, pid);
+});
+
+test('a failed input stream takes the same shutdown path as EOF', async (t) => {
+  const rig = newRig(t, { read: STUBBORN });
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(62, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
+  const [pid] = markerPids(rig);
+
+  server.fail(new Error('EPIPE'));
+  await server.done;
+
+  assert.deepEqual(server.replies(), []);
+  assert.match(server.stderr(), /^quotient: the input failed: EPIPE$/m);
+  assertShutDown(rig, pid);
+});
+
+test('a signal aborted before serve starts admits nothing', async (t) => {
+  const rig = newRig(t, { read: STUBBORN });
+  const server = serveRig(rig, { signal: AbortSignal.abort() });
+  server.write(callLine(63, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  await server.done;
+
+  assert.deepEqual(server.replies(), []);
+  assert.deepEqual(readdirSync(rig.markerDir), [], 'no launcher ran');
+});
+
+test('SIGTERM to the server process shuts down through the same path and exits 0', async (t) => {
+  const rig = newRig(t, { read: STUBBORN });
+  const server = spawn(...serverCommand, { cwd: rig.launchDir, env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const stderr: string[] = [];
+  server.stderr.on('data', (chunk: Buffer) => stderr.push(String(chunk)));
+  const exited = new Promise<number | null>((resolve) => server.once('exit', (code) => resolve(code)));
+  t.after(() => server.kill('SIGKILL'));
+
+  server.stdin.write(`${callLine(64, { prompt: 'work', profile: 'read', cwd: rig.root })}\n`);
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
+  const [pid] = markerPids(rig);
+
+  server.kill('SIGTERM');
+  assert.equal(await exited, 0, stderr.join(''));
+  assertShutDown(rig, pid);
+});
+
 // ── A malformed request is a tool result, never a JSON-RPC error (EX-2) ─────
 
 test('a malformed params object is refused request-invalid, naming the field', async () => {
@@ -229,9 +322,7 @@ test('a launch form that cannot be executed reports failed with termination spaw
   assert.deepEqual(doc.refusal, null);
   // The run directory exists — step 8 passed — so the outcome is the run's audit,
   // not a ledger line: `spawn` before the launch and `exit` with no code.
-  const runs = readdirSync(runDir).filter((name) => name.startsWith('run-'));
-  assert.equal(runs.length, 1);
-  const audit = jsonLines(join(runDir, runs[0], 'audit.jsonl'));
+  const audit = jsonLines(join(onlyRunDir(runDir), 'audit.jsonl'));
   assert.deepEqual(audit.map((line) => line.record), ['spawn', 'exit']);
   assert.match(String(audit[0].policy_digest), /^[0-9a-f]{64}$/);
   assert.match(String(audit[0].profile_digest), /^[0-9a-f]{64}$/);
