@@ -19,7 +19,9 @@ import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
 import { createLatch, failedResult, refusedResult, resultFor } from './result.ts';
 import type { AgentResult } from './result.ts';
-import { admitCall, clampCeilings, knownRunDir, selectForm, transcriptBudget } from './policy.ts';
+import { admitCall, clampCeilings, selectForm, transcriptBudget } from './policy.ts';
+import { resolveLocations, usable } from '../config.ts';
+import type { Locations } from '../config.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
 import type { SnapshotLoad } from './profiles.ts';
 import { acquireSession } from './session.ts';
@@ -111,6 +113,9 @@ type Context = {
   profiles: SnapshotLoad;
   /** What an absent `cwd` resolves to, through the same allowlist as any root. */
   launchDir: string;
+  /** Where the policy, evidence and sessions are: resolved once, from the launch
+   *  environment and launch dir, which are fixed for the process lifetime. */
+  locations: Locations;
   /** `tools/call` is the only method that overlaps the reader (design sec-4); a
    *  cancellation names one of these by its request id. The id is the client's to
    *  repeat, so one key holds every call running under it: the invariant is that
@@ -246,7 +251,7 @@ function toolResult(document: AgentResult): ToolResult {
 
 /** Record a refusal at the request boundary: the ledger's other writer. */
 function refused(context: Context, callId: CallId, reason: string, detail: string): ToolResult {
-  appendAttempt(knownRunDir(context.env), { callId, reason, detail });
+  appendAttempt(usable(context.locations.runDir), { callId, reason, detail });
   return toolResult(refusedResult(reason, detail));
 }
 
@@ -279,7 +284,7 @@ async function callTool(
   if (!parsed.ok) return refused(context, id, 'request-invalid', parsed.detail);
   const request = parsed.request;
 
-  const admission = admitCall(context.env, id);
+  const admission = admitCall(context.locations, id);
   if (!admission.ok) return toolResult(refusedResult(admission.reason, admission.detail));
 
   const refuse = (reason: string, detail: string): ToolResult => {
@@ -593,7 +598,7 @@ function abortNamed(params: unknown, context: Context): void {
 /**
  * Serve one client over `input`/`output` until stdin EOF. Takes its streams, its
  * environment and its two deployment locations, so the protocol is driven
- * in-process by the tests; `main.ts` wires the process's own.
+ * in-process by the tests; `src/cli.ts` wires the process's own.
  *
  * The profile directory is read once, here, before the first line: one snapshot
  * for the process lifetime, so an edit on disk is inert until a restart (EX-1).
@@ -611,12 +616,14 @@ export async function serve(
     // operator needs to know which document to fix (EX-2).
     diagnostics.write(`quotient: the profile snapshot did not load: ${profiles.path}: ${profiles.detail}\n`);
   }
+  const launchDir = options.launchDir ?? process.cwd();
   const context: Context = {
     output,
     diagnostics,
     env,
     profiles,
-    launchDir: options.launchDir ?? process.cwd(),
+    launchDir,
+    locations: resolveLocations(env, launchDir),
     inFlight: new Map(),
     closed: false,
     graceMs: options.graceMs ?? DEFAULT_GRACE_MS,

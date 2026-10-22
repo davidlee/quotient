@@ -44,7 +44,7 @@ export type AttemptRecord = {
   reclaim?: ReclaimRecord;
 };
 
-/** The server-level attempts ledger, under the operator's `PI_MCP_RUN_DIR`. */
+/** The server-level attempts ledger, under the operator's `QUOTIENT_RUN_DIR`. */
 export function attemptsPath(runDir: string): string {
   return join(runDir, 'attempts.jsonl');
 }
@@ -64,7 +64,7 @@ export const RUN_EVIDENCE_FILES = {
 
 /** One run's evidence: its own directory and the five files inside it. */
 export type RunLayout = {
-  /** The run's directory, exactly one level under `PI_MCP_RUN_DIR`. */
+  /** The run's directory, exactly one level under `QUOTIENT_RUN_DIR`. */
   dir: string;
   events: string;
   stderr: string;
@@ -111,7 +111,7 @@ export function runLayout(runDir: string, callId: CallId): RunLayout {
  * check refuses a child view that reaches either (design sec-3).
  */
 export type EvidenceStores = {
-  /** `PI_MCP_RUN_DIR` itself. */
+  /** `QUOTIENT_RUN_DIR` itself. */
   runDir: string;
   /** `attemptsPath(runDir)` — the same ledger, named once. */
   attempts: string;
@@ -130,7 +130,7 @@ export function evidenceStores(runDir: string): EvidenceStores {
  */
 export function appendAttempt(runDir: string | null, attempt: AttemptRecord): boolean {
   if (runDir === null) {
-    process.stderr.write(`quotient: not recording ${attempt.reason}: no absolute PI_MCP_RUN_DIR\n`);
+    process.stderr.write(`quotient: not recording ${attempt.reason}: no usable run dir\n`);
     return false;
   }
   const line: Record<string, unknown> = {

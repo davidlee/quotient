@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
@@ -185,6 +185,19 @@ test('a request-invalid refusal reaches attempts.jsonl with the call id', async 
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'request-invalid');
   assert.equal(lines[0].call_id, 42);
+});
+
+test('with every QUOTIENT_* unset, request-boundary and admission refusals both land in attempts.jsonl under the XDG run dir', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'quotient-xdg-'));
+  const env: Env = { XDG_CONFIG_HOME: join(base, 'config'), XDG_STATE_HOME: join(base, 'state') };
+  mkdirSync(join(base, 'config', 'quotient'), { recursive: true });
+  writeFileSync(join(base, 'config', 'quotient', 'policy.json'), '{ not json');
+
+  await call(callTool({ prompt: 'hi', profile: 'read', speed: 'fast' }), env);
+  await call(callTool({ prompt: 'hi', profile: 'read' }), env);
+
+  const lines = attempts(join(base, 'state', 'quotient', 'runs'));
+  assert.deepEqual(lines.map((l) => l.reason), ['request-invalid', 'policy-invalid']);
 });
 
 // ── The run seam (EX-2: a failure is `failed`, never a JSON-RPC error) ─────

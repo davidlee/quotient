@@ -23,9 +23,9 @@ const REPO_ROOT = realpathSync(new URL('../..', import.meta.url).pathname);
 type Tree = {
   /** The operator's state directory: the run dir, the session home and the policy. */
   state: string;
-  /** `PI_MCP_RUN_DIR`. */
+  /** `QUOTIENT_RUN_DIR`. */
   runDir: string;
-  /** `PI_MCP_SESSION_HOME`. */
+  /** `QUOTIENT_SESSION_HOME`. */
   sessionHome: string;
   policyPath: string;
   /** The active session directory, as step 7 would lay it out (not created). */
@@ -355,9 +355,9 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
     }),
   );
   const env = {
-    PI_MCP_POLICY: policyPath,
-    PI_MCP_RUN_DIR: t.runDir,
-    PI_MCP_SESSION_HOME: t.sessionHome,
+    QUOTIENT_POLICY: policyPath,
+    QUOTIENT_RUN_DIR: t.runDir,
+    QUOTIENT_SESSION_HOME: t.sessionHome,
   };
 
   for (const profile of ['read', 'write']) {

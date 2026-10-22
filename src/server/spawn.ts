@@ -41,8 +41,8 @@ import type { Termination } from './result.ts';
 export const DEFAULT_GRACE_MS = 2000;
 
 /** Every variable the server's own launch environment carries is named here and
- *  nowhere reaches a child: a `PI_MCP_*` value is the server's configuration. */
-const SERVER_VAR_PREFIX = 'PI_MCP_';
+ *  nowhere reaches a child: a `QUOTIENT_*` value is the server's configuration. */
+const SERVER_VAR_PREFIX = 'QUOTIENT_';
 
 /**
  * The causes a trigger may abort a run with. They ride `AbortSignal.reason`, so a
@@ -68,11 +68,11 @@ export type SpawnPlan = {
   form: Form;
   profile: Profile;
   session: string;
-  /** `<PI_MCP_SESSION_HOME>/<session>` — the form's one positional argument. */
+  /** `<QUOTIENT_SESSION_HOME>/<session>` — the form's one positional argument. */
   sessionDir: string;
   /** The canonical root: the child's cwd, and the directory it works in. */
   root: string;
-  /** `PI_MCP_RUN_DIR`; this run's directory is allocated under it (EX-6). */
+  /** `QUOTIENT_RUN_DIR`; this run's directory is allocated under it (EX-6). */
   runDir: string;
   /** The JSON-RPC id of the call, for the run directory's name. */
   callId: CallId;
@@ -170,8 +170,8 @@ export function buildArgv(plan: {
 }
 
 /**
- * The child's environment: the server's, minus every `PI_MCP_*` variable and minus
- * any whose value names `PI_MCP_RUN_DIR` or one of this run's evidence files, so
+ * The child's environment: the server's, minus every `QUOTIENT_*` variable and minus
+ * any whose value names `QUOTIENT_RUN_DIR` or one of this run's evidence files, so
  * no environment member hands the run's evidence to the child (EX-5). PATH and the
  * provider/gateway variables stay: the launch closure and the model call need
  * them. No extra file descriptor is passed either — the child's table is exactly

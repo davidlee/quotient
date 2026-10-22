@@ -13,21 +13,20 @@ here. The tracked profiles are documented in `pi/mcp/profiles/` (`read.md`,
 
 ## Launch environment
 
-The server has exactly three configuration inputs, all read from the process
-environment:
+The server locates its three inputs from the process environment, falling back
+to XDG (`src/config.ts`):
 
-| variable | holds |
-|---|---|
-| `PI_MCP_POLICY` | absolute path of the policy file |
-| `PI_MCP_RUN_DIR` | absolute path of the run/evidence directory |
-| `PI_MCP_SESSION_HOME` | absolute path of the session home |
+| variable | holds | default when unset |
+|---|---|---|
+| `QUOTIENT_POLICY` | absolute path of the policy file | `<xdgConfig>/quotient/policy.json` |
+| `QUOTIENT_RUN_DIR` | absolute path of the run/evidence directory | `<xdgState>/quotient/runs` |
+| `QUOTIENT_SESSION_HOME` | absolute path of the session home | `<xdgState>/quotient/sessions` |
 
-Each value must be absolute. These three variables are the server's whole
-configuration surface: `src/cli.ts` hands the process environment to `serve`, and
-the server reads no argv and discovers no config file. A missing, empty or
-relative `PI_MCP_POLICY`, `PI_MCP_RUN_DIR` or `PI_MCP_SESSION_HOME` refuses the
-call `policy-unavailable` before the policy is read (`admitCall` in
-`policy.ts`). Nothing is defaulted from the caller's working directory.
+`<xdgConfig>` is `$XDG_CONFIG_HOME` when absolute, else `$HOME/.config`;
+`<xdgState>` likewise with `.local/state`. Only an unset variable falls through:
+a set but empty or relative value, or no usable XDG base, refuses the call
+`policy-unavailable` before the policy is read (`admitCall` in `policy.ts`). The
+policy is never looked up in the caller's working directory.
 
 ## Policy fields
 

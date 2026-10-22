@@ -25,7 +25,7 @@ const SESSION_MODULE = new URL('./session.ts', import.meta.url).href;
 // the one-shot cases. It says `ready` before it is told what to do, and reports
 // one JSON message per step, so no assertion rests on a sleep.
 const HELPER_SOURCE = `
-const { acquireSession } = await import(process.env.PI_MCP_SESSION_MODULE);
+const { acquireSession } = await import(process.env.QUOTIENT_SESSION_MODULE);
 
 function describe(acquisition) {
   if (acquisition.ok) return { ok: true, session: acquisition.session, sessionDir: acquisition.sessionDir };
@@ -34,7 +34,7 @@ function describe(acquisition) {
 
 // One-shot mode: spawnSync a caller, read one line, exit.
 if (typeof process.send !== 'function') {
-  const acquisition = acquireSession(JSON.parse(process.env.PI_MCP_SESSION_CALL));
+  const acquisition = acquireSession(JSON.parse(process.env.QUOTIENT_SESSION_CALL));
   process.stdout.write(JSON.stringify(describe(acquisition)) + '\\n');
   if (acquisition.ok) acquisition.release();
   process.exit(0);
@@ -165,7 +165,7 @@ async function callers(context: Cleanup, helperPath: string, count: number): Pro
     () =>
       new Caller(
         fork(helperPath, [], {
-          env: { ...process.env, PI_MCP_SESSION_MODULE: SESSION_MODULE },
+          env: { ...process.env, QUOTIENT_SESSION_MODULE: SESSION_MODULE },
           stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
         }),
       ),
@@ -296,8 +296,8 @@ test('a second caller is refused session-busy while the first holds the lock (EX
   const child = spawnSync(process.execPath, [helperPath], {
     env: {
       ...process.env,
-      PI_MCP_SESSION_MODULE: SESSION_MODULE,
-      PI_MCP_SESSION_CALL: JSON.stringify({
+      QUOTIENT_SESSION_MODULE: SESSION_MODULE,
+      QUOTIENT_SESSION_CALL: JSON.stringify({
         sessionHome: home,
         runDir,
         session: 'oneshot',

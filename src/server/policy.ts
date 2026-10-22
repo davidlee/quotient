@@ -12,14 +12,13 @@
 // refused. Nothing is defaulted from the caller's working directory.
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { usable } from '../config.ts';
+import type { Locations } from '../config.ts';
 import { appendAttempt, sha256Hex } from './evidence.ts';
 import type { CallId } from './evidence.ts';
 import { MCP_EXTENSION } from './profiles.ts';
 import type { Filesystem } from './profiles.ts';
 
-export const POLICY_VAR = 'PI_MCP_POLICY';
-export const RUN_DIR_VAR = 'PI_MCP_RUN_DIR';
-export const SESSION_HOME_VAR = 'PI_MCP_SESSION_HOME';
 
 /** The only posture this build serves (design sec-1). */
 export type PolicyMode = 'per-call';
@@ -75,22 +74,6 @@ export type Admission =
       sessionHome: string;
     }
   | { ok: false; reason: RefusalReason; detail: string; digest: string | null };
-
-/** An absolute launch-env value, or null when unset, empty or relative. */
-function absoluteVar(env: Record<string, string | undefined>, name: string): string | null {
-  const value = env[name];
-  if (typeof value !== 'string' || value.length === 0 || !isAbsolute(value)) return null;
-  return value;
-}
-
-/**
- * Where evidence would go, when the operator set a usable run dir. Used by the
- * request-boundary refusal, which precedes the environment check, so a broken
- * request can still be recorded when the evidence path itself is sound.
- */
-export function knownRunDir(env: Record<string, string | undefined>): string | null {
-  return absoluteVar(env, RUN_DIR_VAR);
-}
 
 export const REQUIRED_FIELDS: readonly string[] = ['mode', 'roots', 'maxima', 'profiles', 'forms', 'child_binds', 'enabled'];
 export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
@@ -364,7 +347,7 @@ export function transcriptBudget(requested?: number, policyMax?: number): number
 /**
  * Steps 1-2 for one call, in order, first failure wins:
  *
- *   1. the launch environment (absent/relative -> `policy-unavailable`) and the
+ *   1. the resolved locations (unusable -> `policy-unavailable`) and the
  *      artefact (unreadable -> `policy-unavailable`, unparsable or schema-invalid
  *      -> `policy-invalid`, a mode or static-only field this build does not serve
  *      -> `posture-unsupported`);
@@ -374,26 +357,18 @@ export function transcriptBudget(requested?: number, policyMax?: number): number
  * is its sink (design sec-6). The caller's verdict is returned unchanged even
  * when the ledger cannot be written.
  */
-export function admitCall(env: Record<string, string | undefined>, callId: CallId): Admission {
-  const runDir = knownRunDir(env);
+export function admitCall(locations: Locations, callId: CallId): Admission {
+  const { policyPath, runDir, sessionHome } = locations;
   const refuse = (reason: RefusalReason, detail: string, digest: string | null = null): Admission => {
-    appendAttempt(runDir, { callId, reason, detail, policyDigest: digest });
+    appendAttempt(usable(runDir), { callId, reason, detail, policyDigest: digest });
     return { ok: false, reason, detail, digest };
   };
 
-  const policyPath = absoluteVar(env, POLICY_VAR);
-  if (policyPath === null) {
-    return refuse('policy-unavailable', `${POLICY_VAR} is unset or not an absolute path`);
-  }
-  if (runDir === null) {
-    return refuse('policy-unavailable', `${RUN_DIR_VAR} is unset or not an absolute path`);
-  }
-  const sessionHome = absoluteVar(env, SESSION_HOME_VAR);
-  if (sessionHome === null) {
-    return refuse('policy-unavailable', `${SESSION_HOME_VAR} is unset or not an absolute path`);
-  }
+  if (!policyPath.ok) return refuse('policy-unavailable', policyPath.detail);
+  if (!runDir.ok) return refuse('policy-unavailable', runDir.detail);
+  if (!sessionHome.ok) return refuse('policy-unavailable', sessionHome.detail);
 
-  const loaded = readPolicy(policyPath);
+  const loaded = readPolicy(policyPath.path);
   if (!loaded.ok) return refuse(loaded.reason, loaded.detail, loaded.digest);
 
   // The posture is fixed for the process lifetime (EX-11), and the mechanism is
@@ -412,8 +387,8 @@ export function admitCall(env: Record<string, string | undefined>, callId: CallI
     ok: true,
     policy: loaded.policy,
     digest: loaded.digest,
-    policyPath,
-    runDir,
-    sessionHome,
+    policyPath: policyPath.path,
+    runDir: runDir.path,
+    sessionHome: sessionHome.path,
   };
 }

@@ -19,8 +19,16 @@ import { join } from 'node:path';
 import { serve } from './server.ts';
 import type { ServeOptions } from './server.ts';
 import { attemptsPath } from './evidence.ts';
+import { admitCall } from './policy.ts';
+import type { Admission } from './policy.ts';
+import type { CallId } from './evidence.ts';
+import { resolveLocations } from '../config.ts';
 
 export type Env = Record<string, string | undefined>;
+
+/** Steps 1-2 for an environment, as the server resolves it from a launch dir. */
+export const admit = (env: Env, callId: CallId, launchDir = '/launch'): Admission =>
+  admitCall(resolveLocations(env, launchDir), callId);
 
 /** The server as a real process: the bare bin, which serves MCP on stdio. */
 export const serverCommand: [string, string[]] = [process.execPath, [new URL('../cli.ts', import.meta.url).pathname]];
@@ -58,9 +66,9 @@ export function validPolicy(overrides: Record<string, unknown> = {}): Record<str
 /** The three launch-env paths a temp tree holds, named as the server reads them. */
 export function launchEnv(dir: string): Env {
   return {
-    PI_MCP_POLICY: join(dir, 'policy.json'),
-    PI_MCP_RUN_DIR: join(dir, 'run'),
-    PI_MCP_SESSION_HOME: join(dir, 'sessions'),
+    QUOTIENT_POLICY: join(dir, 'policy.json'),
+    QUOTIENT_RUN_DIR: join(dir, 'run'),
+    QUOTIENT_SESSION_HOME: join(dir, 'sessions'),
   };
 }
 

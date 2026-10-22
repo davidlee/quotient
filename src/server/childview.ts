@@ -59,12 +59,12 @@ export type ChildViewInput = {
   /** The call's canonical root (step 4). */
   root: string;
   capability: Filesystem;
-  /** `<PI_MCP_SESSION_HOME>/<session>` — the one directory a child is given. */
+  /** `<QUOTIENT_SESSION_HOME>/<session>` — the one directory a child is given. */
   sessionDir: string;
   /** The policy's fixed child mounts. */
   childBinds: readonly string[];
   sessionHome: string;
-  /** `PI_MCP_RUN_DIR`. */
+  /** `QUOTIENT_RUN_DIR`. */
   runDir: string;
   policyPath: string;
 };

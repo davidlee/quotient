@@ -2,7 +2,7 @@
 // (design sec-2 step 7, sec-6 "Sessions (DEC-099, amended)").
 //
 // A stdio MCP server is per client, so two drivers run two servers over one
-// `PI_MCP_SESSION_HOME`. Ownership therefore cannot be an in-memory map: it is
+// `QUOTIENT_SESSION_HOME`. Ownership therefore cannot be an in-memory map: it is
 // exactly one `O_EXCL` create of `<home>/sessions/<id>.lock`, and only the process
 // that wins that create may use the session.
 //
@@ -66,7 +66,7 @@ export type Diagnostics = { write: (text: string) => void };
 
 /** The paths one session's state occupies. */
 export type SessionPaths = {
-  /** `PI_MCP_SESSION_HOME`. */
+  /** `QUOTIENT_SESSION_HOME`. */
   home: string;
   /** `<home>/sessions` — lock, binding and claim, outside every child bind. */
   sessions: string;
@@ -104,7 +104,7 @@ export type OwnershipRecord = {
 };
 
 export type AcquireOptions = {
-  /** `PI_MCP_SESSION_HOME`, absolute (`admission.sessionHome`). */
+  /** `QUOTIENT_SESSION_HOME`, absolute (`admission.sessionHome`). */
   sessionHome: string;
   /** The `attempts.jsonl` directory; null when the operator declared none. */
   runDir: string | null;

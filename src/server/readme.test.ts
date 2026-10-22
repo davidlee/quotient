@@ -13,13 +13,11 @@ import {
   FORM_FIELDS,
   MAXIMA_FIELDS,
   OPTIONAL_FIELDS,
-  POLICY_VAR,
   REQUIRED_FIELDS,
-  RUN_DIR_VAR,
-  SESSION_HOME_VAR,
   STATIC_ONLY_FIELDS,
   readPolicy,
 } from './policy.ts';
+import { POLICY_VAR, RUN_DIR_VAR, SESSION_HOME_VAR } from '../config.ts';
 import { RESULT_REFUSAL_REASONS } from './result.ts';
 import { readText, workspace } from './test-rig.ts';
 

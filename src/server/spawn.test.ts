@@ -430,7 +430,7 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
 
 // ── EX-5 / VT-4: non-exposure ──────────────────────────────────────────────
 
-test('the child inherits no fd, environment variable or argv member naming PI_MCP_RUN_DIR or the run\'s evidence files', async (t) => {
+test('the child inherits no fd, environment variable or argv member naming QUOTIENT_RUN_DIR or the run\'s evidence files', async (t) => {
   const rig = newRig(t, {
     read: [
       'printf \'%s\\n\' $$ > "@MARKER@/pid"',
@@ -445,7 +445,7 @@ test('the child inherits no fd, environment variable or argv member naming PI_MC
     ].join('\n'),
   });
   const layout: RunLayout = runLayout(rig.runDir, 1);
-  // The child's environment is the server's minus every PI_MCP_* variable and
+  // The child's environment is the server's minus every QUOTIENT_* variable and
   // minus any whose value names the run dir or one of its files; PATH and the
   // provider variables are kept.
   const env: Env = {
@@ -453,13 +453,13 @@ test('the child inherits no fd, environment variable or argv member naming PI_MC
     LLM_GATEWAY_KEY: 'gateway-token',
     LEAK_RUN_DIR: rig.runDir,
     LEAK_EVIDENCE_FILE: layout.audit,
-    PI_MCP_EXTRA: 'server-only',
+    QUOTIENT_EXTRA: 'server-only',
   };
   const outcome = await runChild(planFor(rig, { layout }), { signal: noAbort().signal, env });
   assert.equal(outcome.exitCode, 0);
 
   const childEnvDump = readText(join(rig.markerDir, 'env'));
-  assert.ok(!childEnvDump.includes('PI_MCP_'), 'no PI_MCP_* variable reaches the child');
+  assert.ok(!childEnvDump.includes('QUOTIENT_'), 'no QUOTIENT_* variable reaches the child');
   assert.ok(!childEnvDump.includes(rig.runDir), 'no variable names the run directory');
   assert.ok(!childEnvDump.includes(layout.dir), 'no variable names the run\'s evidence directory');
   assert.ok(!childEnvDump.includes('LEAK_'), 'the variables that named the evidence are dropped');
@@ -482,7 +482,7 @@ test('the child inherits no fd, environment variable or argv member naming PI_MC
 
   // The derivation itself, so the rule is not only observed through a stub.
   const derived = childEnv(env, rig.runDir, layout);
-  assert.equal(derived.PI_MCP_RUN_DIR, undefined);
+  assert.equal(derived.QUOTIENT_RUN_DIR, undefined);
   assert.equal(derived.LEAK_RUN_DIR, undefined);
   assert.equal(derived.LEAK_EVIDENCE_FILE, undefined);
   assert.equal(derived.LLM_GATEWAY_KEY, 'gateway-token');

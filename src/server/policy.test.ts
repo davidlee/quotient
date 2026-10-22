@@ -3,15 +3,15 @@
 // build serves, the enable gate, and the attempts ledger every refusal reaches.
 //
 // Hermetic: each test mints its own temp tree and passes an environment object
-// to `admitCall`; the ambient process environment is never read.
+// to `admit` (`admitCall` over the resolved locations); the ambient process environment is never read.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { admitCall, clampCeilings, selectForm, transcriptBudget } from './policy.ts';
+import { clampCeilings, selectForm, transcriptBudget } from './policy.ts';
 import type { Admission } from './policy.ts';
 import { sha256Hex } from './evidence.ts';
-import { attempts, validPolicy, workspace } from './test-rig.ts';
+import { admit, attempts, validPolicy, workspace } from './test-rig.ts';
 import type { Env } from './test-rig.ts';
 
 function refuse(verdict: Admission, reason: string, detail: RegExp): void {
@@ -24,7 +24,7 @@ function refuse(verdict: Admission, reason: string, detail: RegExp): void {
 
 test('a policy declared by the launch environment is admitted', () => {
   const ws = workspace(validPolicy());
-  const verdict = admitCall(ws.env, 1);
+  const verdict = admit(ws.env, 1);
   if (!verdict.ok) assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);
   assert.equal(verdict.policy.mode, 'per-call');
   assert.equal(verdict.policy.roots.length, 1);
@@ -32,46 +32,24 @@ test('a policy declared by the launch environment is admitted', () => {
   assert.equal(verdict.runDir, ws.runDir);
 });
 
-test('an unset PI_MCP_POLICY refuses policy-unavailable, naming the variable', () => {
+// Where each location comes from is config.test.ts's; here, that any unusable
+// one refuses before the policy is read, with the resolver's detail.
+test('an unusable location refuses policy-unavailable, naming the variable: unset with no XDG base, or relative', () => {
   const ws = workspace(validPolicy());
-  const env: Env = { ...ws.env };
-  delete env.PI_MCP_POLICY;
-  refuse(admitCall(env, 1), 'policy-unavailable', /PI_MCP_POLICY/);
-});
-
-test('a relative PI_MCP_RUN_DIR is refused as policy-unavailable: an absolute path is required, never a cwd default', () => {
-  const ws = workspace(validPolicy());
-  refuse(
-    admitCall({ ...ws.env, PI_MCP_RUN_DIR: 'relative/run' }, 1),
-    'policy-unavailable',
-    /PI_MCP_RUN_DIR/,
-  );
-});
-
-test('every launch-env variable must be an absolute path', () => {
-  const ws = workspace(validPolicy());
-  for (const name of ['PI_MCP_POLICY', 'PI_MCP_RUN_DIR', 'PI_MCP_SESSION_HOME']) {
-    refuse(
-      admitCall({ ...ws.env, [name]: 'relative/path' }, 17),
-      'policy-unavailable',
-      new RegExp(name),
-    );
+  for (const name of ['QUOTIENT_POLICY', 'QUOTIENT_RUN_DIR', 'QUOTIENT_SESSION_HOME']) {
+    const unset: Env = { ...ws.env };
+    delete unset[name];
+    refuse(admit(unset, 1), 'policy-unavailable', new RegExp(`${name} is unset`));
+    refuse(admit({ ...ws.env, [name]: 'relative/path' }, 17), 'policy-unavailable', new RegExp(`${name} is set but not`));
   }
-});
-
-test('an unset PI_MCP_SESSION_HOME refuses policy-unavailable, naming the variable', () => {
-  const ws = workspace(validPolicy());
-  const env: Env = { ...ws.env };
-  delete env.PI_MCP_SESSION_HOME;
-  refuse(admitCall(env, 1), 'policy-unavailable', /PI_MCP_SESSION_HOME/);
 });
 
 // ── The artefact: absent, unparsable, schema-invalid (EX-3, EX-6) ───────────
 
 test('an absent policy file refuses policy-unavailable and records an attempt without a digest', () => {
   const ws = workspace(validPolicy());
-  const env: Env = { ...ws.env, PI_MCP_POLICY: join(ws.dir, 'missing.json') };
-  refuse(admitCall(env, 7), 'policy-unavailable', /missing\.json/);
+  const env: Env = { ...ws.env, QUOTIENT_POLICY: join(ws.dir, 'missing.json') };
+  refuse(admit(env, 7), 'policy-unavailable', /missing\.json/);
 
   const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1);
@@ -82,7 +60,7 @@ test('an absent policy file refuses policy-unavailable and records an attempt wi
 
 test('an unparsable policy refuses policy-invalid and records the readable digest', () => {
   const ws = workspace('{"mode": "per-call",', { raw: true });
-  refuse(admitCall(ws.env, 2), 'policy-invalid', /not valid JSON/);
+  refuse(admit(ws.env, 2), 'policy-invalid', /not valid JSON/);
 
   const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1);
@@ -93,7 +71,7 @@ test('an unparsable policy refuses policy-invalid and records the readable diges
 
 test('an unknown policy key refuses policy-invalid, naming it', () => {
   const ws = workspace(validPolicy({ speed: 'fast' }));
-  refuse(admitCall(ws.env, 3), 'policy-invalid', /speed/);
+  refuse(admit(ws.env, 3), 'policy-invalid', /speed/);
   assert.equal(attempts(ws.runDir)[0].reason, 'policy-invalid');
 });
 
@@ -109,7 +87,7 @@ test('a wrong-typed policy value refuses policy-invalid, naming the field', () =
   ];
   for (const [field, value] of cases) {
     const ws = workspace(validPolicy({ [field]: value }));
-    refuse(admitCall(ws.env, 4), 'policy-invalid', new RegExp(field));
+    refuse(admit(ws.env, 4), 'policy-invalid', new RegExp(field));
   }
 });
 
@@ -129,24 +107,24 @@ test('maxima that do not bound the run refuse policy-invalid: all four are requi
   ];
   for (const [maxima, detail] of cases) {
     const ws = workspace(validPolicy({ maxima }));
-    refuse(admitCall(ws.env, 4), 'policy-invalid', detail);
+    refuse(admit(ws.env, 4), 'policy-invalid', detail);
   }
-  assert.ok(admitCall(workspace(validPolicy({ maxima: full })).env, 4).ok);
+  assert.ok(admit(workspace(validPolicy({ maxima: full })).env, 4).ok);
 });
 
 test('a negative transcript budget refuses policy-invalid; 0 is admitted and sets no ceiling', () => {
-  refuse(admitCall(workspace(validPolicy({ transcript_budget_bytes: -1 })).env, 4), 'policy-invalid', /transcript_budget_bytes/);
-  assert.ok(admitCall(workspace(validPolicy({ transcript_budget_bytes: 0 })).env, 4).ok);
+  refuse(admit(workspace(validPolicy({ transcript_budget_bytes: -1 })).env, 4), 'policy-invalid', /transcript_budget_bytes/);
+  assert.ok(admit(workspace(validPolicy({ transcript_budget_bytes: 0 })).env, 4).ok);
 });
 
 test('a policy naming a non-absolute root or form path refuses policy-invalid', () => {
   refuse(
-    admitCall(workspace(validPolicy({ roots: ['relative/root'] })).env, 5),
+    admit(workspace(validPolicy({ roots: ['relative/root'] })).env, 5),
     'policy-invalid',
     /roots/,
   );
   refuse(
-    admitCall(workspace(validPolicy({ forms: { read: 'pi-mcp-read' } })).env, 5),
+    admit(workspace(validPolicy({ forms: { read: 'pi-mcp-read' } })).env, 5),
     'policy-invalid',
     /forms\.read/,
   );
@@ -156,7 +134,7 @@ test('a missing required policy field refuses policy-invalid, naming it', () => 
   for (const field of ['mode', 'roots', 'profiles', 'forms', 'child_binds', 'enabled']) {
     const policy = validPolicy();
     delete policy[field];
-    refuse(admitCall(workspace(policy).env, 6), 'policy-invalid', new RegExp(field));
+    refuse(admit(workspace(policy).env, 6), 'policy-invalid', new RegExp(field));
   }
 });
 
@@ -164,7 +142,7 @@ test('a missing required policy field refuses policy-invalid, naming it', () => 
 
 test('mode = static refuses posture-unsupported instead of being downgraded', () => {
   const ws = workspace(validPolicy({ mode: 'static' }));
-  const verdict = admitCall(ws.env, 8);
+  const verdict = admit(ws.env, 8);
   refuse(verdict, 'posture-unsupported', /static/);
   assert.equal(attempts(ws.runDir)[0].reason, 'posture-unsupported');
 });
@@ -180,25 +158,25 @@ test('any static-only field refuses posture-unsupported, with no field drop', ()
   ];
   for (const [field, value] of fields) {
     const ws = workspace(validPolicy({ [field]: value }));
-    refuse(admitCall(ws.env, 9), 'posture-unsupported', new RegExp(field));
+    refuse(admit(ws.env, 9), 'posture-unsupported', new RegExp(field));
     // Nothing was spawned, so the ledger is the only sink that can hold it.
     assert.equal(attempts(ws.runDir)[0].reason, 'posture-unsupported');
   }
 });
 
 test('an unrecognised mode refuses posture-unsupported: only per-call is served', () => {
-  refuse(admitCall(workspace(validPolicy({ mode: 'shared' })).env, 10), 'posture-unsupported', /shared/);
+  refuse(admit(workspace(validPolicy({ mode: 'shared' })).env, 10), 'posture-unsupported', /shared/);
 });
 
 test('a mode change between calls is refused at the next call by the schema re-validation: only per-call is served, so posture-unsupported names both modes', () => {
   const ws = workspace(validPolicy());
-  const first = admitCall(ws.env, 11);
+  const first = admit(ws.env, 11);
   assert.equal(first.ok, true);
 
   // No process state remembers the first call's mode: the artefact is re-read and
   // re-validated per call, and the schema is what refuses the new one.
   writeFileSync(ws.policyPath, JSON.stringify(validPolicy({ mode: 'static' })));
-  refuse(admitCall(ws.env, 12), 'posture-unsupported', /static/);
+  refuse(admit(ws.env, 12), 'posture-unsupported', /static/);
 
   const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1, 'the admitted call records no refusal; the refused one does');
@@ -211,7 +189,7 @@ test('a mode change between calls is refused at the next call by the schema re-v
 
 test('enabled = false refuses disabled and records it in attempts.jsonl', () => {
   const ws = workspace(validPolicy({ enabled: false }));
-  refuse(admitCall(ws.env, 13), 'disabled', /enabled/);
+  refuse(admit(ws.env, 13), 'disabled', /enabled/);
 
   const lines = attempts(ws.runDir);
   assert.equal(lines.length, 1);
@@ -222,10 +200,10 @@ test('enabled = false refuses disabled and records it in attempts.jsonl', () => 
 
 test('a policy re-read per call sees an enable flip at the next call', () => {
   const ws = workspace(validPolicy());
-  assert.equal(admitCall(ws.env, 14).ok, true);
+  assert.equal(admit(ws.env, 14).ok, true);
 
   writeFileSync(ws.policyPath, JSON.stringify(validPolicy({ enabled: false })));
-  refuse(admitCall(ws.env, 15), 'disabled', /enabled/);
+  refuse(admit(ws.env, 15), 'disabled', /enabled/);
 });
 
 // ── The forms: a capability selects its wrapper form (EX-5, EX-7) ──────────
@@ -233,7 +211,7 @@ test('a policy re-read per call sees an enable flip at the next call', () => {
 /** A policy as `admitCall` normalised it, so the later steps see the real shape. */
 function admittedPolicy(overrides: Record<string, unknown> = {}) {
   const ws = workspace(validPolicy(overrides));
-  const verdict = admitCall(ws.env, 1);
+  const verdict = admit(ws.env, 1);
   if (!verdict.ok) assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);
   return verdict.policy;
 }
@@ -271,12 +249,12 @@ test('a form may declare the extensions it passes, and nothing else', () => {
     [{ read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: 'builtin:mcp' } }, /forms\.read\.extensions/],
   ];
   for (const [forms, detail] of cases) {
-    refuse(admitCall(workspace(validPolicy({ forms })).env, 2), 'policy-invalid', detail);
+    refuse(admit(workspace(validPolicy({ forms })).env, 2), 'policy-invalid', detail);
   }
 
   // The launch forms pass no `-e` other than the one extension this build wires,
   // so a foreign entry is a policy naming a launcher that does not exist here.
-  const foreign = admitCall(
+  const foreign = admit(
     workspace(
       validPolicy({
         forms: { read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['/nix/store/bbb/lib/other.ts'] } },
