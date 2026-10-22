@@ -15,28 +15,10 @@
 // otherwise. That, and step 8 keeping both layers unwritable by any delegate,
 // is what closes RV-046 F-5's elevation path under local-first lookup.
 //
-// Document format. A profile document is markdown whose first non-empty line
-// opens an HTML-comment header, followed by one `key: value` line per field, and
-// then a line holding just the comment terminator:
-//
-//     <!-- quotient-profile
-//     filesystem: read
-//     model: llm-gateway/deepseek-flash
-//     thinking: off
-//     tools: read, grep, find, ls, bash
-//     -->
-//
-// Three fields are required — `filesystem` (`read` or `write`), `model` (one
-// non-empty token) and `tools` (a comma-separated list of tool names) — and one
-// is optional: `thinking`, one of `off`, `minimal`, `low`, `medium`, `high`,
-// `xhigh` or `max` (THINKING_LEVELS). Each field is declared once, with a
-// non-empty value after a space or tab; there is no blank line inside the header
-// and no other key. `thinking` is the one place a level is set: a `model` ending
-// in pi's `:<level>` shorthand refuses, and an omitted `thinking` leaves the
-// child on its own default. The profile's name is the file's base name and
-// must match PROFILE_NAME. That is a strict grammar `split` and one regular
-// expression can parse, so the loader needs no YAML or markdown dependency.
-// Everything after the header is prose for a human and is not parsed.
+// Document format: `help/profiles.md` (`quotient help profiles`) specifies the
+// header grammar this loader parses. It is strict enough that `split` and one
+// regular expression parse it, so the loader needs no YAML or markdown
+// dependency; everything after the header is prose and is not parsed.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import type { Dirent } from 'node:fs';

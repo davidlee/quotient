@@ -26,7 +26,7 @@ type Args = {
   quiet: boolean;
 };
 
-const USAGE = `usage: quotient reduce [FILE] [--out DIR] [--budget-bytes N | --full]
+export const USAGE = `usage: quotient reduce [FILE] [--out DIR] [--budget-bytes N | --full]
                        [--alert RE]... [-v|--verbose] [-q|--quiet]
 
 Reads a pi --mode json event stream (FILE or stdin) and writes <out>/transcript.md

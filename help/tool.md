@@ -1,0 +1,1 @@
+Run one pi agent under the operator's policy and answer with its reduced transcript, status and verdict. Trust `result` only when `final` is true; a `refused` state means nothing ran. Pass `session` back to continue a conversation.

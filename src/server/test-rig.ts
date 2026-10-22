@@ -85,6 +85,9 @@ export function launchEnv(dir: string): Env {
 /** The XDG profile layer under a tree `launchEnv` names. */
 export const xdgProfileLayer = (dir: string): string => join(dir, 'config', 'quotient', 'profiles');
 
+/** The XDG help layer under a tree `launchEnv` names. */
+export const xdgHelpLayer = (dir: string): string => join(dir, 'config', 'quotient', 'help');
+
 /** One profile document in the header format the loader documents. */
 export function profileDocument(
   overrides: { filesystem?: string; model?: string; thinking?: string; tools?: string } = {},

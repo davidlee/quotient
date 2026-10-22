@@ -60,7 +60,7 @@ export type Policy = {
   mode: PolicyMode;
   /** Canonicalisable roots a call may name (consumed by PHASE-03). */
   roots: string[];
-  maxima: Maxima;
+  maxima: Required<Maxima>;
   /** The profiles the policy allows, each pinned to a filesystem capability. */
   profiles: Record<string, Filesystem>;
   forms: Forms;
@@ -285,7 +285,7 @@ function validatePolicy(value: unknown): PolicyCheck {
     schema: POLICY_SCHEMA,
     mode: 'per-call',
     roots: roots as string[],
-    maxima: maxima as Maxima,
+    maxima: maxima as Required<Maxima>,
     profiles: profiles as Record<string, Filesystem>,
     forms: parsedForms,
     exposure: exposure as string[],
