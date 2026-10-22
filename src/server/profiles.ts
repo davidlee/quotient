@@ -38,7 +38,7 @@
 // expression can parse, so the loader needs no YAML or markdown dependency.
 // Everything after the header is prose for a human and is not parsed.
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { canonicalPath, within } from './paths.ts';
@@ -212,13 +212,24 @@ function parseDocument(
 
 type Loaded = { profile: Profile; bytes: Buffer };
 
+const lexicallyPresent = (path: string): boolean => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** One layer's documents, in name order; a missing layer is empty. */
 function readLayer(layer: string): { ok: true; documents: string[] } | { ok: false; path: string; detail: string } {
   let entries: Dirent<string>[];
   try {
     entries = readdirSync(layer, { withFileTypes: true });
   } catch (error) {
-    if (errorCode(error) === 'ENOENT') return { ok: true, documents: [] };
+    // Only an absent entry is an empty layer: a symlink that does not resolve
+    // also reads ENOENT, and it is a broken deployment, not an absent one.
+    if (errorCode(error) === 'ENOENT' && !lexicallyPresent(layer)) return { ok: true, documents: [] };
     return { ok: false, path: layer, detail: `${layer} could not be read (${errorCode(error)})` };
   }
   const documents = entries

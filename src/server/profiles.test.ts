@@ -274,6 +274,12 @@ test('loadProfiles: a missing layer is empty; an unreadable one refuses start-up
   const none = loadProfiles([absent]);
   assert.equal(none.ok && none.snapshot.profiles.size, 0, 'no layer at all is an empty snapshot, not a refusal');
 
+  const dangling = join(mkdtempSync(join(tmpdir(), 'quotient-layer-link-')), 'profiles');
+  symlinkSync(join(tmpdir(), 'quotient-no-such-target'), dangling);
+  const unresolved = loadProfiles([dangling, xdg]);
+  if (unresolved.ok) assert.fail('a layer entry that does not resolve is unreadable, not absent');
+  assert.equal(unresolved.path, dangling);
+
   const file = join(mkdtempSync(join(tmpdir(), 'quotient-layer-file-')), 'profiles');
   writeFileSync(file, 'not a directory');
   const unreadable = loadProfiles([file, xdg]);
