@@ -1,4 +1,4 @@
-<!-- pi-mcp-profile
+<!-- quotient-profile
 filesystem: write
 model: llm-gateway/deepseek-flash
 thinking: off
@@ -22,7 +22,13 @@ beyond the default of no extensions (design sec-3, "Executable contract").
 
 ## Document format
 
-The grammar is specified in the header comment of `pi/mcp/profiles.ts`. The
-server parses this header and nothing else, once at start-up, into a snapshot
-held for its lifetime — editing this file takes effect only when the server
-restarts, which is a deployment act.
+This is an example, not a built-in: the server loads profiles only from
+`<launch dir>/.quotient/profiles/` and `$XDG_CONFIG_HOME/quotient/profiles/`.
+Copy it into one of those layers. The launch-dir copy wins per name. The
+policy's `profiles` map must list the name and pin the same `filesystem`, or
+calls refuse `profile-capability-mismatch`.
+
+The grammar is specified in the header comment of quotient's
+`src/server/profiles.ts`. The server parses this header and nothing else, once
+at start-up, into a snapshot held for its lifetime. An edit takes effect only
+when the server restarts, which is a deployment act.

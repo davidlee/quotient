@@ -28,7 +28,8 @@ import {
   markerPids,
   markerText,
   newRig,
-  openServer,
+  profileDocument,
+  serveRig,
   patchPolicy,
   pause,
   readText,
@@ -57,7 +58,7 @@ function answer(stop: string, text = 'the answer'): string {
 
 const READ_PROFILE: Profile = {
   name: 'read',
-  path: '/profiles/read.md',
+  source: '/profiles/read.md',
   filesystem: 'read',
   model: 'llm-gateway/deepseek-flash',
   tools: ['read', 'grep', 'bash'],
@@ -112,8 +113,12 @@ async function waitForRunDir(runDir: string): Promise<string> {
  * stdin. The channel stays open until the answer arrives, because stdin EOF is
  * DEC-103's abort trigger and an aborted call is answered with nothing.
  */
-async function oneShot(t: TestContext, env: Env, request: string): Promise<Record<string, any>> {
-  const child = spawnProcess(...serverCommand, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+async function oneShot(t: TestContext, rig: Rig, request: string, extraEnv: Env = {}): Promise<Record<string, any>> {
+  const child = spawnProcess(...serverCommand, {
+    cwd: rig.launchDir,
+    env: { ...rig.env, ...extraEnv },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   t.after(() => child.kill('SIGKILL'));
   const out: string[] = [];
   const err: string[] = [];
@@ -254,12 +259,12 @@ test('a profile that needs the MCP built-in makes the launcher receive -e builti
   });
   writeFileSync(
     join(rig.profilesDir, 'mcp-read.md'),
-    '<!-- pi-mcp-profile\nfilesystem: read\nmodel: llm-gateway/deepseek-flash\ntools: read, mcp__doctrine__search\n-->\n\n# mcp-read\n',
+    profileDocument({ tools: 'read, mcp__doctrine__search' }),
   );
   patchPolicy(rig, 'profiles', { 'mcp-read': 'read' });
   patchPolicy(rig, 'forms', { read: { path: rig.readLauncher, extensions: ['builtin:mcp'] }, write: rig.writeLauncher });
 
-  const server = openServer(rig.env, { profilesDir: rig.profilesDir, graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(7, { prompt: 'search', profile: 'mcp-read', cwd: rig.root }));
   const [reply] = await waitForReplies(server, 1);
   server.end();
@@ -383,7 +388,7 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
       'exit 0',
     ].join('\n'),
   });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(1, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'cancelme' }));
   server.write(callLine(2, { prompt: 'keep going', profile: 'write', cwd: rig.root, session: 'keeper' }));
   await waitForPath(join(rig.markerDir, 'grandchild.pid'), 'the ignoring grandchild');
@@ -498,7 +503,7 @@ test('an audit append that fails after the child was launched fails the call clo
       'exit 0',
     ].join('\n'),
   });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(11, { prompt: 'work', profile: 'read', cwd: rig.root }));
 
   // The audit is broken after the `spawn` record landed and before the `exit`
@@ -531,7 +536,7 @@ test('an audit append that fails after the child was launched fails the call clo
 
 test('an audit record that cannot be written never blocks the ladder: the child is still killed and the failure joins the causes', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(16, { prompt: 'work', profile: 'read', cwd: rig.root }));
   const auditPath = join(await waitForRunDir(rig.runDir), 'audit.jsonl');
   await waitForPath(auditPath, 'the run audit');
@@ -565,7 +570,7 @@ test('an unwritable attempts.jsonl refuses audit-unavailable without spawning an
   // a server that cannot record a run must not launch one.
   mkdirSync(join(rig.runDir, 'attempts.jsonl'), { recursive: true });
 
-  const server = openServer(rig.env);
+  const server = serveRig(rig);
   server.write(callLine(12, { prompt: 'work', profile: 'read', cwd: rig.root }));
   const [reply] = await waitForReplies(server, 1);
   server.end();
@@ -594,7 +599,7 @@ test('an audit append failing before spawn discards the run directory and refuse
     }
   });
 
-  const server = openServer(rig.env);
+  const server = serveRig(rig);
   server.write(callLine(13, { prompt: 'work', profile: 'read', cwd: rig.root }));
   const [reply] = await waitForReplies(server, 1);
   server.end();
@@ -638,7 +643,7 @@ test('a pre-exec spawn failure after the run directory exists reports failed wit
   const rig = newRig(t, { read: LAUNCH_MARKER });
   patchPolicy(rig, 'forms', { read: join(rig.dir, 'no-such-launcher'), write: rig.writeLauncher });
 
-  const server = openServer(rig.env);
+  const server = serveRig(rig);
   server.write(callLine(14, { prompt: 'work', profile: 'read', cwd: rig.root }));
   const [reply] = await waitForReplies(server, 1);
   server.end();
@@ -690,7 +695,7 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
       const rig = newRig(inner, {
         read: [...stream(testCase.stop), `exit ${testCase.exit}`].join('\n'),
       });
-      const server = openServer(rig.env);
+      const server = serveRig(rig);
       server.write(callLine(15, { prompt: 'work', profile: 'read', cwd: rig.root }));
       const [reply] = await waitForReplies(server, 1);
       server.end();
@@ -727,7 +732,7 @@ test('the session lock is released only after the drain and the final audit appe
       'exit 0',
     ].join('\n'),
   });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(21, { prompt: 'slow drain', profile: 'read', cwd: rig.root, session: 'drain' }));
   await waitForPath(join(rig.markerDir, 'child-done'), 'the child to exit');
   assert.equal(server.replies().length, 0, 'the answer waits for the drain, not for the exit');
@@ -735,7 +740,7 @@ test('the session lock is released only after the drain and the final audit appe
   assert.ok(isAlive(grandchildPid), 'the grandchild is what holds the pipe open');
 
   const rival = async (extra: Env = {}): Promise<Record<string, any>> =>
-    resultDocument(await oneShot(t, { ...rig.env, ...extra }, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' })));
+    resultDocument(await oneShot(t, rig, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' }), extra));
 
   const busy = await rival();
   assert.equal(busy.state, 'refused');
@@ -773,7 +778,7 @@ test('two server processes on one session: the loser is refused session-busy and
   const rig = newRig(t, {
     read: [`printf '%s\\n' $$ >> "@MARKER@/pids"`, 'sleep 1.2', answer('stop'), SETTLED, 'exit 0'].join('\n'),
   });
-  const winner = spawnProcess(...serverCommand, { env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const winner = spawnProcess(...serverCommand, { cwd: rig.launchDir, env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => winner.kill('SIGKILL'));
   const winnerOut: string[] = [];
   winner.stdout.setEncoding('utf8');
@@ -782,7 +787,7 @@ test('two server processes on one session: the loser is refused session-busy and
   winner.stdin.write(`${callLine(41, { prompt: 'winner', profile: 'read', cwd: rig.root, session: 'shared' })}\n`);
 
   await waitForPath(join(rig.markerDir, 'pids'), 'the winner\'s child');
-  const loserDoc = resultDocument(await oneShot(t, rig.env, callLine(42, { prompt: 'loser', profile: 'read', cwd: rig.root, session: 'shared' })));
+  const loserDoc = resultDocument(await oneShot(t, rig, callLine(42, { prompt: 'loser', profile: 'read', cwd: rig.root, session: 'shared' })));
   assert.equal(loserDoc.state, 'refused');
   assert.equal(loserDoc.refusal.reason, 'session-busy');
   assert.equal(readFileSync(join(rig.markerDir, 'pids'), 'utf8').trim().split('\n').length, 1, 'the loser created no child');
@@ -804,7 +809,7 @@ test('two server processes on one session: the loser is refused session-busy and
 
 test('notifications/cancelled aborts exactly the requestId it names; an unknown requestId is ignored and is not a protocol error', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(51, { prompt: 'cancel me', profile: 'read', cwd: rig.root, session: 'victim' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [pid] = markerPids(rig);
@@ -848,7 +853,7 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
       'exit 0',
     ].join('\n'),
   });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(53, { prompt: 'the tail is held open', profile: 'read', cwd: rig.root, session: 'tail' }));
   await waitForPath(join(rig.markerDir, 'leader-exited'), 'the leader to exit');
   const [grandchildPid] = markerPids(rig, 'grandchild.pid');
@@ -882,7 +887,7 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
 
 test('two tools/calls carrying one id are both in the index: a cancellation naming it aborts both, and each run records its abort', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ >> "@MARKER@/pids"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   // The same wire id twice: the id is the client's, and neither call may drop out of
   // the index the cancellation and the EOF sweep read.
   server.write(callLine(71, { prompt: 'first', profile: 'read', cwd: rig.root, session: 'dupe-one' }));
@@ -915,7 +920,7 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
 
 test('stdin EOF aborts every in-flight run through the same ladder, writes no result and leaves no child behind', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 200 });
+  const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(61, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'eof' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [pid] = markerPids(rig);

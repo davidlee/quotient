@@ -16,7 +16,7 @@ import { usable } from '../config.ts';
 import type { Locations } from '../config.ts';
 import { appendAttempt, sha256Hex } from './evidence.ts';
 import type { CallId } from './evidence.ts';
-import { MCP_EXTENSION, PROFILE_NAME } from './profiles.ts';
+import { MCP_EXTENSION, PROFILE_NAME, isFilesystem } from './profiles.ts';
 import type { Filesystem } from './profiles.ts';
 
 
@@ -93,8 +93,6 @@ export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
  */
 export const STATIC_ONLY_FIELDS: readonly string[] = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
 export const MAXIMA_FIELDS: readonly string[] = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
-/** The filesystem capabilities: the keys of `forms`, the values of `profiles`. */
-export const FORM_FIELDS: readonly string[] = ['read', 'write'];
 const FORM_KEYS: readonly string[] = ['path', 'extensions', 'unconfined'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };
@@ -249,7 +247,7 @@ function validatePolicy(value: unknown): PolicyCheck {
   if (!isRecord(profiles)) return invalid('profiles must be an object mapping a profile name to "read" or "write"');
   for (const [name, capability] of Object.entries(profiles)) {
     if (!PROFILE_NAME.test(name)) return invalid(`profiles.${name}: "${name}" is not a profile name (${PROFILE_NAME.source})`);
-    if (typeof capability !== 'string' || !FORM_FIELDS.includes(capability)) {
+    if (!isFilesystem(capability)) {
       return invalid(`profiles.${name} must be "read" or "write"`);
     }
   }
@@ -258,10 +256,10 @@ function validatePolicy(value: unknown): PolicyCheck {
   if (!isRecord(forms)) return invalid('forms must be an object');
   const parsedForms: Forms = {};
   for (const field of Object.keys(forms)) {
-    if (!FORM_FIELDS.includes(field)) return invalid(`unknown policy field: forms.${field}`);
+    if (!isFilesystem(field)) return invalid(`unknown policy field: forms.${field}`);
     const parsed = readForm(field, forms[field]);
     if (!parsed.ok) return invalid(parsed.detail);
-    parsedForms[field as Filesystem] = parsed.form;
+    parsedForms[field] = parsed.form;
   }
 
   const exposure = value.exposure;

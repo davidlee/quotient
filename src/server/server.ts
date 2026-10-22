@@ -14,7 +14,6 @@
 import { StringDecoder } from 'node:string_decoder';
 import { writeFileSync } from 'node:fs';
 import type { Readable, Writable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
 import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
 import { createLatch, failedResult, refusedResult, resultFor } from './result.ts';
@@ -35,13 +34,6 @@ import { packageVersion } from '../root.ts';
 export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
 export const PROTOCOL_VERSION = '2025-06-18';
-
-/**
- * The tracked profile directory, resolved from this module's own URL: never the
- * environment, never the call's cwd, so a delegate cannot choose the authority
- * it is checked against (design sec-2 step 3).
- */
-export const DEFAULT_PROFILES_DIR = fileURLToPath(new URL('./profiles/', import.meta.url));
 
 /** The one tool this server exposes, with its declared input schema. */
 export const PI_AGENT_TOOL = {
@@ -292,8 +284,9 @@ async function callTool(
     return toolResult(refusedResult(reason, detail));
   };
 
-  // Step 3: the profile, from the start-up snapshot only.
-  const profile = resolveProfile(snapshot, request.profile, Object.keys(admission.policy.profiles));
+  // Step 3: the profile, from the start-up snapshot only, its capability pinned
+  // by the policy's map.
+  const profile = resolveProfile(snapshot, request.profile, admission.policy.profiles);
   if (!profile.ok) return refuse(profile.reason, profile.detail);
 
   // Step 4: the root, canonicalised and allowlisted by components.
@@ -358,7 +351,7 @@ async function callTool(
 
   try {
     // Step 8: the child view — the canonicalised union of {root, the active
-    // session directory, the policy's fixed mounts} — must not reach a protected
+    // session directory, the policy's exposure paths} — must not reach a protected
     // store more strongly than that store tolerates (design sec-2 step 8,
     // sec-3). The refusal names the overlapping member and the store and stops;
     // nothing is masked, and no run directory exists yet (PHASE-06 allocates one
@@ -367,10 +360,12 @@ async function callTool(
       root: root.root,
       capability: profile.profile.filesystem,
       sessionDir: session.sessionDir,
-      childBinds: admission.policy.exposure,
+      exposure: admission.policy.exposure,
       sessionHome: admission.sessionHome,
       runDir: admission.runDir,
       policyPath: admission.policyPath,
+      profileLayers: context.locations.profileLayers,
+      helpLayers: context.locations.helpLayers,
     });
     if (!view.ok) return refuse(view.reason, view.detail);
 
@@ -573,8 +568,6 @@ async function handleLine(line: string, context: Context): Promise<void> {
 
 /** What a caller may override; production takes every default. */
 export type ServeOptions = {
-  /** The profile directory to snapshot; production uses the module's own. */
-  profilesDir?: string;
   /** The server's launch directory, which an absent `cwd` resolves to. */
   launchDir?: string;
   /** SIGTERM-to-SIGKILL grace; `DEFAULT_GRACE_MS` (design sec-4's 2 s) unless a
@@ -604,8 +597,8 @@ function abortNamed(params: unknown, context: Context): void {
  * environment and its two deployment locations, so the protocol is driven
  * in-process by the tests; `src/cli.ts` wires the process's own.
  *
- * The profile directory is read once, here, before the first line: one snapshot
- * for the process lifetime, so an edit on disk is inert until a restart (EX-1).
+ * The profile layers are read once, here, before the first line: one snapshot
+ * for the process lifetime, so an edit on disk is inert until a restart.
  */
 export async function serve(
   input: Readable,
@@ -614,20 +607,21 @@ export async function serve(
   diagnostics: Writable = process.stderr,
   options: ServeOptions = {},
 ): Promise<void> {
-  const profiles = loadProfiles(options.profilesDir ?? DEFAULT_PROFILES_DIR);
+  const launchDir = options.launchDir ?? process.cwd();
+  const locations = resolveLocations(env, launchDir);
+  const profiles = loadProfiles(locations.profileLayers);
   if (!profiles.ok) {
     // One line, naming the path: the server refuses from here on, and an
     // operator needs to know which document to fix (EX-2).
     diagnostics.write(`quotient: the profile snapshot did not load: ${profiles.path}: ${profiles.detail}\n`);
   }
-  const launchDir = options.launchDir ?? process.cwd();
   const context: Context = {
     output,
     diagnostics,
     env,
     profiles,
     launchDir,
-    locations: resolveLocations(env, launchDir),
+    locations,
     inFlight: new Map(),
     closed: false,
     graceMs: options.graceMs ?? DEFAULT_GRACE_MS,

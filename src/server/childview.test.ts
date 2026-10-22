@@ -17,9 +17,8 @@ import { canonicalPath, within } from './paths.ts';
 import type { ChildViewInput } from './childview.ts';
 import { RUN_EVIDENCE_FILES, attemptsPath, evidenceStores, runLayout } from './evidence.ts';
 import { serve } from './server.ts';
-import { validPolicy } from './test-rig.ts';
-
-const REPO_ROOT = realpathSync(new URL('../..', import.meta.url).pathname);
+import { RIG_PROFILES, validPolicy, writeProfiles, xdgProfileLayer } from './test-rig.ts';
+import { resolveLocations } from '../config.ts';
 
 type Tree = {
   /** The operator's state directory: the run dir, the session home and the policy. */
@@ -35,6 +34,12 @@ type Tree = {
   otherSession: string;
   /** A directory the child may be rooted at, disjoint from the stores. */
   work: string;
+  /** The server's launch dir; its `.quotient/` is not created. */
+  launch: string;
+  /** `XDG_CONFIG_HOME`; its `quotient/` is not created. */
+  xdgConfig: string;
+  /** The four layers `config.ts` derives from those two, highest first. */
+  layers: Pick<ChildViewInput, 'profileLayers' | 'helpLayers'>;
 };
 
 function tree(): Tree {
@@ -45,8 +50,15 @@ function tree(): Tree {
   const work = join(state, 'work');
   for (const dir of [runDir, sessionHome, work]) mkdirSync(dir, { recursive: true });
   writeFileSync(policyPath, JSON.stringify({ mode: 'per-call' }));
+  const launch = join(state, 'launch');
+  const xdgConfig = join(state, 'config');
+  mkdirSync(launch);
+  const { profileLayers, helpLayers } = resolveLocations({ XDG_CONFIG_HOME: xdgConfig }, launch);
   return {
     state,
+    launch,
+    xdgConfig,
+    layers: { profileLayers, helpLayers },
     runDir,
     sessionHome,
     policyPath,
@@ -62,10 +74,11 @@ function view(t: Tree, overrides: Partial<ChildViewInput> = {}): ChildViewInput 
     root: t.work,
     capability: 'read',
     sessionDir: t.session,
-    childBinds: [],
+    exposure: [],
     sessionHome: t.sessionHome,
     runDir: t.runDir,
     policyPath: t.policyPath,
+    ...t.layers,
     ...overrides,
   };
 }
@@ -148,7 +161,7 @@ test('the protected stores come from the evidence layout: the run evidence and t
   const stores = protectedStores(view(t));
   assert.deepEqual(
     stores.map((store) => store.kind),
-    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file'],
+    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'profile-layer', 'profile-layer', 'help-layer', 'help-layer'],
   );
   const byKind = new Map(stores.map((store) => [store.kind, store]));
   assert.equal(byKind.get('run-evidence')?.path, realpathSync(t.runDir));
@@ -160,9 +173,16 @@ test('the protected stores come from the evidence layout: the run evidence and t
   assert.equal(byKind.get('session-home')?.except, join(realpathSync(t.sessionHome), 'sess-a'));
   assert.equal(byKind.get('policy-file')?.path, realpathSync(t.policyPath));
   assert.equal(byKind.get('policy-file')?.tolerance, 'never-writable');
-  // The tracked profile documents are not a store at all (design sec-3), so the
-  // list has no entry for the checkout and no caller-supplied bind list.
-  assert.equal(stores.length, 4);
+  // Then the four layers, never-writable, whether or not they exist.
+  assert.deepEqual(
+    stores.slice(4).map((store) => [store.kind, store.path, store.tolerance]),
+    [
+      ['profile-layer', join(realpathSync(t.launch), '.quotient', 'profiles'), 'never-writable'],
+      ['profile-layer', join(realpathSync(t.state), 'config', 'quotient', 'profiles'), 'never-writable'],
+      ['help-layer', join(realpathSync(t.launch), '.quotient', 'help'), 'never-writable'],
+      ['help-layer', join(realpathSync(t.state), 'config', 'quotient', 'help'), 'never-writable'],
+    ],
+  );
 });
 
 // ── The session home (EX-2) ────────────────────────────────────────────────
@@ -179,28 +199,29 @@ test('the session home minus the active session directory, and the lock/binding 
     sessionHome: home,
     runDir: t.runDir,
     policyPath: t.policyPath,
+    ...t.layers,
   };
-  const rootDetail = refusal(checkChildView({ ...aside, root: childRoot, capability: 'read', childBinds: [] }));
+  const rootDetail = refusal(checkChildView({ ...aside, root: childRoot, capability: 'read', exposure: [] }));
   assert.ok(rootDetail.includes(JSON.stringify(realpathSync(childRoot))), rootDetail);
   assert.ok(rootDetail.includes(JSON.stringify(realpathSync(home))), rootDetail);
 
-  // A fixed mount that contains the home exposes it just as surely.
+  // An exposure path that contains the home exposes it just as surely.
   const bindDetail = refusal(
-    checkChildView({ ...aside, root: t.work, capability: 'read', childBinds: [childRoot] }),
+    checkChildView({ ...aside, root: t.work, capability: 'read', exposure: [childRoot] }),
   );
   assert.ok(bindDetail.includes(JSON.stringify(realpathSync(home))), bindDetail);
 
   // The metadata directory holds the locks and bindings; another session's
   // directory holds that session's conversation. Neither is this call's.
   for (const member of [join(t.sessionHome, 'sessions'), t.otherSession, t.sessionHome]) {
-    const detail = refusal(checkChildView(view(t, { childBinds: [member] })));
+    const detail = refusal(checkChildView(view(t, { exposure: [member] })));
     assert.ok(detail.includes(JSON.stringify(realpathSync(t.sessionHome))), detail);
   }
 
   // The active session directory is the one session path the child is meant to
   // have — and is exempt even though it lies inside the home.
-  assert.deepEqual(checkChildView(view(t, { childBinds: [t.session] })), { ok: true });
-  assert.deepEqual(checkChildView(view(t, { childBinds: [join(t.session, 'state')] })), { ok: true });
+  assert.deepEqual(checkChildView(view(t, { exposure: [t.session] })), { ok: true });
+  assert.deepEqual(checkChildView(view(t, { exposure: [join(t.session, 'state')] })), { ok: true });
 });
 
 // ── The policy file (EX-3) ─────────────────────────────────────────────────
@@ -215,10 +236,11 @@ test('the policy file is never writable: a write root containing it refuses, a r
   const shared = {
     root: authority,
     sessionDir: t.session,
-    childBinds: [] as string[],
+    exposure: [] as string[],
     sessionHome: t.sessionHome,
     runDir: t.runDir,
     policyPath,
+    ...t.layers,
   };
 
   const detail = refusal(checkChildView({ ...shared, capability: 'write' }));
@@ -228,43 +250,60 @@ test('the policy file is never writable: a write root containing it refuses, a r
   // Reading the policy is tolerated: it governs other calls, it is not a secret.
   assert.deepEqual(checkChildView({ ...shared, capability: 'read' }), { ok: true });
 
-  // Every fixed child mount is writable, so naming the policy file as one
+  // Every exposure path is writable, so naming the policy file as one
   // is a writable exposure whatever the root's capability.
   const bindDetail = refusal(
-    checkChildView({ ...shared, root: t.work, capability: 'read', childBinds: [policyPath] }),
+    checkChildView({ ...shared, root: t.work, capability: 'read', exposure: [policyPath] }),
   );
   assert.ok(bindDetail.includes(JSON.stringify(realpathSync(policyPath))), bindDetail);
 });
 
-// ── The tracked profile documents (EX-4) ───────────────────────────────────
+// ── The profile and help layers (SL-031 PHASE-05 EX-5) ────────────────────
 
-test('the tracked profile documents are not protected as a store: a write root containing the checkout is legal (EX-4)', () => {
+test('a write root containing the launch-dir .quotient/ refuses view-overlaps-protected, existing or not; a read root is admitted', () => {
   const t = tree();
-  // The repo-rooted writer: the documents it may edit are source, and the live
-  // authority is the start-up snapshot (design sec-3, "Profiles are live
-  // authority"), so protecting the checkout would kill the use case and buy
-  // nothing.
-  assert.deepEqual(checkChildView(view(t, { root: REPO_ROOT, capability: 'write' })), { ok: true });
-  // …and the case is not vacuous: the documents really are inside that root.
-  const documents = join(REPO_ROOT, 'src', 'server', 'profiles');
-  assert.equal(existsSync(documents), true);
-  assert.equal(within(REPO_ROOT, documents), true);
+  const layer = join(realpathSync(t.launch), '.quotient', 'profiles');
+  assert.equal(existsSync(join(t.launch, '.quotient')), false, 'absent: a delegate must not be able to create it');
+  const absent = refusal(checkChildView(view(t, { root: t.launch, capability: 'write' })));
+  assert.ok(absent.includes(JSON.stringify(layer)), absent);
+
+  writeProfiles(join(t.launch, '.quotient', 'profiles'), RIG_PROFILES);
+  for (const root of [t.launch, join(t.launch, '.quotient'), layer]) {
+    const detail = refusal(checkChildView(view(t, { root, capability: 'write' })));
+    assert.ok(detail.includes(JSON.stringify(layer)), detail);
+  }
+  assert.deepEqual(checkChildView(view(t, { root: t.launch, capability: 'read' })), { ok: true });
 });
 
-// ── child_binds are part of the view (VT-3, EX-2) ──────────────────────────
+test('a writable exposure path that is, contains or lies inside a layer refuses; the XDG and help layers are covered too', () => {
+  const t = tree();
+  const xdgProfiles = xdgProfileLayer(t.state);
+  for (const member of [t.xdgConfig, xdgProfiles, join(xdgProfiles, 'sub'), join(t.launch, '.quotient', 'help')]) {
+    refusal(checkChildView(view(t, { exposure: [member] })));
+  }
+  const help = refusal(checkChildView(view(t, { exposure: [join(t.xdgConfig, 'quotient', 'help')] })));
+  assert.match(help, /help layer/);
+});
 
-test('a child_bind is part of the child view: a fixed mount exposing a protected store refuses (VT-3)', () => {
+test('a sibling-repo write root, beside the launch dir, is admitted', () => {
+  const t = tree();
+  assert.deepEqual(checkChildView(view(t, { root: t.work, capability: 'write' })), { ok: true });
+});
+
+// ── exposure paths are part of the view (VT-3, EX-2) ───────────────────────
+
+test('an exposure path is part of the child view: one exposing a protected store refuses (VT-3)', () => {
   const t = tree();
   const store = realpathSync(t.runDir);
 
   for (const member of [t.runDir, runLayout(t.runDir, 11).dir, attemptsPath(t.runDir)]) {
-    const detail = refusal(checkChildView(view(t, { childBinds: [member] })));
+    const detail = refusal(checkChildView(view(t, { exposure: [member] })));
     assert.ok(detail.includes(JSON.stringify(store)), detail);
   }
 
-  // The fixed mounts that expose nothing are admitted, so the check is not a
-  // blanket refusal of `child_binds`.
-  assert.deepEqual(checkChildView(view(t, { childBinds: [join(t.state, 'dot-pi')] })), { ok: true });
+  // The exposure paths that expose nothing are admitted, so the check is not a
+  // blanket refusal of `exposure`.
+  assert.deepEqual(checkChildView(view(t, { exposure: [join(t.state, 'dot-pi')] })), { ok: true });
 });
 
 // ── The one evidence layout (EX-5, VT-4) ───────────────────────────────────
@@ -331,8 +370,8 @@ test('a refusal names the overlapping member and the protected path, and the adm
 
 test('a view with two overlapping members names the same one every run (EX-6)', () => {
   const t = tree();
-  const first = checkChildView(view(t, { root: t.state, capability: 'write', childBinds: [t.sessionHome] }));
-  const second = checkChildView(view(t, { root: t.state, capability: 'write', childBinds: [t.sessionHome] }));
+  const first = checkChildView(view(t, { root: t.state, capability: 'write', exposure: [t.sessionHome] }));
+  const second = checkChildView(view(t, { root: t.state, capability: 'write', exposure: [t.sessionHome] }));
   assert.deepEqual(first, second);
   // The root is the first member checked, so the larger exposure is the one named.
   assert.ok(refusal(first).includes(JSON.stringify(realpathSync(t.state))));
@@ -351,7 +390,9 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
     QUOTIENT_POLICY: policyPath,
     QUOTIENT_RUN_DIR: t.runDir,
     QUOTIENT_SESSION_HOME: t.sessionHome,
+    XDG_CONFIG_HOME: t.xdgConfig,
   };
+  writeProfiles(xdgProfileLayer(t.state), RIG_PROFILES);
 
   for (const profile of ['read', 'write']) {
     const replies: string[] = [];
@@ -370,7 +411,9 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
     // reader) and stdin EOF is DEC-103's abort trigger, so the channel stays open
     // until this call has answered.
     const input = new PassThrough();
-    const serving = serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => done() }));
+    const serving = serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => done() }), {
+      launchDir: t.launch,
+    });
     input.write(
       `${JSON.stringify({
         jsonrpc: '2.0',

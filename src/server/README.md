@@ -7,8 +7,8 @@ one one-shot pi delegate under a wrapper form — a flake-provided launcher that
 owns the confinement — and answers with its reduced transcript, status and
 verdict. The server holds no jail argv of its own: the form decides what the
 child can reach. A call's filesystem capability and tool set come from a
-tracked profile document; admission comes from the operator policy described
-here. The tracked profiles are documented in `pi/mcp/profiles/` (`read.md`,
+profile document; admission comes from the operator policy described here.
+Example profiles to copy from are in `examples/profiles/` (`read.md`,
 `write.md`, `research.md`).
 
 ## Launch environment
@@ -90,9 +90,24 @@ Placeholder absolute paths; replace them with this host's real form launchers.
 
 ## Profiles and forms
 
-The policy's `profiles` maps each profile a call may use to its capability. A
-name outside that map refuses `profile-not-allowed`; a name the start-up snapshot
-does not hold refuses `profile-unknown`.
+Profile documents live in two layers: `<launch dir>/.quotient/profiles/` over
+`$XDG_CONFIG_HOME/quotient/profiles/` (else `~/.config/quotient/profiles/`).
+Per name, the launch-dir document wins. There is no built-in layer. A missing
+layer is empty. An unreadable layer, or an invalid document in either layer,
+refuses every call with `profile-invalid`, whether or not the document is
+shadowed. A document opens with the header marker `<!-- quotient-profile`.
+
+The policy's `profiles` maps each profile a call may use to its capability.
+Step 3 decides in this order:
+
+1. A name the start-up snapshot does not hold refuses `profile-unknown`.
+2. A name outside the policy map refuses `profile-not-allowed`.
+3. A document whose `filesystem` differs from the capability the map pins
+   refuses `profile-capability-mismatch`.
+
+A local document may change model, thinking, tools and prose, never
+capability. The `spawn` audit record carries `profile_digest` and
+`profile_source`, the path of the document that won.
 
 A profile's `filesystem` (read or write) selects `forms.read` or `forms.write`
 respectively. A capability with no declared form refuses `wrapper-unavailable`,
@@ -127,10 +142,13 @@ What the server enforces:
 - **Absent, unreadable or malformed refuses every call.** A file that cannot be
   read refuses `policy-unavailable`; one that cannot be parsed or fails the
   schema refuses `policy-invalid`.
-- **The child's view may never make the policy file writable.** `childview.ts`
-  treats the policy file as a protected store with `never-writable` tolerance:
-  a read-write root or fixed bind that is or contains the policy file refuses
-  `view-overlaps-protected`. Reading it is tolerated.
+- **The child's view may never make the policy file, or a profile or help
+  layer, writable.** `childview.ts` treats the policy file and all four layers
+  (launch-dir and XDG, profiles and help) as protected stores with
+  `never-writable` tolerance. A layer is protected whether or not it exists. A
+  read-write root or `exposure` path that is, contains or lies inside one
+  refuses `view-overlaps-protected`. Reading is tolerated. As a consequence, a
+  write call cannot be rooted at the server's launch dir or any parent of it.
 
 What the operator must do:
 
@@ -143,7 +161,7 @@ What the operator must do:
 
 ## Known limitation: `exposure`
 
-Today every fixed bind is treated as read-write by the child-view check, so a
+Today every `exposure` path is treated as read-write by the child-view check, so a
 read-only mount that contains the policy file over-refuses. And nothing checks
 a policy's `exposure` against the binds the selected form actually adds; the
 policy's list is taken as the description. Tracked as IMP-048.
@@ -163,6 +181,7 @@ string; none is a JSON-RPC error.
 | `profile-invalid` | before every call; step 3; step 5 | the start-up snapshot failed to load (every call refuses, whatever its shape); the name fails the profile grammar; or the profile needs an extension its form cannot pass |
 | `profile-unknown` | step 3 | the name is not in the start-up snapshot |
 | `profile-not-allowed` | step 3 | the name is not in the policy's `profiles` |
+| `profile-capability-mismatch` | step 3 | the document's `filesystem` differs from the capability the policy's `profiles` pins |
 | `root-missing` | step 4 | the call's root does not exist |
 | `root-not-a-directory` | step 4 | the call's root exists but is not a directory |
 | `root-not-allowlisted` | step 4 | the canonical root is outside every `roots` entry |

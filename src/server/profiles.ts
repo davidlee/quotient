@@ -2,20 +2,24 @@
 // authority"), the call's root allowlist (sec-2 step 4) and the call's `tools`
 // narrowing (DEC-103).
 //
-// The tracked documents under `pi/mcp/profiles/` are read ONCE, at start-up,
-// into a snapshot the server holds for its whole lifetime. A profile edited on
-// disk is therefore inert until a restart, which is a deployment act: that is
-// what stops a write-capable delegate rewriting a `read` profile into a `write`
-// one and elevating a later call with neither a policy change nor a deployment
-// (RV-046 F-5). Nothing here reads the directory per call, and nothing joins the
-// caller's `profile` string into a path — the name is a snapshot key, never a
-// path component.
+// Profiles live in two layers, the launch dir's `.quotient/profiles` over
+// `<xdgConfig>/quotient/profiles` (`config.ts`); per name, the higher layer
+// wins. There is no built-in layer: `examples/profiles/` are copies to start
+// from. Both layers are read ONCE, at start-up, into a snapshot the server holds
+// for its whole lifetime, so an edit on disk is inert until a restart. Nothing
+// here reads a layer per call, and nothing joins the caller's `profile` string
+// into a path — the name is a snapshot key, never a path component.
+//
+// A document cannot raise its own capability: the policy's `profiles` map pins
+// each name to `read` or `write`, and step 3 refuses a document that declares
+// otherwise. That, and step 8 keeping both layers unwritable by any delegate,
+// is what closes RV-046 F-5's elevation path under local-first lookup.
 //
 // Document format. A profile document is markdown whose first non-empty line
 // opens an HTML-comment header, followed by one `key: value` line per field, and
 // then a line holding just the comment terminator:
 //
-//     <!-- pi-mcp-profile
+//     <!-- quotient-profile
 //     filesystem: read
 //     model: llm-gateway/deepseek-flash
 //     thinking: off
@@ -48,11 +52,17 @@ export const MCP_EXTENSION = 'builtin:mcp';
 /** The tool-name prefix the MCP built-in extension registers. */
 export const MCP_TOOL_PREFIX = 'mcp__';
 
-/** A tracked profile document's suffix; the base name is the profile name. */
+/** A profile document's suffix; the base name is the profile name. */
 export const PROFILE_SUFFIX = '.md';
 
-/** The filesystem capability a profile grants (design sec-1's capability column). */
-export type Filesystem = 'read' | 'write';
+/** The filesystem capabilities (design sec-1's capability column). */
+export const FILESYSTEMS = ['read', 'write'] as const;
+
+/** The filesystem capability a profile grants. */
+export type Filesystem = (typeof FILESYSTEMS)[number];
+
+export const isFilesystem = (value: unknown): value is Filesystem =>
+  (FILESYSTEMS as readonly unknown[]).includes(value);
 
 /** pi's `--thinking` levels: the optional header field's vocabulary. */
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -65,8 +75,8 @@ const isThinkingLevel = (value: string): value is ThinkingLevel => (THINKING_LEV
 /** One validated profile document, frozen into a snapshot. */
 export type Profile = {
   readonly name: string;
-  /** The absolute path of the document this entry was read from. */
-  readonly path: string;
+  /** The path of the document this entry was read from: the winning layer's. */
+  readonly source: string;
   readonly filesystem: Filesystem;
   readonly model: string;
   /** The child's `--thinking` level; absent when the header omits it. */
@@ -74,26 +84,27 @@ export type Profile = {
   readonly tools: readonly string[];
 };
 
-/** One read of the profile directory, held for the process lifetime. */
+/** One read of the profile layers, held for the process lifetime. */
 export type Snapshot = {
-  readonly dir: string;
+  /** The layers read, highest first. */
+  readonly layers: readonly string[];
   readonly profiles: ReadonlyMap<string, Profile>;
   /**
-   * sha256 over the directory's documents: for each document in ascending name
-   * order, its file name, a NUL, its bytes, and a NUL. Recorded in every run's
-   * audit spawn record (PHASE-06), so a run names the snapshot it ran under.
+   * sha256 over the winning documents: for each name in ascending order, the
+   * name, its source path and its bytes, each followed by a NUL. On every
+   * run's `spawn` record, so a run names the snapshot it ran under. Audit-only.
    */
   readonly digest: string;
 };
 
 /**
- * The directory a path failed in, and why. The caller answers `profile-invalid`
+ * The path a load failed at, and why. The caller answers `profile-invalid`
  * with this path: a snapshot that does not validate refuses at start-up rather
  * than being discovered per call (EX-2).
  */
 export type SnapshotLoad = { ok: true; snapshot: Snapshot } | { ok: false; path: string; detail: string };
 
-const HEADER_OPEN = '<!-- pi-mcp-profile';
+const HEADER_OPEN = '<!-- quotient-profile';
 const HEADER_CLOSE = '-->';
 const REQUIRED_HEADER_FIELDS = ['filesystem', 'model', 'tools'];
 const HEADER_FIELDS = [...REQUIRED_HEADER_FIELDS, 'thinking'];
@@ -151,7 +162,7 @@ function parseDocument(
   }
 
   const filesystem = fields.get('filesystem');
-  if (filesystem !== 'read' && filesystem !== 'write') {
+  if (!isFilesystem(filesystem)) {
     return { ok: false, detail: `${path}: filesystem must be "read" or "write", not "${filesystem}"` };
   }
   const model = fields.get('model') ?? '';
@@ -190,7 +201,7 @@ function parseDocument(
     ok: true,
     profile: Object.freeze({
       name,
-      path,
+      source: path,
       filesystem,
       model,
       tools: Object.freeze(tools),
@@ -199,56 +210,80 @@ function parseDocument(
   };
 }
 
-/**
- * Read and validate the profile directory once. Documents are the directory's
- * `*.md` files, in ascending name order, which is also the digest order: the
- * snapshot is a function of the directory's contents and nothing else, so two
- * checkouts of the same documents share one digest.
- */
-export function loadProfiles(dir: string): SnapshotLoad {
+type Loaded = { profile: Profile; bytes: Buffer };
+
+/** One layer's documents, in name order; a missing layer is empty. */
+function readLayer(layer: string): { ok: true; documents: string[] } | { ok: false; path: string; detail: string } {
   let entries: Dirent<string>[];
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    entries = readdirSync(layer, { withFileTypes: true });
   } catch (error) {
-    return { ok: false, path: dir, detail: `${dir} could not be read (${errorCode(error)})` };
+    if (errorCode(error) === 'ENOENT') return { ok: true, documents: [] };
+    return { ok: false, path: layer, detail: `${layer} could not be read (${errorCode(error)})` };
   }
-
   const documents = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(PROFILE_SUFFIX))
     .map((entry) => entry.name)
     .sort();
+  return { ok: true, documents };
+}
+
+function readDocument(path: string, document: string): { ok: true; loaded: Loaded } | { ok: false; path: string; detail: string } {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch (error) {
+    return { ok: false, path, detail: `${path} could not be read (${errorCode(error)})` };
+  }
+  const name = document.slice(0, -PROFILE_SUFFIX.length);
+  if (!PROFILE_NAME.test(name)) {
+    return { ok: false, path, detail: `${path}: "${name}" is not a profile name (${PROFILE_NAME.source})` };
+  }
+  const parsed = parseDocument(name, path, bytes.toString('utf8'));
+  if (!parsed.ok) return { ok: false, path, detail: parsed.detail };
+  return { ok: true, loaded: { profile: parsed.profile, bytes } };
+}
+
+/**
+ * Read and validate every layer once, highest first. A missing layer is empty;
+ * an unreadable layer, or an invalid document in ANY layer — shadowed or not —
+ * refuses: a broken document is a deployment fault whether or not it wins today.
+ * Per name the highest layer's document wins. The snapshot is a function of the
+ * layers' contents and paths and nothing else.
+ */
+export function loadProfiles(layers: readonly string[]): SnapshotLoad {
+  const winners = new Map<string, Loaded>();
+  for (const layer of layers) {
+    const listed = readLayer(layer);
+    if (!listed.ok) return listed;
+    for (const document of listed.documents) {
+      const read = readDocument(join(layer, document), document);
+      if (!read.ok) return read;
+      if (!winners.has(read.loaded.profile.name)) winners.set(read.loaded.profile.name, read.loaded);
+    }
+  }
 
   const profiles = new Map<string, Profile>();
   const digest = createHash('sha256');
-  for (const document of documents) {
-    const path = join(dir, document);
-    let bytes: Buffer;
-    try {
-      bytes = readFileSync(path);
-    } catch (error) {
-      return { ok: false, path, detail: `${path} could not be read (${errorCode(error)})` };
+  for (const name of [...winners.keys()].sort()) {
+    const { profile, bytes } = winners.get(name) as Loaded;
+    for (const part of [name, profile.source, bytes]) {
+      digest.update(part);
+      digest.update('\0');
     }
-    digest.update(document);
-    digest.update('\0');
-    digest.update(bytes);
-    digest.update('\0');
-
-    const name = document.slice(0, -PROFILE_SUFFIX.length);
-    if (!PROFILE_NAME.test(name)) {
-      return { ok: false, path, detail: `${path}: "${name}" is not a profile name (${PROFILE_NAME.source})` };
-    }
-    const parsed = parseDocument(name, path, bytes.toString('utf8'));
-    if (!parsed.ok) return { ok: false, path, detail: parsed.detail };
-    profiles.set(name, parsed.profile);
+    profiles.set(name, profile);
   }
 
   // The entries are frozen at construction; the map is never written again, and
   // every accessor below hands back a copy rather than the stored object.
-  return { ok: true, snapshot: Object.freeze({ dir, profiles, digest: digest.digest('hex') }) };
+  return {
+    ok: true,
+    snapshot: Object.freeze({ layers: Object.freeze([...layers]), profiles, digest: digest.digest('hex') }),
+  };
 }
 
-/** The three profile refusals, in the order step 3 decides them. */
-export type ProfileRefusal = 'profile-invalid' | 'profile-unknown' | 'profile-not-allowed';
+/** The four profile refusals, in the order step 3 decides them. */
+export type ProfileRefusal = 'profile-invalid' | 'profile-unknown' | 'profile-not-allowed' | 'profile-capability-mismatch';
 
 export type ProfileResolution =
   | { ok: true; profile: Profile }
@@ -256,13 +291,16 @@ export type ProfileResolution =
 
 /**
  * Step 3: resolve a caller's `profile` from the snapshot only, first failure
- * wins — the grammar, then the snapshot, then the policy's allowlist. The name
- * is never joined into a path, and the snapshot is never re-read.
+ * wins — the grammar, then the snapshot, then the policy's map key, then the
+ * capability the map pins against the one the document declares. A local
+ * document may change model, thinking, tools and prose, never capability. The
+ * name is never joined into a path, the snapshot is never re-read, and the map
+ * is consulted by own key only.
  */
 export function resolveProfile(
   snapshot: Snapshot,
   name: string,
-  allowed: readonly string[],
+  pinned: Readonly<Record<string, Filesystem>>,
 ): ProfileResolution {
   if (!PROFILE_NAME.test(name)) {
     return {
@@ -276,21 +314,28 @@ export function resolveProfile(
     return {
       ok: false,
       reason: 'profile-unknown',
-      detail: `profile "${name}" is not in the start-up snapshot of ${snapshot.dir}`,
+      detail: `profile "${name}" is not in the start-up snapshot of ${snapshot.layers.join(', ') || 'no layer'}`,
     };
   }
-  if (!allowed.includes(name)) {
+  if (!Object.hasOwn(pinned, name)) {
     return {
       ok: false,
       reason: 'profile-not-allowed',
-      detail: `profile "${name}" is not listed in the policy's profiles (${allowed.join(', ') || 'none'})`,
+      detail: `profile "${name}" is not listed in the policy's profiles (${Object.keys(pinned).join(', ') || 'none'})`,
+    };
+  }
+  if (pinned[name] !== found.filesystem) {
+    return {
+      ok: false,
+      reason: 'profile-capability-mismatch',
+      detail: `${found.source} declares filesystem "${found.filesystem}", but the policy pins profile "${name}" to "${pinned[name]}"`,
     };
   }
   return {
     ok: true,
     profile: {
       name: found.name,
-      path: found.path,
+      source: found.source,
       filesystem: found.filesystem,
       model: found.model,
       tools: [...found.tools],
@@ -408,6 +453,6 @@ export function checkProfileExtensions(profile: Profile, extensions: readonly st
   return {
     ok: false,
     reason: 'profile-invalid',
-    detail: `${profile.path} names an ${MCP_TOOL_PREFIX}* tool while the "${profile.filesystem}" form passes no "-e ${MCP_EXTENSION}": the profile would ask for tools it can never receive`,
+    detail: `${profile.source} names an ${MCP_TOOL_PREFIX}* tool while the "${profile.filesystem}" form passes no "-e ${MCP_EXTENSION}": the profile would ask for tools it can never receive`,
   };
 }

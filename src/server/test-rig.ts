@@ -64,20 +64,62 @@ export function validPolicy(overrides: Record<string, unknown> = {}): Record<str
   };
 }
 
-/** The three launch-env paths a temp tree holds, named as the server reads them. */
+/**
+ * The launch-env paths a temp tree holds, named as the server reads them. The
+ * XDG config home is the tree's own, so the XDG profile and help layers never
+ * reach the operator's real `~/.config/quotient`.
+ */
 export function launchEnv(dir: string): Env {
   return {
     QUOTIENT_POLICY: join(dir, 'policy.json'),
     QUOTIENT_RUN_DIR: join(dir, 'run'),
     QUOTIENT_SESSION_HOME: join(dir, 'sessions'),
+    XDG_CONFIG_HOME: join(dir, 'config'),
   };
 }
 
+/** The XDG profile layer under a tree `launchEnv` names. */
+export const xdgProfileLayer = (dir: string): string => join(dir, 'config', 'quotient', 'profiles');
+
+/** One profile document in the header format the loader documents. */
+export function profileDocument(
+  overrides: { filesystem?: string; model?: string; thinking?: string; tools?: string } = {},
+): string {
+  return [
+    '<!-- quotient-profile',
+    `filesystem: ${overrides.filesystem ?? 'read'}`,
+    `model: ${overrides.model ?? 'llm-gateway/deepseek-flash'}`,
+    ...(overrides.thinking === undefined ? [] : [`thinking: ${overrides.thinking}`]),
+    `tools: ${overrides.tools ?? 'read, grep, find, ls, bash'}`,
+    '-->',
+    '',
+    '# profile',
+    '',
+    'Prose the loader ignores: only the header is machine-readable.',
+    '',
+  ].join('\n');
+}
+
+/** Write one `<name>.md` per entry into LAYER, creating it; the layer path. */
+export function writeProfiles(layer: string, documents: Record<string, string>): string {
+  mkdirSync(layer, { recursive: true });
+  for (const [name, text] of Object.entries(documents)) writeFileSync(join(layer, `${name}.md`), text);
+  return layer;
+}
+
+/** The fixture profiles every rig serves: one per capability. */
+export const RIG_PROFILES: Record<string, string> = {
+  read: profileDocument(),
+  write: profileDocument({ filesystem: 'write', tools: 'read, bash, edit, write, grep, find, ls' }),
+};
+
 export type Workspace = { env: Env; dir: string; policyPath: string; runDir: string };
 
-/** A temp tree with a policy file and the three launch-env paths. */
+/** A temp tree with a policy file, the launch-env paths and RIG_PROFILES in
+ *  its XDG profile layer. */
 export function workspace(policy: unknown = validPolicy(), options: { raw?: boolean } = {}): Workspace {
   const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-ws-'));
+  writeProfiles(xdgProfileLayer(dir), RIG_PROFILES);
   const policyPath = join(dir, 'policy.json');
   writeFileSync(policyPath, options.raw ? String(policy) : JSON.stringify(policy, null, 2));
   const runDir = join(dir, 'run');
@@ -106,6 +148,10 @@ export type Rig = {
   sessionHome: string;
   root: string;
   policyPath: string;
+  /** The server's launch dir: its `.quotient/` is the highest layer, and it is
+   *  not the root, so a write call is not refused for containing it. */
+  launchDir: string;
+  /** The XDG profile layer, seeded with RIG_PROFILES. */
   profilesDir: string;
   readLauncher: string;
   writeLauncher: string;
@@ -157,8 +203,9 @@ export function newRig(
   mkdirSync(root);
   const runDir = join(dir, 'run');
   const sessionHome = join(dir, 'sessions');
-  const profilesDir = join(dir, 'profiles');
-  mkdirSync(profilesDir);
+  const launchDir = join(dir, 'launch');
+  mkdirSync(launchDir);
+  const profilesDir = writeProfiles(xdgProfileLayer(dir), RIG_PROFILES);
   const readLauncher = stubLauncher(dir, 'pi-mcp-read', options.read ?? QUIET, markerDir);
   const writeLauncher = stubLauncher(dir, 'pi-mcp-write', options.write ?? QUIET, markerDir);
   const policyPath = join(dir, 'policy.json');
@@ -183,6 +230,7 @@ export function newRig(
     sessionHome,
     root,
     policyPath,
+    launchDir,
     profilesDir,
     readLauncher,
     writeLauncher,
@@ -261,6 +309,11 @@ export type LiveServer = {
   stderr: () => string;
 };
 
+/**
+ * A server in this process. Its launch dir defaults to a fresh empty directory
+ * rather than the process cwd, so the checkout's own `.quotient/` never reaches
+ * a test's snapshot.
+ */
 export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
   const out: string[] = [];
   const err: string[] = [];
@@ -277,7 +330,8 @@ export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
     },
   });
   const input = new PassThrough();
-  const done = serve(input, output, env, diagnostics, options);
+  const launchDir = options.launchDir ?? mkdtempSync(join(tmpdir(), 'quotient-launch-'));
+  const done = serve(input, output, env, diagnostics, { ...options, launchDir });
   return {
     replies: () =>
       out
@@ -292,6 +346,10 @@ export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
     stderr: () => err.join(''),
   };
 }
+
+/** A server for RIG, launched from the rig's own launch dir. */
+export const serveRig = (rig: Rig, options: ServeOptions = {}): LiveServer =>
+  openServer(rig.env, { launchDir: rig.launchDir, ...options });
 
 export async function waitForReplies(server: LiveServer, count: number, timeoutMs = 10000): Promise<Record<string, any>[]> {
   const deadline = Date.now() + timeoutMs;

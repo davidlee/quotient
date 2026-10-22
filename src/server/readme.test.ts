@@ -10,7 +10,6 @@ import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  FORM_FIELDS,
   MAXIMA_FIELDS,
   OPTIONAL_FIELDS,
   REQUIRED_FIELDS,
@@ -19,6 +18,7 @@ import {
 } from './policy.ts';
 import { POLICY_VAR, RUN_DIR_VAR, SESSION_HOME_VAR } from '../config.ts';
 import { RESULT_REFUSAL_REASONS } from './result.ts';
+import { FILESYSTEMS } from './profiles.ts';
 import { readText, workspace } from './test-rig.ts';
 
 const README = new URL('./README.md', import.meta.url).pathname;
@@ -78,7 +78,7 @@ test('every policy field the schema declares appears backticked', () => {
     ...OPTIONAL_FIELDS,
     ...STATIC_ONLY_FIELDS,
     ...MAXIMA_FIELDS.map((unit) => `maxima.${unit}`),
-    ...FORM_FIELDS.map((capability) => `forms.${capability}`),
+    ...FILESYSTEMS.map((capability) => `forms.${capability}`),
   ];
   for (const field of fields) {
     assert.ok(backticked(text, field), `the README must name \`${field}\``);

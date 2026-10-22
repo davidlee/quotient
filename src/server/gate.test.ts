@@ -29,7 +29,7 @@ import {
   line,
   markerPids,
   newRig,
-  openServer,
+  serveRig,
   patchPolicy,
   pause,
   resultDocument,
@@ -336,7 +336,7 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
     read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, emit(messageEnd('stop')), SETTLED, 'exit 0'].join('\n'),
     policy: { maxima: { requests: 20, tokens: 100000, cost_usd: 0.005, wall_clock_s: 600 } },
   });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'spend', profile: 'read', cwd: rig.root, session: 'ceiling1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [reply] = await waitForReplies(server, 1);
@@ -366,7 +366,7 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
 
 test('switch: flipping enabled to false halts an in-flight run through the ladder, and the next call is refused (EX-3, VT-3)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'switch1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
@@ -396,7 +396,7 @@ test('switch: flipping enabled to false halts an in-flight run through the ladde
 
 test('switch: a policy deleted during an idle run aborts it, and the next call is refused policy-unavailable (EX-4, VT-4)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'lost1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
@@ -416,7 +416,7 @@ test('switch: a policy deleted during an idle run aborts it, and the next call i
 
 test('switch: a policy corrupted during an idle run aborts it, and the next call is refused policy-invalid (EX-4, VT-4)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'broken1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
 
@@ -441,7 +441,7 @@ test('timeout: the wall clock halts a stalled run with cause timeout and its own
     read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n'),
     policy: { maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 0.2 } },
   });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'backstop1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [reply] = await waitForReplies(server, 1);
@@ -466,7 +466,7 @@ test('usage sanity live: an unpriced send halts the run as accounting_unknown (E
       'sleep 60',
     ].join('\n'),
   });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'unpriced', profile: 'read', cwd: rig.root, session: 'accounting1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [reply] = await waitForReplies(server, 1);
@@ -483,7 +483,7 @@ test('usage sanity live: an unpriced send halts the run as accounting_unknown (E
 
 test('a run that hits no limit completes, and its audit has no abort record (EX-6)', async (t) => {
   const rig = newRig(t, { read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, emit(messageEnd('stop')), SETTLED, 'exit 0'].join('\n') });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'clean1' }));
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
@@ -523,7 +523,7 @@ test('the transcript budget reaches a running call: the policy re-read at admiss
     ].join('\n'),
     policy: { transcript_budget_bytes: 10_000_000 },
   });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
 
   server.write(callLine(1, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
@@ -568,7 +568,7 @@ test('a nested figure named in a tool result is not attributed to the run: cost_
       'exit 0',
     ].join('\n'),
   });
-  const server = openServer(rig.env, { graceMs: 150, gateIdleMs: 20 });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'call a nested agent', profile: 'read', cwd: rig.root, session: 'nested1' }));
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);

@@ -275,6 +275,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
       form: plan.form.path,
       profile: plan.profile.name,
       profile_digest: plan.profileDigest,
+      profile_source: plan.profile.source,
       argv,
     })
   ) {

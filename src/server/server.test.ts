@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
 import { packageVersion } from '../root.ts';
-import { attempts, converse, jsonLines, line, serverCommand, validPolicy, workspace } from './test-rig.ts';
+import { attempts, converse, jsonLines, line, serverCommand, validPolicy, workspace, xdgProfileLayer } from './test-rig.ts';
 import type { Env } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
@@ -127,8 +127,9 @@ test('an unparsable line produces no response, only a stderr note, and the loop 
 });
 
 test('the server process starts, answers initialize and exits 0 on stdin EOF', () => {
-  const { env } = workspace();
+  const { env, dir } = workspace();
   const child = spawnSync(...serverCommand, {
+    cwd: dir,
     input: `${line({ id: 1, method: 'initialize' })}\n`,
     env: { PATH: process.env.PATH, ...env },
     encoding: 'utf8',
@@ -209,7 +210,7 @@ test('with every QUOTIENT_* unset, request-boundary and admission refusals both 
 test('a launch form that cannot be executed reports failed with termination spawn, with the run audit beside it', async () => {
   const root = join(mkdtempSync(join(tmpdir(), 'pi-mcp-server-root-')), 'root');
   mkdirSync(root, { recursive: true });
-  const { runDir, env } = workspace(validPolicy({ roots: [root] }));
+  const { runDir, env, dir } = workspace(validPolicy({ roots: [root] }));
   const { doc, isError, reply } = await call(
     callTool({ prompt: 'review this', profile: 'read', cwd: root }),
     env,
@@ -234,6 +235,7 @@ test('a launch form that cannot be executed reports failed with termination spaw
   assert.deepEqual(audit.map((line) => line.record), ['spawn', 'exit']);
   assert.match(String(audit[0].policy_digest), /^[0-9a-f]{64}$/);
   assert.match(String(audit[0].profile_digest), /^[0-9a-f]{64}$/);
+  assert.equal(audit[0].profile_source, join(xdgProfileLayer(dir), 'read.md'), 'the winning document is audited');
   assert.equal(audit[1].code, null);
   assert.equal(audit[1].spawn_failed, true);
   assert.equal(attempts(runDir).length, 0);

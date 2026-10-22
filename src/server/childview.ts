@@ -2,7 +2,7 @@
 // "Child-view disjointness").
 //
 // The child view is the canonicalised union of {the root, the active session
-// directory, the policy's fixed child mounts}. "No bind names the evidence" is
+// directory, the policy's `exposure` paths}. "No bind names the evidence" is
 // not the property that matters — a root that *contains* the evidence directory
 // exposes it just as surely, and DEC-095 lets an operator allowlist `$HOME` or
 // `/`. So the property is disjointness over that union, checked before spawn: a
@@ -20,12 +20,12 @@ import type { Filesystem } from './profiles.ts';
 export type ViewRefusal = 'view-overlaps-protected';
 
 /** What a member of the child view is bound for, for the refusal's detail. */
-export type MemberRole = 'root' | 'session-directory' | 'child_bind';
+export type MemberRole = 'root' | 'session-directory' | 'exposure';
 
 /**
  * How strongly a member exposes what it covers, in this posture: the root is
- * writable for a `write` capability and read-only for a `read` one; every fixed
- * child mount and the active session directory are writable.
+ * writable for a `write` capability and read-only for a `read` one; every
+ * `exposure` path and the active session directory are writable.
  */
 export type Exposure = 'read-only' | 'read-write';
 
@@ -39,7 +39,7 @@ export type ChildViewMember = {
 /** How much exposure a protected store tolerates (design sec-3's table). */
 export type StoreTolerance = 'unreachable' | 'never-writable';
 
-export type StoreKind = 'run-evidence' | 'attempts-ledger' | 'session-home' | 'policy-file';
+export type StoreKind = 'run-evidence' | 'attempts-ledger' | 'session-home' | 'policy-file' | 'profile-layer' | 'help-layer';
 
 export type ProtectedStore = {
   kind: StoreKind;
@@ -61,12 +61,16 @@ export type ChildViewInput = {
   capability: Filesystem;
   /** `<QUOTIENT_SESSION_HOME>/<session>` — the one directory a child is given. */
   sessionDir: string;
-  /** The policy's fixed child mounts. */
-  childBinds: readonly string[];
+  /** The policy's `exposure`: writable host paths beyond the root and session. */
+  exposure: readonly string[];
   sessionHome: string;
   /** `QUOTIENT_RUN_DIR`. */
   runDir: string;
   policyPath: string;
+  /** The profile layers (`Locations.profileLayers`), whether or not they exist. */
+  profileLayers: readonly string[];
+  /** The help layers (`Locations.helpLayers`), whether or not they exist. */
+  helpLayers: readonly string[];
 };
 
 export type ChildViewCheck = { ok: true } | { ok: false; reason: ViewRefusal; detail: string };
@@ -80,8 +84,8 @@ export function childViewMembers(input: ChildViewInput): ChildViewMember[] {
       exposure: input.capability === 'write' ? 'read-write' : 'read-only',
     },
     { role: 'session-directory', path: canonicalPath(input.sessionDir), exposure: 'read-write' },
-    ...input.childBinds.map((path): ChildViewMember => ({
-      role: 'child_bind',
+    ...input.exposure.map((path): ChildViewMember => ({
+      role: 'exposure',
       path: canonicalPath(path),
       exposure: 'read-write',
     })),
@@ -106,12 +110,19 @@ export function protectedStores(input: ChildViewInput): ProtectedStore[] {
       except: canonicalPath(input.sessionDir),
     },
     { kind: 'policy-file', path: canonicalPath(input.policyPath), tolerance: 'never-writable' },
+    // The layers are protected whether or not they exist: a write delegate must
+    // not be able to create `.quotient/` and plant text for the next restart.
+    ...layerStores('profile-layer', input.profileLayers),
+    ...layerStores('help-layer', input.helpLayers),
   ];
 }
 
+const layerStores = (kind: StoreKind, layers: readonly string[]): ProtectedStore[] =>
+  layers.map((layer) => ({ kind, path: canonicalPath(layer), tolerance: 'never-writable' }));
+
 /**
- * Step 8. Members are checked in a stable order (the root first, then the fixed
- * mounts in the policy's order) against the stores in theirs, so a policy with
+ * Step 8. Members are checked in a stable order (the root first, then the
+ * `exposure` paths in the policy's order) against the stores in theirs, so a policy with
  * two problems names the same one on every call (EX-6).
  */
 export function checkChildView(input: ChildViewInput): ChildViewCheck {
@@ -120,7 +131,7 @@ export function checkChildView(input: ChildViewInput): ChildViewCheck {
     for (const store of stores) {
       const overlap = relationTo(member.path, store.path);
       if (overlap === null || isExempt(member, store)) continue;
-      if (!refuses(overlap, member.exposure, store.tolerance)) continue;
+      if (!refuses(member.exposure, store.tolerance)) continue;
       return {
         ok: false,
         reason: 'view-overlaps-protected',
@@ -150,18 +161,18 @@ function isExempt(member: ChildViewMember, store: ProtectedStore): boolean {
 
 /**
  * Whether the store tolerates this overlap at this exposure. An unreachable
- * store tolerates none — read or write. A never-writable one tolerates reading,
- * and a member strictly inside a file exposes none of it.
+ * store tolerates none — read or write. A never-writable one tolerates reading
+ * only: a writable member that is, contains or lies inside it can write it
+ * (inside a layer directory, plant a document there).
  */
-function refuses(overlap: Overlap, exposure: Exposure, tolerance: StoreTolerance): boolean {
-  if (tolerance === 'unreachable') return true;
-  return exposure === 'read-write' && overlap !== 'inside';
+function refuses(exposure: Exposure, tolerance: StoreTolerance): boolean {
+  return tolerance === 'unreachable' || exposure === 'read-write';
 }
 
 const ROLE_LABEL: Record<MemberRole, string> = {
   root: 'root',
   'session-directory': 'session directory',
-  child_bind: 'child_bind',
+  exposure: 'exposure path',
 };
 
 const STORE_LABEL: Record<StoreKind, string> = {
@@ -169,6 +180,8 @@ const STORE_LABEL: Record<StoreKind, string> = {
   'attempts-ledger': 'attempts ledger',
   'session-home': 'session home',
   'policy-file': 'policy file',
+  'profile-layer': 'profile layer',
+  'help-layer': 'help layer',
 };
 
 const OVERLAP_PHRASE: Record<Overlap, string> = {

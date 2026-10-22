@@ -39,6 +39,7 @@ test('an unusable location refuses policy-unavailable, naming the variable: unse
   for (const name of ['QUOTIENT_POLICY', 'QUOTIENT_RUN_DIR', 'QUOTIENT_SESSION_HOME']) {
     const unset: Env = { ...ws.env };
     delete unset[name];
+    delete unset.XDG_CONFIG_HOME;
     refuse(admit(unset, 1), 'policy-unavailable', new RegExp(`${name} is unset`));
     refuse(admit({ ...ws.env, [name]: 'relative/path' }, 17), 'policy-unavailable', new RegExp(`${name} is set but not`));
   }
