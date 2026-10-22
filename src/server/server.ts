@@ -18,7 +18,7 @@ import { reduce } from '../reduce/reduce.ts';
 import type { Reduced } from '../reduce/reduce.ts';
 import { createLatch, failedResult, refusedResult, resultFor } from './result.ts';
 import type { AgentResult } from './result.ts';
-import { admitCall, clampCeilings, selectForm, transcriptBudget } from './policy.ts';
+import { admitCall, clampCeilings, formExtensions, selectForm, transcriptBudget } from './policy.ts';
 import { resolveLocations, usable } from '../config.ts';
 import type { Locations } from '../config.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
@@ -297,11 +297,7 @@ async function callTool(
   // extensions must be able to deliver the profile's tools (EX-7).
   const form = selectForm(admission.policy, profile.profile.filesystem);
   if (!form.ok) return refuse(form.reason, form.detail);
-  // Interim until the spawn branches on the form kind (PHASE-06).
-  if (form.form.kind === 'unconfined') {
-    return refuse('wrapper-unavailable', 'this build cannot yet launch an unconfined form');
-  }
-  const extensions = checkProfileExtensions(profile.profile, form.form.extensions);
+  const extensions = checkProfileExtensions(profile.profile, formExtensions(form.form));
   if (!extensions.ok) return refuse(extensions.reason, extensions.detail);
 
   // Step 6: the ceilings, clamped downward.

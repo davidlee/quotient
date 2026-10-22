@@ -1,10 +1,11 @@
-// The spawn: one wrapped launch form, one child, one termination ladder.
+// The spawn: one launch form, one child, one termination ladder.
 //
-// Design sec-3's executable contract is a launcher with the executable baked in.
-// It consumes exactly one positional — the active session directory it binds at
-// run time — and then receives pi's own options verbatim, with no executable word
-// and no `--`; the confinement is the form's, so the server names no jail flag and
-// has no second argv shape to fall back to.
+// `buildArgv` is pi's argv, and the form kind decides the command once
+// (`launchCommand`, DEC-114). A confined form is a launcher with pi baked in: it
+// consumes exactly one positional — the active session directory it binds at run
+// time — and then receives pi's argv verbatim, with no executable word and no
+// `--`. An unconfined form is pi itself, given pi's argv alone. Everything after
+// that choice is shared: process group, ladder, child env, audit.
 //
 // Design sec-4's spawn: cwd is the root, the prompt travels on the child's own
 // stdin pipe (closed after the write), stdout is captured into the run's
@@ -31,10 +32,6 @@ import type { Tally } from '../reduce/reduce.ts';
 import { attemptsPath, appendAudit, removeRun, runLayout } from './evidence.ts';
 import type { AuditRecord, CallId, RunLayout } from './evidence.ts';
 import type { Form } from './policy.ts';
-
-/** The forms this build launches: confined only until the spawn branches on the
- *  form kind (PHASE-06). */
-type LaunchForm = Extract<Form, { kind: 'confined' }>;
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument } from './profiles.ts';
 import type { Profile } from './profiles.ts';
 import type { Termination } from './result.ts';
@@ -68,11 +65,12 @@ type Crossing = { unit: string; observed: number | null; limit: number | null };
 /** What an admitted call hands the spawn: the launch form, the profile it runs
  *  under, the active session directory the form binds, and the evidence root. */
 export type SpawnPlan = {
-  /** The policy's wrapped form for the profile's capability: the launcher. */
-  form: LaunchForm;
+  /** The policy's form for the profile's capability: a launcher, or pi itself. */
+  form: Form;
   profile: Profile;
   session: string;
-  /** `<QUOTIENT_SESSION_HOME>/<session>` — the form's one positional argument. */
+  /** `<QUOTIENT_SESSION_HOME>/<session>` — pi's `--session-dir`, and a confined
+   *  form's one positional argument. */
   sessionDir: string;
   /** The canonical root: the child's cwd, and the directory it works in. */
   root: string;
@@ -132,9 +130,9 @@ export type RunOutcome = {
 };
 
 /**
- * The launcher's argv: exactly one positional — the active session directory the
- * form binds at run time — and then pi's options verbatim. No `pi` token, no
- * `--`, no second positional, and no `-e` beyond `builtin:mcp` (design sec-3).
+ * Pi's argv: its options verbatim, with no executable word, no `--`, no
+ * positional, and no `-e` beyond `builtin:mcp` (design sec-3). Which command
+ * receives it, and with what in front, is `launchCommand`'s.
  *
  * `-e builtin:mcp` is passed exactly when the profile names an `mcp__*` tool,
  * because `--no-extensions` also disables the MCP built-in: step 5 has already
@@ -146,14 +144,12 @@ export type RunOutcome = {
  * byte-identical to one built before the field existed.
  */
 export function buildArgv(plan: {
-  form: LaunchForm;
   profile: Profile;
   session: string;
   sessionDir: string;
   tools: readonly string[];
 }): string[] {
   const argv = [
-    plan.sessionDir,
     '--mode',
     'json',
     '--model',
@@ -171,6 +167,15 @@ export function buildArgv(plan: {
     argv.push('-e', MCP_EXTENSION);
   }
   return argv;
+}
+
+/**
+ * The one branch on the form kind (DEC-114): the command to run and its argv. A
+ * confined form takes the session directory as its positional, then pi's argv;
+ * unconfined pi takes pi's argv alone, which already names `--session-dir`.
+ */
+export function launchCommand(form: Form, sessionDir: string, piArgv: readonly string[]): [string, string[]] {
+  return form.kind === 'confined' ? [form.path, [sessionDir, ...piArgv]] : [form.pi, [...piArgv]];
 }
 
 /**
@@ -217,7 +222,7 @@ export function childEnv(
 export async function runChild(plan: SpawnPlan, control: RunControl): Promise<RunOutcome> {
   const layout = plan.layout ?? runLayout(plan.runDir, plan.callId);
   const graceMs = control.graceMs ?? DEFAULT_GRACE_MS;
-  const argv = buildArgv(plan);
+  const [command, argv] = launchCommand(plan.form, plan.sessionDir, buildArgv(plan));
   const env = childEnv(control.env ?? process.env, plan.runDir, layout);
 
   const lines: string[] = [];
@@ -272,7 +277,8 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     !audit({
       record: 'spawn',
       root: plan.root,
-      form: plan.form.path,
+      form: command,
+      form_kind: plan.form.kind,
       profile: plan.profile.name,
       profile_digest: plan.profileDigest,
       profile_source: plan.profile.source,
@@ -287,7 +293,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   const events = createWriteStream(layout.events);
   const stderrLog = createWriteStream(layout.stderr);
 
-  const child: ChildProcess = spawn(plan.form.path, argv, {
+  const child: ChildProcess = spawn(command, argv, {
     cwd: plan.root,
     env,
     // One session of its own (`setsid`): the child leads a new process group, so
@@ -309,7 +315,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
         spawnFailed = true;
         exit = { code: null, signal: null };
       }
-      process.stderr.write(`quotient: the launch form ${plan.form.path} failed: ${error.message}\n`);
+      process.stderr.write(`quotient: the launch form ${command} failed: ${error.message}\n`);
       resolve();
     });
   });

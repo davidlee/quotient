@@ -41,6 +41,12 @@ export type Form =
   | { kind: 'confined'; path: string; extensions: string[] }
   | { kind: 'unconfined'; pi: string };
 
+/** The extensions a form passes. Unconfined pi passes none: the policy admits no
+ *  `extensions` beside `unconfined`, and pi runs `--no-extensions`. */
+export function formExtensions(form: Form): readonly string[] {
+  return form.kind === 'confined' ? form.extensions : [];
+}
+
 /** The per-call wrapper forms, one per filesystem capability. The server names
  *  no jail flag; it selects a form and the form owns its confinement. */
 export type Forms = { read?: Form; write?: Form };

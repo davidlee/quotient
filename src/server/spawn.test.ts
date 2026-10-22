@@ -21,6 +21,7 @@ import type { RunLayout } from './evidence.ts';
 import type { Profile } from './profiles.ts';
 import {
   callLine,
+  closeServer,
   emit,
   isAlive,
   jsonLines,
@@ -149,16 +150,14 @@ async function oneShot(t: TestContext, rig: Rig, request: string, extraEnv: Env 
 
 // ── EX-1: the launcher argv (VT-1) ─────────────────────────────────────────
 
-test('buildArgv: one positional (the active session dir), then pi options verbatim — no `pi` token, no `--`', () => {
+test('buildArgv: pi options verbatim — no session positional, no `pi` token, no `--`', () => {
   const argv = buildArgv({
-    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: [] },
     profile: READ_PROFILE,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
     tools: ['read', 'grep'],
   });
   assert.deepEqual(argv, [
-    '/sessions/sess-1',
     '--mode',
     'json',
     '--model',
@@ -171,10 +170,10 @@ test('buildArgv: one positional (the active session dir), then pi options verbat
     '/sessions/sess-1',
     '--no-extensions',
   ]);
-  assert.ok(!argv.includes('pi'), 'the executable is baked into the launcher, so no `pi` word');
-  assert.ok(!argv.includes('--'), 'the launcher takes no `--` separator');
+  assert.ok(!argv.includes('pi'), 'the executable is the command, never a word of its argv');
+  assert.ok(!argv.includes('--'), 'pi takes no `--` separator');
   assert.equal(argv.filter((arg) => arg === '--session-dir').length, 1);
-  assert.equal(argv[0], '/sessions/sess-1', 'the first word is the one positional');
+  assert.equal(argv[0], '--mode', 'the session positional is the confined branch\'s, not buildArgv\'s');
   assert.equal(argv.filter((arg) => arg === '-e').length, 0, 'a profile with no mcp__* tool passes no -e');
   assert.equal(argv.at(-1), '--no-extensions');
 });
@@ -182,7 +181,6 @@ test('buildArgv: one positional (the active session dir), then pi options verbat
 test('buildArgv: a profile with a thinking level passes `--thinking <level>` right after the model, exactly once', () => {
   const thinkingProfile: Profile = { ...READ_PROFILE, thinking: 'high' };
   const argv = buildArgv({
-    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: [] },
     profile: thinkingProfile,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -197,7 +195,6 @@ test('buildArgv: a profile with a thinking level passes `--thinking <level>` rig
   assert.equal(argv.filter((arg) => arg === '--thinking').length, 1, 'exactly one --thinking');
 
   const plain = buildArgv({
-    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: [] },
     profile: READ_PROFILE,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -206,11 +203,9 @@ test('buildArgv: a profile with a thinking level passes `--thinking <level>` rig
   assert.ok(!plain.includes('--thinking'), 'a profile with no level passes no --thinking');
 });
 
-test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__* tool, and no other -e ever', () => {
+test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__* tool', () => {
   const mcpProfile: Profile = { ...READ_PROFILE, tools: ['read', 'mcp__doctrine__search'] };
   const withMcp = buildArgv({
-    // The form declares the extension (step 5 refused the combination otherwise).
-    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: ['builtin:mcp'] },
     profile: mcpProfile,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -219,18 +214,6 @@ test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__*
   assert.deepEqual(withMcp.slice(-2), ['-e', 'builtin:mcp']);
   assert.equal(withMcp.filter((arg) => arg === '-e').length, 1, 'exactly one -e');
   assert.equal(withMcp.at(-1), 'builtin:mcp');
-
-  // A form that declares some other extension path passes none of it: the launch
-  // forms pass no -e other than builtin:mcp (design sec-3).
-  const other = buildArgv({
-    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: ['/nix/store/xxxxxxxx-extension/index.js'] },
-    profile: READ_PROFILE,
-    session: 'sess-1',
-    sessionDir: '/sessions/sess-1',
-    tools: ['read'],
-  });
-  assert.equal(other.filter((arg) => arg === '-e').length, 0);
-  assert.ok(!other.some((arg) => arg.includes('/nix/store/')));
 });
 
 test('the launcher receives the argv head and the tail separately: the session dir, then pi options', async (t) => {
@@ -251,6 +234,58 @@ test('the launcher receives the argv head and the tail separately: the session d
   assert.ok(!sawArgv.includes('pi'));
   assert.ok(!sawArgv.includes('--'));
   assert.ok(!sawArgv.includes('-e'), 'the read profile names no mcp__* tool');
+
+  const [spawned] = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
+  assert.equal(spawned.record, 'spawn');
+  assert.equal(spawned.form_kind, 'confined');
+  assert.equal(spawned.form, rig.readLauncher);
+  assert.deepEqual(spawned.argv, sawArgv, 'the audit names the argv the command received');
+});
+
+test('an unconfined write form runs pi with pi\'s argv: no session positional, and form_kind is audited', async (t) => {
+  // The stub stands in for pi itself: the policy names it as the unconfined pi.
+  const rig = newRig(t, {
+    write: `for a in "$@"; do printf '%s\n' "$a"; done > "@MARKER@/argv"\n${answer('stop')}\n${SETTLED}\nexit 0`,
+  });
+  patchPolicy(rig, 'forms', { read: rig.readLauncher, write: { unconfined: rig.writeLauncher } });
+
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(8, { prompt: 'edit', profile: 'write', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
+
+  const doc = resultDocument(reply);
+  assert.equal(doc.state, 'completed', JSON.stringify(doc));
+  const sawArgv = markerText(rig, 'argv').split('\n');
+  assert.equal(sawArgv[0], '--mode', `pi gets no session positional: ${JSON.stringify(sawArgv)}`);
+  const sessionDir = sawArgv[sawArgv.indexOf('--session-dir') + 1];
+  assert.equal(sawArgv.filter((arg) => arg === sessionDir).length, 1, 'the sessionDir appears once, as --session-dir\'s value');
+  assert.equal(sawArgv.at(-1), '--no-extensions');
+
+  const [spawned] = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
+  assert.equal(spawned.form_kind, 'unconfined');
+  assert.equal(spawned.form, rig.writeLauncher, 'the audit names pi as the command');
+  assert.deepEqual(spawned.argv, sawArgv);
+});
+
+test('an unconfined form passes no extensions, so a profile naming an mcp__* tool refuses profile-invalid', async (t) => {
+  const rig = newRig(t, { write: `printf x > "@MARKER@/ran"\nexit 0` });
+  writeFileSync(
+    join(rig.profilesDir, 'mcp-write.md'),
+    profileDocument({ filesystem: 'write', tools: 'read, write, mcp__doctrine__search' }),
+  );
+  patchPolicy(rig, 'profiles', { 'mcp-write': 'write' });
+  patchPolicy(rig, 'forms', { read: rig.readLauncher, write: { unconfined: rig.writeLauncher } });
+
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(9, { prompt: 'edit', profile: 'mcp-write', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
+
+  const doc = resultDocument(reply);
+  assert.equal(doc.state, 'refused', JSON.stringify(doc));
+  assert.equal(doc.refusal.reason, 'profile-invalid');
+  assert.equal(existsSync(join(rig.markerDir, 'ran')), false, 'nothing ran');
 });
 
 test('a profile that needs the MCP built-in makes the launcher receive -e builtin:mcp', async (t) => {
