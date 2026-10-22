@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2329  # cleanup and check_* are called indirectly, by trap and run_check
+# pack-check — the publish gate (design sec-5, "Pack verification").
+#
+# From a clean checkout of the repository's HEAD: `npm ci`, `npm pack` (whose
+# `prepack` runs tsc), install the tarball into an empty temp directory, then the
+# four design sec-5 checks against the INSTALLED bin. Nothing here reads this
+# worktree's src/: the point is the artefact a publish would upload.
+#
+#   1. `quotient --version` prints the package version, and `quotient help agent`
+#      exits 0;
+#   2. `quotient reduce <fixture>` exits 0 on a pi --mode json stream;
+#   3. an MCP `initialize` over stdio answers serverInfo.name = "quotient" and a
+#      non-empty `instructions`;
+#   4. one `pi_agent` call, under a temp policy through this script's own stub
+#      form, answers a pi-agent-result/1 with `final: true`.
+#
+# The stub is this gate's, not the test rig's: a canned pi event stream (JSONL,
+# the shape pi --mode json emits for one successful turn), a fake `pi` that emits
+# it on stdout, and a shell form that takes the confined-form invocation
+# (`<form> <session-dir> <pi argv…>`) and execs the fake pi. The SAME stream file
+# is check 2's fixture, so the reducer and the server are handed identical input.
+#
+# The checks own the server's launch environment (QUOTIENT_POLICY,
+# QUOTIENT_RUN_DIR, QUOTIENT_SESSION_HOME, XDG_CONFIG_HOME), so an ambient value
+# is refused rather than silently overriding the tree this gate printed.
+#
+# Usage: scripts/pack-check [REPO]
+#   REPO defaults to the repository this script lives in.
+#
+# Exit: 0 all four checks passed · 1 setup or a check failed · 2 usage or an
+#       ambient QUOTIENT_* variable.
+# QUOTIENT_PACK_KEEP=1 keeps the temp directory and prints its path.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+usage: scripts/pack-check [REPO]
+
+REPO is the checkout to clone (default: the repository this script lives in).
+Runs, from a clean checkout: npm ci, npm pack, install the tarball into an empty
+temp directory, then the four design sec-5 checks. Exit 0 only when all four pass.
+
+environment:
+  QUOTIENT_PACK_KEEP=1   keep the temp directory and print its path
+USAGE
+}
+
+refuse() {
+  echo "pack-check: $*" >&2
+  exit 2
+}
+fatal() {
+  echo "pack-check: $*" >&2
+  exit 1
+}
+
+repo_arg=
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  '') ;;
+  *)
+    [ "$#" -eq 1 ] || {
+      usage >&2
+      exit 2
+    }
+    repo_arg=$1
+    ;;
+esac
+
+# An ambient QUOTIENT_* variable would point a server at a tree this gate did not
+# set up, so it refuses instead of quietly overriding it. QUOTIENT_PACK_KEEP is
+# this script's own switch and is consumed below.
+while IFS='=' read -r name _value; do
+  case "$name" in
+    QUOTIENT_PACK_KEEP) continue ;;
+    QUOTIENT_*) refuse "$name is set; unset it (pack-check sets QUOTIENT_* for its own server)" ;;
+  esac
+done < <(env)
+
+for tool in git node npm; do
+  command -v "$tool" >/dev/null || fatal "$tool is not on PATH"
+done
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+repo=$(cd "${repo_arg:-$here/..}" && pwd -P)
+source_root=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) ||
+  fatal "$repo is not inside a git repository (pass REPO as the first argument)"
+head=$(git -C "$source_root" rev-parse --verify HEAD 2>/dev/null) ||
+  fatal "$source_root has no HEAD to clone"
+
+keep=${QUOTIENT_PACK_KEEP:-}
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/quotient-pack-check.XXXXXX")
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ -n "$keep" ]; then
+    echo "pack-check: kept $tmp (QUOTIENT_PACK_KEEP=1)" >&2
+  else
+    rm -rf -- "$tmp"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+# ── The clean checkout: clone HEAD, install, pack, install the tarball ──────
+# A clone of HEAD, not this worktree: uncommitted edits and ignored build output
+# must not reach the gate, and neither must a stray node_modules/.
+checkout=$tmp/checkout
+echo "pack-check: cloning $source_root at $head"
+git clone --quiet "$source_root" "$checkout" || fatal "git clone $source_root failed"
+git -C "$checkout" checkout --quiet --detach "$head" || fatal "checking out $head in $checkout failed"
+
+echo "pack-check: npm ci in $checkout"
+(cd "$checkout" && npm ci --no-audit --no-fund) || fatal "npm ci failed"
+
+echo "pack-check: npm pack in $checkout"
+packed=$(cd "$checkout" && npm pack --pack-destination "$tmp" --silent | tail -n 1) || fatal "npm pack failed"
+case "$packed" in
+  /*) tarball=$packed ;;
+  *) tarball=$tmp/$packed ;;
+esac
+[ -f "$tarball" ] || fatal "npm pack produced no tarball (got \"$packed\")"
+
+install_dir=$tmp/install
+mkdir -p "$install_dir"
+echo "pack-check: installing $(basename "$tarball") into $install_dir"
+(
+  cd "$install_dir" &&
+    npm init --yes >/dev/null 2>&1 &&
+    npm install --no-audit --no-fund --no-save "$tarball" >/dev/null
+) || fatal "installing the tarball into $install_dir failed"
+
+bin=$install_dir/node_modules/.bin/quotient
+[ -x "$bin" ] || fatal "the installed package has no executable bin at $bin"
+expected_version=$(node -e 'process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).version)' "$checkout/package.json") ||
+  fatal "cannot read the version from $checkout/package.json"
+
+# ── The stub deployment: stream, fake pi, form, profile, policy ─────────────
+# Everything the checks read or run is under this one temp tree; the paths are
+# siblings, never parents of each other, so no child view can reach another
+# store (step 8 would refuse that before spawning).
+deploy=$tmp/deploy
+stream=$deploy/stream.jsonl
+root=$deploy/root
+launch=$deploy/launch
+run=$deploy/run
+sessions=$deploy/sessions
+config=$deploy/config
+out=$tmp/out
+mkdir -p "$root" "$run" "$sessions" "$launch/.quotient/profiles" "$config" "$deploy/libexec" "$out"
+
+# (1) One successful turn, as pi --mode json frames it: LF-terminated JSON
+# records, a usage-bearing terminal assistant message, then agent_settled. The
+# reducer needs the usage to keep accounting `known`, and the server needs
+# stopReason `stop` + agent_settled + exit 0 to reach `final: true`.
+node - "$stream" "$root" <<'JS'
+const fs = require('node:fs');
+const [streamPath, rootPath] = process.argv.slice(2);
+const records = [
+  { type: 'session', version: 3, id: 'pack-check-session', cwd: rootPath },
+  { type: 'agent_start' },
+  { type: 'turn_start' },
+  { type: 'message_start', message: { role: 'assistant' } },
+  {
+    type: 'message_end',
+    message: {
+      role: 'assistant',
+      model: 'pack-check/stub',
+      stopReason: 'stop',
+      content: [{ type: 'text', text: 'pack-check: the stub delegate answered.' }],
+      usage: {
+        input: 12,
+        output: 4,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 16,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.001 },
+      },
+    },
+  },
+  { type: 'turn_end' },
+  { type: 'agent_end', messages: [] },
+  { type: 'agent_settled' },
+];
+fs.writeFileSync(streamPath, records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+JS
+
+# (2) The fake pi: it ignores pi's argv and stdin and emits the canned stream.
+pi_stub=$deploy/libexec/pi
+{
+  printf '#!/usr/bin/env bash\n'
+  printf '# pack-check stub pi: emit the canned pi --mode json stream for one turn.\n'
+  printf 'set -euo pipefail\n'
+  printf 'cat %q\n' "$stream"
+} >"$pi_stub"
+chmod 755 "$pi_stub"
+
+# (3) The form, in the confined-form invocation form-1 specifies:
+#     <form> <session-dir> <pi argv…>
+form=$deploy/libexec/quotient-pack-write
+{
+  cat <<'SH'
+#!/usr/bin/env bash
+# pack-check stub form: consume the session directory, then exec the fake pi with
+# pi's argv verbatim (form-1's invocation).
+set -euo pipefail
+if [ "$#" -lt 1 ]; then
+  echo "quotient-pack-write: no session directory" >&2
+  exit 64
+fi
+session_dir=$1
+shift
+if [ ! -d "$session_dir" ]; then
+  echo "quotient-pack-write: $session_dir is not a directory" >&2
+  exit 64
+fi
+SH
+  printf 'exec %q "$@"\n' "$pi_stub"
+} >"$form"
+chmod 755 "$form"
+
+# The one profile the call names. It must sit in one of the server's layers; the
+# launch dir's `.quotient/profiles` is the highest, and XDG_CONFIG_HOME is pointed
+# at an empty temp dir so no ambient profile layer is read.
+cat >"$launch/.quotient/profiles/write.md" <<'MD'
+<!-- quotient-profile
+filesystem: write
+model: pack-check/stub
+tools: read, bash
+-->
+
+# pack-check stub profile
+
+Written by `scripts/pack-check` for one `pi_agent` call. It names a stub form,
+so nothing in this deployment reaches a real model.
+MD
+
+# The temp policy: one write-capability profile, one form, one root, and maxima
+# wide enough that the single stub turn never crosses a ceiling.
+node - "$deploy/policy.json" "$root" "$form" <<'JS'
+const fs = require('node:fs');
+const [policyPath, rootPath, form] = process.argv.slice(2);
+const policy = {
+  schema: 'quotient-policy/1',
+  mode: 'per-call',
+  enabled: true,
+  roots: [rootPath],
+  maxima: { requests: 4, tokens: 100000, cost_usd: 0.25, wall_clock_s: 120 },
+  profiles: { write: 'write' },
+  forms: { write: form },
+  exposure: [],
+  transcript_budget_bytes: 8192,
+};
+fs.writeFileSync(policyPath, JSON.stringify(policy, null, 2) + '\n');
+JS
+
+server_env=(
+  "QUOTIENT_POLICY=$deploy/policy.json"
+  "QUOTIENT_RUN_DIR=$run"
+  "QUOTIENT_SESSION_HOME=$sessions"
+  "XDG_CONFIG_HOME=$config"
+)
+
+# ── The MCP driver: the installed bin over stdio, newline-framed JSON-RPC ────
+# `initialize` first in both modes; `call` then sends notifications/initialized
+# and one tools/call pi_agent. Each mode asserts its own contract and exits
+# nonzero with the detail on failure.
+driver=$tmp/mcp-drive.mjs
+cat >"$driver" <<'JS'
+// pack-check's MCP driver.
+//   node mcp-drive.mjs initialize <bin> <launch-dir> <root>
+//   node mcp-drive.mjs call       <bin> <launch-dir> <root>
+//
+// One server process, LF-framed JSON-RPC on stdio. The launch dir is the
+// server's cwd, so an absent `cwd` would resolve there; the call names the
+// deployment's root explicitly. stdin stays open until the answer arrives
+// (EOF is a cancellation trigger), then closes so the server exits 0.
+import { spawn } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
+
+const [mode, bin, launchDir, root] = process.argv.slice(2);
+if (bin === undefined || mode === undefined || launchDir === undefined || root === undefined) {
+  process.stderr.write('usage: mcp-drive.mjs <initialize|call> <bin> <launch-dir> <root>\n');
+  process.exit(2);
+}
+
+const server = spawn(bin, [], { cwd: launchDir, stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
+const waiters = new Map();
+let buffer = '';
+let stderrText = '';
+
+// A server that cannot start answers nothing; the check must fail with the
+// launch error rather than hang. Once started, a closed stdin is the child's
+// exit and not this driver's failure.
+server.on('error', (error) => {
+  void finish(1, `cannot start ${bin}: ${error.message}`);
+});
+server.stdin.on('error', () => {});
+
+server.stderr.on('data', (chunk) => {
+  stderrText += chunk;
+});
+server.stdout.on('data', (chunk) => {
+  buffer += chunk;
+  let newline = buffer.indexOf('\n');
+  while (newline >= 0) {
+    const line = buffer.slice(0, newline);
+    buffer = buffer.slice(newline + 1);
+    if (line.trim().length > 0) {
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        void finish(1, `the server wrote an unparsable line: ${line.slice(0, 200)}`);
+        return;
+      }
+      const waiter = waiters.get(message.id);
+      if (waiter !== undefined) {
+        waiters.delete(message.id);
+        waiter(message);
+      }
+    }
+    newline = buffer.indexOf('\n');
+  }
+});
+const exited = new Promise((resolve) => server.once('exit', (code, signal) => resolve({ code, signal })));
+
+function finish(code, detail) {
+  try {
+    server.stdin.end();
+  } catch {
+    // A server that never started has no stdin to close.
+  }
+  return Promise.race([exited, sleep(5000)]).then(() => {
+    if (server.exitCode === null) server.kill('SIGKILL');
+    if (code !== 0) {
+      process.stderr.write(`mcp-drive (${mode}): ${detail}\n`);
+      if (stderrText.trim().length > 0) process.stderr.write(`server stderr:\n${stderrText.trim()}\n`);
+    } else {
+      process.stdout.write(`${detail}\n`);
+    }
+    process.exit(code);
+  });
+}
+
+function request(id, method, params) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiters.delete(id);
+      reject(new Error(`no answer to ${method} within 30 s${stderrText.trim() ? ` (server stderr: ${stderrText.trim()})` : ''}`));
+    }, 30000);
+    waiters.set(id, (reply) => {
+      clearTimeout(timer);
+      resolve(reply);
+    });
+    try {
+      server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) })}\n`);
+    } catch (error) {
+      clearTimeout(timer);
+      waiters.delete(id);
+      reject(error);
+    }
+  });
+}
+
+function notify(method) {
+  server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method })}\n`);
+}
+
+/** A failed assertion: thrown so the one catch below reports it and exits 1. */
+function fail(detail) {
+  throw new Error(detail);
+}
+
+try {
+  const hello = await request(1, 'initialize');
+  const info = hello?.result?.serverInfo;
+  const instructions = hello?.result?.instructions;
+  if (info?.name !== 'quotient') fail(`serverInfo.name is ${JSON.stringify(info?.name)}, expected "quotient"`);
+  if (typeof instructions !== 'string' || instructions.trim().length === 0) {
+    fail('initialize carried no instructions');
+  }
+  if (mode === 'initialize') {
+    await finish(0, `serverInfo.name=quotient instructions=${Buffer.byteLength(instructions)} bytes protocolVersion=${hello.result.protocolVersion}`);
+  }
+
+  notify('notifications/initialized');
+  const call = await request(2, 'tools/call', {
+    name: 'pi_agent',
+    arguments: { prompt: 'pack-check: answer in one line.', profile: 'write', cwd: root },
+  });
+  const content = call?.result?.content;
+  if (!Array.isArray(content) || content.length !== 1 || content[0]?.type !== 'text') {
+    fail(`the pi_agent call carried no text content: ${JSON.stringify(call?.result)}`);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(content[0].text);
+  } catch (error) {
+    fail(`the call's text is not pi-agent-result JSON: ${String(error)}`);
+  }
+  if (doc.state !== 'completed' || doc.final !== true) {
+    const refusal = doc.refusal ? ` refusal=${doc.refusal.reason}: ${doc.refusal.detail}` : '';
+    fail(`the call answered state=${doc.state} final=${String(doc.final)} causes=${JSON.stringify(doc.causes)}${refusal}`);
+  }
+  await finish(0, `pi_agent answered final=true state=completed session=${doc.session} result=${JSON.stringify(doc.result)}`);
+} catch (error) {
+  await finish(1, error instanceof Error ? error.message : String(error));
+}
+JS
+
+# ── The four checks ─────────────────────────────────────────────────────────
+
+check_version_and_help() {
+  local version
+  version=$("$bin" --version) || {
+    echo "  quotient --version exited nonzero" >&2
+    return 1
+  }
+  if [ "$version" != "$expected_version" ]; then
+    echo "  quotient --version printed \"$version\", expected \"$expected_version\"" >&2
+    return 1
+  fi
+  if ! (cd "$launch" && env "${server_env[@]}" "$bin" help agent >/dev/null); then
+    echo "  quotient help agent exited nonzero" >&2
+    return 1
+  fi
+  echo "  quotient $version; help agent ok"
+}
+
+check_reduce() {
+  if ! "$bin" reduce "$stream" --out "$out" --quiet; then
+    echo "  quotient reduce $stream exited nonzero" >&2
+    return 1
+  fi
+  if [ ! -s "$out/status.json" ]; then
+    echo "  quotient reduce wrote no status.json in $out" >&2
+    return 1
+  fi
+  if ! grep -Eq '"state": *"completed"' "$out/status.json"; then
+    echo "  quotient reduce did not reduce the canned turn to state completed" >&2
+    return 1
+  fi
+  echo "  quotient reduce $stream exited 0"
+}
+
+check_initialize() {
+  env "${server_env[@]}" node "$driver" initialize "$bin" "$launch" "$root"
+}
+
+check_pi_agent() {
+  env "${server_env[@]}" node "$driver" call "$bin" "$launch" "$root"
+}
+
+failed=0
+run_check() {
+  local label=$1
+  shift
+  if "$@"; then
+    printf 'PASS %s\n' "$label"
+  else
+    printf 'FAIL %s\n' "$label"
+    failed=1
+  fi
+}
+
+run_check "1/4  quotient --version, quotient help agent" check_version_and_help
+run_check "2/4  quotient reduce <fixture>" check_reduce
+run_check "3/4  MCP initialize (serverInfo.name=quotient, instructions)" check_initialize
+run_check "4/4  pi_agent call (final: true)" check_pi_agent
+
+if [ "$failed" -ne 0 ]; then
+  echo "pack-check: FAIL — at least one check failed" >&2
+  exit 1
+fi
+echo "pack-check: PASS — all four checks passed"
+exit 0
