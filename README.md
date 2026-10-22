@@ -1,11 +1,18 @@
 # quotient
 
-A stdio MCP server with one tool, `pi_agent`, which delegates a bounded piece
-of work to a [pi](https://github.com/earendil-works/pi) agent. Each call runs one
-pi process, confined by a form you choose, under limits you set, in a
-directory you allowlisted. It answers with a reduced transcript, a status and
-a verdict. Use it to hand recon, review or small edits to a cheaper model
-without handing it your machine.
+An MCP server with one tool, `pi_agent`, which delegates a bounded piece of
+work to [pi](https://github.com/earendil-works/pi), a command-line coding agent
+that can run on a cheaper model. MCP (the Model Context Protocol) is how agents
+such as Claude Code and Codex call external tools; quotient speaks it over
+stdin and stdout.
+
+Each call runs one pi process in a directory you allowlisted, under limits you
+set, confined by a *form*: an executable you choose that decides what the
+delegate can read and write. Each profile has a *capability*, `read` or
+`write`, and the policy names one form per capability. The call answers with
+a transcript reduced to its essentials, a status (usage, cost, counts) and a
+verdict: whether the run succeeded, and if not, why. Use it to hand recon,
+review or small edits to a cheaper model without handing it your machine.
 
 ## Install
 

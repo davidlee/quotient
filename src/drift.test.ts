@@ -106,6 +106,21 @@ function refusalViolations(contract: string, reasons: readonly string[]): string
 
 type Field = { type: string; nullable: boolean };
 
+const JSON_TYPES = ['string', 'number', 'boolean', 'object', 'array'];
+
+/** Rows of the Fields table that cannot be read as (path, type, nullable,
+ *  meaning): a missing cell, a `|` inside a cell, or a value outside the
+ *  vocabulary would otherwise be misread silently. */
+function malformedFieldRows(contract: string): string[] {
+  return table(contract, 'Fields').flatMap((row) => {
+    if (row.length !== 4) return [`Fields row \`${row[0]}\` has ${row.length} cells, not 4`];
+    const problems: string[] = [];
+    if (!JSON_TYPES.includes(row[1])) problems.push(`Fields row \`${row[0]}\`: type ${row[1]} is not a JSON type`);
+    if (row[2] !== 'yes' && row[2] !== 'no') problems.push(`Fields row \`${row[0]}\`: nullable is ${row[2]}, not yes or no`);
+    return problems;
+  });
+}
+
 /** The Fields table: path → JSON type and nullability. An array's elements are
  *  `<path>[]`, an object's members `<path>.<key>`. */
 function fields(contract: string): Map<string, Field> {
@@ -163,7 +178,8 @@ function keysAndTypesViolations(contract: string, fixtures: Record<string, Agent
   const documented = fields(contract);
   if (documented.size === 0) return ['the contract has no Fields table'];
   const nulls = new Set<string>();
-  const violations = Object.entries(fixtures).flatMap(([label, doc]) => shapeViolations(doc, documented, label, nulls));
+  const violations = [...malformedFieldRows(contract)];
+  violations.push(...Object.entries(fixtures).flatMap(([label, doc]) => shapeViolations(doc, documented, label, nulls)));
   for (const [path, field] of documented) {
     if (field.nullable && !nulls.has(path)) violations.push(`nullable \`${path}\` is null in no fixture`);
   }
@@ -248,7 +264,7 @@ function policyViolations(contract: string): string[] {
 
 // ── No doctrine ids ────────────────────────────────────────────────────────
 
-const DOCTRINE_ID = /\b(?:SL|DEC|RV|ADR|REQ|POL|IMP|ISS|SPEC)-\d{3}\b/g;
+const DOCTRINE_ID = /\b(?:SL|DEC|RV|ADR|REQ|POL|IMP|ISS|SPEC|RFC|REV|CHR|IDE|RSK)-\d{3}\b/g;
 
 /** Every file under PATH (a file or a directory), recursively. */
 function filesUnder(path: string): string[] {
@@ -273,11 +289,8 @@ test('refusal tokens: the sources\' refusal unions equal the pi-agent-result-1.m
 
 test('result keys and types: every fixture matches the Fields table at every level, and each nullable field is null somewhere', () => {
   const results = fixtures();
-  assert.deepEqual(
-    new Set(Object.values(results).map((doc) => doc.state)),
-    new Set(RESULT_STATES),
-    'a fixture for every state',
-  );
+  for (const [label, doc] of Object.entries(results)) assert.equal(doc.state, label.split(' ')[0], `the ${label} fixture`);
+  assert.deepEqual(new Set(Object.values(results).map((doc) => doc.state)), new Set(RESULT_STATES), 'a fixture for every state');
   assert.ok(results.completed.status && (results.completed.status.alerts as unknown[]).length > 0, 'an alert element is checked');
   assert.deepEqual(keysAndTypesViolations(read(RESULT_CONTRACT), results), []);
 });
@@ -299,6 +312,12 @@ test('no doctrine ids: nothing under docs/, examples/ or the README cites one', 
 });
 
 // ── Negative controls: each check fails on a doctored contract ─────────────
+
+test('negative control: a Fields row that lost its nullable cell fails result keys and types', () => {
+  const doctored = doctor(read(RESULT_CONTRACT), '| `status.model` | string | yes |', '| `status.model` | string |');
+  const violations = keysAndTypesViolations(doctored, fixtures());
+  assert.ok(violations.includes('Fields row `status.model` has 3 cells, not 4'), violations.join('\n'));
+});
 
 /** Replace exactly one occurrence, so a doctoring that matched nothing fails
  *  loudly instead of passing vacuously. */
