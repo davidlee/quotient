@@ -293,7 +293,7 @@ async function callTool(
   };
 
   // Step 3: the profile, from the start-up snapshot only.
-  const profile = resolveProfile(snapshot, request.profile, admission.policy.profiles);
+  const profile = resolveProfile(snapshot, request.profile, Object.keys(admission.policy.profiles));
   if (!profile.ok) return refuse(profile.reason, profile.detail);
 
   // Step 4: the root, canonicalised and allowlisted by components.
@@ -304,6 +304,10 @@ async function callTool(
   // extensions must be able to deliver the profile's tools (EX-7).
   const form = selectForm(admission.policy, profile.profile.filesystem);
   if (!form.ok) return refuse(form.reason, form.detail);
+  // Interim until the spawn branches on the form kind (PHASE-06).
+  if (form.form.kind === 'unconfined') {
+    return refuse('wrapper-unavailable', 'this build cannot yet launch an unconfined form');
+  }
   const extensions = checkProfileExtensions(profile.profile, form.form.extensions);
   if (!extensions.ok) return refuse(extensions.reason, extensions.detail);
 
@@ -363,7 +367,7 @@ async function callTool(
       root: root.root,
       capability: profile.profile.filesystem,
       sessionDir: session.sessionDir,
-      childBinds: admission.policy.child_binds,
+      childBinds: admission.policy.exposure,
       sessionHome: admission.sessionHome,
       runDir: admission.runDir,
       policyPath: admission.policyPath,

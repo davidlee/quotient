@@ -66,7 +66,7 @@ const READ_PROFILE: Profile = {
 /** The plan an admitted call hands the spawn, for the direct cases. */
 function planFor(rig: Rig, overrides: Partial<SpawnPlan> = {}): SpawnPlan {
   return {
-    form: { path: rig.readLauncher, extensions: [] },
+    form: { kind: 'confined', path: rig.readLauncher, extensions: [] },
     profile: READ_PROFILE,
     session: 'session1',
     sessionDir: join(rig.sessionHome, 'session1'),
@@ -146,7 +146,7 @@ async function oneShot(t: TestContext, env: Env, request: string): Promise<Recor
 
 test('buildArgv: one positional (the active session dir), then pi options verbatim — no `pi` token, no `--`', () => {
   const argv = buildArgv({
-    form: { path: '/launchers/pi-mcp-read', extensions: [] },
+    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: [] },
     profile: READ_PROFILE,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -177,7 +177,7 @@ test('buildArgv: one positional (the active session dir), then pi options verbat
 test('buildArgv: a profile with a thinking level passes `--thinking <level>` right after the model, exactly once', () => {
   const thinkingProfile: Profile = { ...READ_PROFILE, thinking: 'high' };
   const argv = buildArgv({
-    form: { path: '/launchers/pi-mcp-read', extensions: [] },
+    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: [] },
     profile: thinkingProfile,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -192,7 +192,7 @@ test('buildArgv: a profile with a thinking level passes `--thinking <level>` rig
   assert.equal(argv.filter((arg) => arg === '--thinking').length, 1, 'exactly one --thinking');
 
   const plain = buildArgv({
-    form: { path: '/launchers/pi-mcp-read', extensions: [] },
+    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: [] },
     profile: READ_PROFILE,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -205,7 +205,7 @@ test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__*
   const mcpProfile: Profile = { ...READ_PROFILE, tools: ['read', 'mcp__doctrine__search'] };
   const withMcp = buildArgv({
     // The form declares the extension (step 5 refused the combination otherwise).
-    form: { path: '/launchers/pi-mcp-read', extensions: ['builtin:mcp'] },
+    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: ['builtin:mcp'] },
     profile: mcpProfile,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -218,7 +218,7 @@ test('buildArgv passes `-e builtin:mcp` exactly when the profile names an mcp__*
   // A form that declares some other extension path passes none of it: the launch
   // forms pass no -e other than builtin:mcp (design sec-3).
   const other = buildArgv({
-    form: { path: '/launchers/pi-mcp-read', extensions: ['/nix/store/xxxxxxxx-extension/index.js'] },
+    form: { kind: 'confined', path: '/launchers/pi-mcp-read', extensions: ['/nix/store/xxxxxxxx-extension/index.js'] },
     profile: READ_PROFILE,
     session: 'sess-1',
     sessionDir: '/sessions/sess-1',
@@ -256,7 +256,7 @@ test('a profile that needs the MCP built-in makes the launcher receive -e builti
     join(rig.profilesDir, 'mcp-read.md'),
     '<!-- pi-mcp-profile\nfilesystem: read\nmodel: llm-gateway/deepseek-flash\ntools: read, mcp__doctrine__search\n-->\n\n# mcp-read\n',
   );
-  patchPolicy(rig, 'profiles', ['mcp-read']);
+  patchPolicy(rig, 'profiles', { 'mcp-read': 'read' });
   patchPolicy(rig, 'forms', { read: { path: rig.readLauncher, extensions: ['builtin:mcp'] }, write: rig.writeLauncher });
 
   const server = openServer(rig.env, { profilesDir: rig.profilesDir, graceMs: 200 });

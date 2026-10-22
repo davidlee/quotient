@@ -442,7 +442,7 @@ test('the profile refusals reach the caller as tool results, in grammar -> snaps
   const listed = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root }, wire);
   assert.equal(listed.state, 'failed', 'the same name is admitted once the policy lists it');
 
-  const restricted = mintWire({ policy: { profiles: [] } });
+  const restricted = mintWire({ policy: { profiles: {} } });
   const refused = await drive({ prompt: 'hi', profile: 'read', cwd: restricted.root }, restricted);
   assert.equal(refused.refusal.reason, 'profile-not-allowed');
 });

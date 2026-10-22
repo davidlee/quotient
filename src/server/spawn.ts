@@ -31,6 +31,10 @@ import type { Tally } from '../reduce/reduce.ts';
 import { attemptsPath, appendAudit, removeRun, runLayout } from './evidence.ts';
 import type { AuditRecord, CallId, RunLayout } from './evidence.ts';
 import type { Form } from './policy.ts';
+
+/** The forms this build launches: confined only until the spawn branches on the
+ *  form kind (PHASE-06). */
+type LaunchForm = Extract<Form, { kind: 'confined' }>;
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument } from './profiles.ts';
 import type { Profile } from './profiles.ts';
 import type { Termination } from './result.ts';
@@ -65,7 +69,7 @@ type Crossing = { unit: string; observed: number | null; limit: number | null };
  *  under, the active session directory the form binds, and the evidence root. */
 export type SpawnPlan = {
   /** The policy's wrapped form for the profile's capability: the launcher. */
-  form: Form;
+  form: LaunchForm;
   profile: Profile;
   session: string;
   /** `<QUOTIENT_SESSION_HOME>/<session>` — the form's one positional argument. */
@@ -142,7 +146,7 @@ export type RunOutcome = {
  * byte-identical to one built before the field existed.
  */
 export function buildArgv(plan: {
-  form: Form;
+  form: LaunchForm;
   profile: Profile;
   session: string;
   sessionDir: string;

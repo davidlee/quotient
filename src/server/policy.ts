@@ -16,7 +16,7 @@ import { usable } from '../config.ts';
 import type { Locations } from '../config.ts';
 import { appendAttempt, sha256Hex } from './evidence.ts';
 import type { CallId } from './evidence.ts';
-import { MCP_EXTENSION } from './profiles.ts';
+import { MCP_EXTENSION, PROFILE_NAME } from './profiles.ts';
 import type { Filesystem } from './profiles.ts';
 
 
@@ -31,26 +31,35 @@ export type Maxima = {
 };
 
 /**
- * One per-call wrapper form: a flake-provided launcher, plus the extension paths
- * the launcher passes. `extensions` is empty for the plain string form, which is
- * what EX-7 compares a profile's `mcp__*` tools against (design sec-3).
+ * How a capability's child runs. Confined: a flake-provided launcher that owns
+ * the confinement, plus the extension paths it passes (`extensions` is empty
+ * for the plain string form; it is what a profile's `mcp__*` tools are compared
+ * against). Unconfined: pi itself, named by absolute path — write only, and
+ * never a PATH lookup.
  */
-export type Form = { path: string; extensions: string[] };
+export type Form =
+  | { kind: 'confined'; path: string; extensions: string[] }
+  | { kind: 'unconfined'; pi: string };
 
 /** The per-call wrapper forms, one per filesystem capability. The server names
  *  no jail flag; it selects a form and the form owns its confinement. */
 export type Forms = { read?: Form; write?: Form };
 
+/** The schema tag this build reads. */
+export const POLICY_SCHEMA = 'quotient-policy/1';
+
 export type Policy = {
+  schema: typeof POLICY_SCHEMA;
   mode: PolicyMode;
   /** Canonicalisable roots a call may name (consumed by PHASE-03). */
   roots: string[];
   maxima: Maxima;
-  /** Profile names the policy allows (consumed by PHASE-03). */
-  profiles: string[];
+  /** The profiles the policy allows, each pinned to a filesystem capability. */
+  profiles: Record<string, Filesystem>;
   forms: Forms;
-  /** Fixed child binds the wrapped form adds (consumed by PHASE-05). */
-  child_binds: string[];
+  /** The writable host paths a form shares with the child beyond the root, the
+   *  session directory and its private temp: an input to step 8. */
+  exposure: string[];
   enabled: boolean;
   /** Transcript byte ceiling (wired by PHASE-08). */
   transcript_budget_bytes?: number;
@@ -75,7 +84,7 @@ export type Admission =
     }
   | { ok: false; reason: RefusalReason; detail: string; digest: string | null };
 
-export const REQUIRED_FIELDS: readonly string[] = ['mode', 'roots', 'maxima', 'profiles', 'forms', 'child_binds', 'enabled'];
+export const REQUIRED_FIELDS: readonly string[] = ['schema', 'mode', 'roots', 'maxima', 'profiles', 'forms', 'exposure', 'enabled'];
 export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
 /**
  * Fields only the static posture declares. Their presence is a posture refusal,
@@ -84,8 +93,9 @@ export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
  */
 export const STATIC_ONLY_FIELDS: readonly string[] = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
 export const MAXIMA_FIELDS: readonly string[] = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
+/** The filesystem capabilities: the keys of `forms`, the values of `profiles`. */
 export const FORM_FIELDS: readonly string[] = ['read', 'write'];
-const FORM_KEYS: readonly string[] = ['path', 'extensions'];
+const FORM_KEYS: readonly string[] = ['path', 'extensions', 'unconfined'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };
 
@@ -126,10 +136,11 @@ export function readPolicy(policyPath: string): { ok: true; policy: Policy; dige
 }
 
 /**
- * One form value: an absolute path string (the PHASE-02 shape, which declares no
- * extension), or an object naming the path and the `-e` paths the form passes.
- * Nothing else is accepted inside the object: an operator who mistypes
- * `extensions` must not get a form that silently passes none.
+ * One form value: an absolute path string (which declares no extension), an
+ * object naming the path and the `-e` paths the form passes, or
+ * `{ unconfined: <absolute pi path> }` for a write form. Nothing else is
+ * accepted inside the object: an operator who mistypes `extensions` must not
+ * get a form that silently passes none.
  *
  * The extension list is not free-form: the launch forms pass no `-e` other than
  * `builtin:mcp` (design sec-3), so an entry naming anything else is a policy that
@@ -137,17 +148,26 @@ export function readPolicy(policyPath: string): { ok: true; policy: Policy; dige
  * carried as a claim the spawn never acts on.
  */
 function readForm(field: string, value: unknown): { ok: true; form: Form } | { ok: false; detail: string } {
-  if (isAbsolutePath(value)) return { ok: true, form: { path: value, extensions: [] } };
+  if (isAbsolutePath(value)) return { ok: true, form: { kind: 'confined', path: value, extensions: [] } };
   if (!isRecord(value)) {
     return { ok: false, detail: `forms.${field} must be an absolute path string or an object carrying one` };
   }
   for (const key of Object.keys(value)) {
     if (!FORM_KEYS.includes(key)) return { ok: false, detail: `unknown policy field: forms.${field}.${key}` };
   }
+  if (Object.hasOwn(value, 'unconfined')) {
+    if (Object.hasOwn(value, 'path')) return { ok: false, detail: `forms.${field}: path and unconfined are exclusive` };
+    if (Object.hasOwn(value, 'extensions')) return { ok: false, detail: `unknown policy field: forms.${field}.extensions` };
+    if (field === 'read') return { ok: false, detail: `forms.${field}: a read form cannot be unconfined` };
+    if (!isAbsolutePath(value.unconfined)) {
+      return { ok: false, detail: `forms.${field}.unconfined must be an absolute path to pi (there is no PATH lookup)` };
+    }
+    return { ok: true, form: { kind: 'unconfined', pi: value.unconfined } };
+  }
   const path = value.path;
   if (!isAbsolutePath(path)) return { ok: false, detail: `forms.${field}.path must be an absolute path string` };
   const extensions = value.extensions;
-  if (extensions === undefined) return { ok: true, form: { path, extensions: [] } };
+  if (extensions === undefined) return { ok: true, form: { kind: 'confined', path, extensions: [] } };
   if (!Array.isArray(extensions) || !extensions.every((extension) => typeof extension === 'string' && extension.length > 0)) {
     return { ok: false, detail: `forms.${field}.extensions must be an array of extension path strings` };
   }
@@ -159,7 +179,7 @@ function readForm(field: string, value: unknown): { ok: true; form: Form } | { o
       };
     }
   }
-  return { ok: true, form: { path, extensions: [...extensions] } };
+  return { ok: true, form: { kind: 'confined', path, extensions: [...extensions] } };
 }
 
 /**
@@ -169,6 +189,13 @@ function readForm(field: string, value: unknown): { ok: true; form: Form } | { o
  */
 function validatePolicy(value: unknown): PolicyCheck {
   if (!isRecord(value)) return invalid('the policy is not a JSON object');
+
+  // The tag first: a document that does not say it is this schema is not read
+  // against it, so no later check reports on a shape it was never written for.
+  if (!Object.hasOwn(value, 'schema')) return invalid('missing policy field: schema');
+  if (value.schema !== POLICY_SCHEMA) {
+    return invalid(`schema ${JSON.stringify(value.schema)} is not one this build reads: expected "${POLICY_SCHEMA}"`);
+  }
 
   for (const field of STATIC_ONLY_FIELDS) {
     if (Object.hasOwn(value, field)) {
@@ -219,8 +246,12 @@ function validatePolicy(value: unknown): PolicyCheck {
   }
 
   const profiles = value.profiles;
-  if (!Array.isArray(profiles) || !profiles.every((name) => typeof name === 'string')) {
-    return invalid('profiles must be an array of profile names');
+  if (!isRecord(profiles)) return invalid('profiles must be an object mapping a profile name to "read" or "write"');
+  for (const [name, capability] of Object.entries(profiles)) {
+    if (!PROFILE_NAME.test(name)) return invalid(`profiles.${name}: "${name}" is not a profile name (${PROFILE_NAME.source})`);
+    if (typeof capability !== 'string' || !FORM_FIELDS.includes(capability)) {
+      return invalid(`profiles.${name} must be "read" or "write"`);
+    }
   }
 
   const forms = value.forms;
@@ -233,9 +264,9 @@ function validatePolicy(value: unknown): PolicyCheck {
     parsedForms[field as Filesystem] = parsed.form;
   }
 
-  const childBinds = value.child_binds;
-  if (!Array.isArray(childBinds) || !childBinds.every(isAbsolutePath)) {
-    return invalid('child_binds must be an array of absolute path strings');
+  const exposure = value.exposure;
+  if (!Array.isArray(exposure) || !exposure.every(isAbsolutePath)) {
+    return invalid('exposure must be an array of absolute path strings');
   }
 
   const enabled = value.enabled;
@@ -247,12 +278,13 @@ function validatePolicy(value: unknown): PolicyCheck {
   }
 
   const policy: Policy = {
+    schema: POLICY_SCHEMA,
     mode: 'per-call',
     roots: roots as string[],
     maxima: maxima as Maxima,
-    profiles: profiles as string[],
+    profiles: profiles as Record<string, Filesystem>,
     forms: parsedForms,
-    child_binds: childBinds as string[],
+    exposure: exposure as string[],
     enabled,
   };
   if (budget !== undefined) policy.transcript_budget_bytes = budget as number;

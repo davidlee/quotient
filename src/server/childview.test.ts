@@ -17,6 +17,7 @@ import { canonicalPath, within } from './paths.ts';
 import type { ChildViewInput } from './childview.ts';
 import { RUN_EVIDENCE_FILES, attemptsPath, evidenceStores, runLayout } from './evidence.ts';
 import { serve } from './server.ts';
+import { validPolicy } from './test-rig.ts';
 
 const REPO_ROOT = realpathSync(new URL('../..', import.meta.url).pathname);
 
@@ -344,15 +345,7 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
   const policyPath = join(t.state, 'policy.json');
   writeFileSync(
     policyPath,
-    JSON.stringify({
-      mode: 'per-call',
-      roots: [t.state],
-      maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-      profiles: ['read', 'write'],
-      forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
-      child_binds: [],
-      enabled: true,
-    }),
+    JSON.stringify(validPolicy({ roots: [t.state], exposure: [], transcript_budget_bytes: undefined })),
   );
   const env = {
     QUOTIENT_POLICY: policyPath,

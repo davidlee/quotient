@@ -81,7 +81,8 @@ test('a wrong-typed policy value refuses policy-invalid, naming the field', () =
     ['profiles', 'read'],
     ['maxima', []],
     ['forms', 'pi-mcp-read'],
-    ['child_binds', [7]],
+    ['exposure', [7]],
+    ['exposure', ['relative/path']],
     ['enabled', 'yes'],
     ['transcript_budget_bytes', 1.5],
   ];
@@ -131,7 +132,7 @@ test('a policy naming a non-absolute root or form path refuses policy-invalid', 
 });
 
 test('a missing required policy field refuses policy-invalid, naming it', () => {
-  for (const field of ['mode', 'roots', 'profiles', 'forms', 'child_binds', 'enabled']) {
+  for (const field of ['schema', 'mode', 'roots', 'profiles', 'forms', 'exposure', 'enabled']) {
     const policy = validPolicy();
     delete policy[field];
     refuse(admit(workspace(policy).env, 6), 'policy-invalid', new RegExp(field));
@@ -221,8 +222,7 @@ test('the profile capability selects its form; a form the policy does not declar
 
   const read = selectForm(policy, 'read');
   if (!read.ok) assert.fail(`expected the read form, got ${read.reason}: ${read.detail}`);
-  assert.equal(read.form.path, '/nix/store/aaa/bin/pi-mcp-read');
-  assert.deepEqual(read.form.extensions, [], 'the string form declares no extension');
+  assert.deepEqual(read.form, { kind: 'confined', path: '/nix/store/aaa/bin/pi-mcp-read', extensions: [] }, 'the string form declares no extension');
 
   const write = selectForm(policy, 'write');
   if (write.ok) assert.fail('expected wrapper-unavailable for a capability with no form');
@@ -234,10 +234,11 @@ test('a form may declare the extensions it passes, and nothing else', () => {
   const policy = admittedPolicy({
     forms: { read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['builtin:mcp'] } },
   });
-  assert.deepEqual(policy.forms.read, { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['builtin:mcp'] });
+  assert.deepEqual(policy.forms.read, { kind: 'confined', path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['builtin:mcp'] });
 
   // A form with no declared extensions passes none, which is what EX-7 compares.
   assert.deepEqual(admittedPolicy({ forms: { read: { path: '/nix/store/aaa/bin/pi-mcp-read' } } }).forms.read, {
+    kind: 'confined',
     path: '/nix/store/aaa/bin/pi-mcp-read',
     extensions: [],
   });
@@ -266,6 +267,57 @@ test('a form may declare the extensions it passes, and nothing else', () => {
   assert.equal(foreign.reason, 'policy-invalid');
   assert.match(foreign.detail, /forms\.read\.extensions\[0\]/, 'the detail names the offending index');
   assert.match(foreign.detail, /other\.ts/, 'and the offending entry');
+});
+
+// ── quotient-policy/1: the schema tag, the profiles map, unconfined, exposure ─
+
+test('quotient-policy/1: schema is required and checked first; an unknown value is policy-invalid', () => {
+  const missing = validPolicy();
+  delete missing.schema;
+  refuse(admit(workspace(missing).env, 1), 'policy-invalid', /missing policy field: schema/);
+  // First: before the static-only posture check and the unknown-key check.
+  refuse(admit(workspace({ ...missing, agent: 'x', speed: 'fast' }).env, 1), 'policy-invalid', /schema/);
+  for (const schema of ['quotient-policy/2', 'pi-mcp-policy/1', 1, null]) {
+    refuse(admit(workspace(validPolicy({ schema })).env, 1), 'policy-invalid', /schema/);
+  }
+});
+
+test('child_binds is now an unknown field; exposure replaces it', () => {
+  const policy = validPolicy({ child_binds: [] });
+  refuse(admit(workspace(policy).env, 1), 'policy-invalid', /unknown policy field: child_binds/);
+  assert.deepEqual(admittedPolicy({ exposure: ['/home/operator/.pi'] }).exposure, ['/home/operator/.pi']);
+});
+
+test('profiles maps a profile name to read or write', () => {
+  assert.deepEqual(admittedPolicy({ profiles: { read: 'read', research: 'read', write: 'write' } }).profiles, {
+    read: 'read',
+    research: 'read',
+    write: 'write',
+  });
+  const cases: [unknown, RegExp][] = [
+    [['read', 'write'], /profiles must be an object/],
+    [{ Read: 'read' }, /profiles\.Read/],
+    [{ read: 'rw' }, /profiles\.read must be "read" or "write"/],
+    [{ read: true }, /profiles\.read must be "read" or "write"/],
+  ];
+  for (const [profiles, detail] of cases) {
+    refuse(admit(workspace(validPolicy({ profiles })).env, 1), 'policy-invalid', detail);
+  }
+});
+
+test('a write form may be unconfined; read unconfined, path with unconfined, and a relative pi are policy-invalid', () => {
+  const policy = admittedPolicy({ forms: { read: '/nix/store/aaa/bin/quotient-read', write: { unconfined: '/usr/bin/pi' } } });
+  assert.deepEqual(policy.forms.write, { kind: 'unconfined', pi: '/usr/bin/pi' }, 'a write unconfined is admitted');
+
+  const cases: [Record<string, unknown>, RegExp][] = [
+    [{ read: { unconfined: '/usr/bin/pi' } }, /forms\.read: a read form cannot be unconfined/],
+    [{ write: { path: '/nix/store/aaa/bin/quotient-write', unconfined: '/usr/bin/pi' } }, /forms\.write: path and unconfined/],
+    [{ write: { unconfined: 'pi' } }, /forms\.write\.unconfined must be an absolute path/],
+    [{ write: { unconfined: '/usr/bin/pi', extensions: ['builtin:mcp'] } }, /unknown policy field: forms\.write\.extensions/],
+  ];
+  for (const [forms, detail] of cases) {
+    refuse(admit(workspace(validPolicy({ forms })).env, 1), 'policy-invalid', detail);
+  }
 });
 
 // ── Ceilings clamp downward and refuse an above-maximum request (EX-6) ─────

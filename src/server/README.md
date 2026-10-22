@@ -37,17 +37,18 @@ top level and inside `maxima` or `forms` — rather than being silently dropped.
 | field | type | required | meaning | bad value |
 |---|---|---|---|---|
 | `mode` | string | yes | `per-call` is the only posture this build serves | `posture-unsupported` for any other value (`policy-invalid` if not a string) |
+| `schema` | the string `"quotient-policy/1"` | yes, checked first | the schema this document is written against | `policy-invalid` |
 | `roots` | array of absolute path strings | yes | roots a call's `cwd` may name; allowlisting is by path component | `policy-invalid` |
 | `maxima` | object | yes | per-run spend and time bounds; all four units required | `policy-invalid` |
 | `maxima.requests` | positive finite number | yes | provider requests per run | `policy-invalid` |
 | `maxima.tokens` | positive finite number | yes | input, output, cached and cache-write tokens per run | `policy-invalid` |
 | `maxima.cost_usd` | positive finite number | yes | provider cost in US dollars per run | `policy-invalid` |
 | `maxima.wall_clock_s` | positive finite number | yes | wall-clock seconds per run; the hard backstop | `policy-invalid` |
-| `profiles` | array of strings | yes | profile names a call may request | `policy-invalid` |
+| `profiles` | object: profile name → `"read"` or `"write"` | yes | profiles a call may request, each pinned to a capability | `policy-invalid` |
 | `forms` | object | yes | wrapper forms, one per filesystem capability | `policy-invalid` |
 | `forms.read` | absolute path string, or `{ "path": ..., "extensions": [...] }` | no | form used by a `read`-capability profile | `policy-invalid`; absent form refuses `wrapper-unavailable` at step 5 |
-| `forms.write` | absolute path string, or `{ "path": ..., "extensions": [...] }` | no | form used by a `write`-capability profile | `policy-invalid`; absent form refuses `wrapper-unavailable` at step 5 |
-| `child_binds` | array of absolute path strings | yes (may be empty) | fixed mounts the form adds beyond the root and session directory | `policy-invalid` |
+| `forms.write` | absolute path string, `{ "path": ..., "extensions": [...] }`, or `{ "unconfined": <absolute pi path> }` | no | form used by a `write`-capability profile | `policy-invalid`; absent form refuses `wrapper-unavailable` at step 5 |
+| `exposure` | array of absolute path strings | yes (may be empty) | writable host paths the form shares beyond the root and session directory | `policy-invalid` |
 | `enabled` | boolean | yes | the operator switch; `false` refuses every call | `policy-invalid`; `false` refuses `disabled` at step 2 |
 | `transcript_budget_bytes` | non-negative integer | no | byte ceiling for the returned transcript; `0` sets no ceiling | `policy-invalid` |
 
@@ -67,6 +68,7 @@ Placeholder absolute paths; replace them with this host's real form launchers.
 
 ```json
 {
+  "schema": "quotient-policy/1",
   "mode": "per-call",
   "roots": ["/home/operator/work"],
   "maxima": {
@@ -75,12 +77,12 @@ Placeholder absolute paths; replace them with this host's real form launchers.
     "cost_usd": 1.5,
     "wall_clock_s": 600
   },
-  "profiles": ["read", "research"],
+  "profiles": { "read": "read", "research": "read" },
   "forms": {
     "read": "/nix/store/00000000000000000000000000000000-pi-mcp-read/bin/pi-mcp-read",
     "write": "/nix/store/00000000000000000000000000000000-pi-mcp-write/bin/pi-mcp-write"
   },
-  "child_binds": ["/home/operator/.pi"],
+  "exposure": ["/home/operator/.pi"],
   "enabled": true,
   "transcript_budget_bytes": 8192
 }
@@ -88,8 +90,8 @@ Placeholder absolute paths; replace them with this host's real form launchers.
 
 ## Profiles and forms
 
-The policy's `profiles` names which tracked profiles a call may use. A name
-outside that list refuses `profile-not-allowed`; a name the start-up snapshot
+The policy's `profiles` maps each profile a call may use to its capability. A
+name outside that map refuses `profile-not-allowed`; a name the start-up snapshot
 does not hold refuses `profile-unknown`.
 
 A profile's `filesystem` (read or write) selects `forms.read` or `forms.write`
@@ -133,17 +135,17 @@ What the server enforces:
 What the operator must do:
 
 - Keep the file read-only (for example mode `0444`) and outside every root and
-  `child_binds` entry.
+  `exposure` entry.
 - Publish atomically: write a temp file in the same directory, then rename it
   over the policy path. A gate tick that catches a half-written file sees an
   unparsable policy and halts the in-flight run with cause `switch`. Fail-closed
   is the intended direction for a control channel.
 
-## Known limitation: `child_binds`
+## Known limitation: `exposure`
 
 Today every fixed bind is treated as read-write by the child-view check, so a
 read-only mount that contains the policy file over-refuses. And nothing checks
-a policy's `child_binds` against the binds the selected form actually adds; the
+a policy's `exposure` against the binds the selected form actually adds; the
 policy's list is taken as the description. Tracked as IMP-048.
 
 ## Refusals

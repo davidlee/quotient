@@ -51,12 +51,13 @@ const QUIET = `${SETTLED}\nexit 0`;
 /** A policy with every declared field present, per the schema in EX-6. */
 export function validPolicy(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    schema: 'quotient-policy/1',
     mode: 'per-call',
     roots: ['/work/one'],
     maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
-    profiles: ['read', 'write'],
+    profiles: { read: 'read', write: 'write' },
     forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
-    child_binds: ['/home/operator/.pi'],
+    exposure: ['/home/operator/.pi'],
     enabled: true,
     transcript_budget_bytes: 8192,
     ...overrides,
@@ -167,7 +168,7 @@ export function newRig(
       validPolicy({
         roots: [root],
         forms: { read: readLauncher, write: writeLauncher },
-        child_binds: [],
+        exposure: [],
         transcript_budget_bytes: 4096,
         ...options.policy,
       }),
