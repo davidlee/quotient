@@ -593,6 +593,23 @@ function abortNamed(params: unknown, context: Context): void {
 }
 
 /**
+ * The input's chunks until EOF, a failed input or SIGNAL: each ends the sequence
+ * the same way, so `serve` has one exit. The signal destroys the input, which
+ * the iterator reports as an AbortError. Only the input's own errors are caught
+ * here; an error from the consumer's loop body is not the input's and propagates.
+ */
+async function* inputChunks(input: Readable, diagnostics: Writable, signal?: AbortSignal): AsyncGenerator<unknown> {
+  if (signal) addAbortSignal(signal, input);
+  try {
+    for await (const chunk of input) yield chunk;
+  } catch (error) {
+    // A failed input is the client gone, as EOF is; the signal's AbortError is
+    // the operator's shutdown and needs no note.
+    if (!signal?.aborted) diagnostics.write(`quotient: the input failed: ${(error as Error).message}\n`);
+  }
+}
+
+/**
  * Serve one client over `input`/`output` until stdin EOF, a failed input or
  * `options.signal`. Takes its streams, its
  * environment and its two deployment locations, so the protocol is driven
@@ -631,25 +648,16 @@ export async function serve(
   const decoder = new StringDecoder('utf8');
   let pending = '';
 
-  // The signal destroys the input, so the loop below ends with an AbortError
-  // rather than by a second exit beside it.
-  if (options.signal) addAbortSignal(options.signal, input);
-  try {
-    for await (const chunk of input) {
-      pending += typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer);
-      let newline = pending.indexOf('\n');
-      while (newline >= 0) {
-        let record = pending.slice(0, newline);
-        pending = pending.slice(newline + 1);
-        if (record.endsWith('\r')) record = record.slice(0, -1);
-        await handleLine(record, context);
-        newline = pending.indexOf('\n');
-      }
+  for await (const chunk of inputChunks(input, diagnostics, options.signal)) {
+    pending += typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer);
+    let newline = pending.indexOf('\n');
+    while (newline >= 0) {
+      let record = pending.slice(0, newline);
+      pending = pending.slice(newline + 1);
+      if (record.endsWith('\r')) record = record.slice(0, -1);
+      await handleLine(record, context);
+      newline = pending.indexOf('\n');
     }
-  } catch (error) {
-    // A failed input is the client gone, as EOF is; the signal's AbortError is
-    // the operator's shutdown and needs no note.
-    if (!options.signal?.aborted) diagnostics.write(`quotient: the input failed: ${(error as Error).message}\n`);
   }
   // EOF, a failed input or the signal ends the loop. A trailing fragment without
   // LF is not a record: JSONL framing terminates every record with one.
