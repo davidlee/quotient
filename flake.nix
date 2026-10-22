@@ -34,6 +34,13 @@
             npmDepsHash = "sha256-7oIHeV7WcQZoQ7SzB78hEEBUtiYTb8T4HhPUJ0iWwrU=";
             nodejs = pkgs.nodejs_22;
             npmBuildScript = "build";
+            # The bin is a wrapper over dist/cli.js, so `process.argv[1]` names a
+            # store path that the next rebuild and GC remove. The wrapper exports
+            # the path it was run as, which `quotient help clients` prints.
+            nativeBuildInputs = [pkgs.makeWrapper];
+            postInstall = ''
+              wrapProgram $out/bin/quotient --run 'case "$0" in /*) QUOTIENT_LAUNCHER=$0 ;; *) QUOTIENT_LAUNCHER=$PWD/$0 ;; esac; export QUOTIENT_LAUNCHER'
+            '';
             meta = {
               description = "An MCP server with one tool, pi_agent, which delegates bounded work to pi";
               homepage = "https://github.com/davidlee/quotient";

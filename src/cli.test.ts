@@ -24,9 +24,9 @@ function hermetic(): { env: Env; cwd: string } {
 function quotient(
   args: string[],
   input = '',
-  { env, cwd } = hermetic(),
+  { env, cwd, script = CLI }: { env: Env; cwd: string; script?: string } = hermetic(),
 ): { status: number | null; stdout: string; stderr: string } {
-  const child = spawnSync(process.execPath, [CLI, ...args], { input, encoding: 'utf8', timeout: 30000, env, cwd });
+  const child = spawnSync(process.execPath, [script, ...args], { input, encoding: 'utf8', timeout: 30000, env, cwd });
   return { status: child.status, stdout: child.stdout, stderr: child.stderr };
 }
 
@@ -80,11 +80,30 @@ test('help clients prints both snippets with the running bin and the policy time
   mkdirSync(cwd);
   const { status, stdout } = quotient(['help', 'clients'], '', { env: { ...env, PATH: process.env.PATH }, cwd });
   assert.equal(status, 0);
-  const bin = JSON.stringify(realpathSync(CLI));
+  const bin = JSON.stringify(CLI);
   assert.ok(stdout.includes(`"command": ${bin}`), 'the Claude Code snippet names the bin');
   assert.ok(stdout.includes(`command = ${bin}`), 'the Codex snippet names the bin');
   assert.ok(stdout.includes(`cwd = ${JSON.stringify(cwd)}`));
   assert.match(stdout, /^tool_timeout_sec = 660 /m);
+});
+
+/** The command line `help clients` prints in the Codex snippet. */
+const codexCommand = (stdout: string): string | undefined => /^command = (.*)$/m.exec(stdout)?.[1];
+
+test('help clients names the bin by the path it was run as, not its symlink target', () => {
+  const { env, dir } = workspace(validPolicy());
+  const link = join(dir, 'bin-quotient.ts');
+  symlinkSync(CLI, link);
+  const { stdout } = quotient(['help', 'clients'], '', { env: { ...env, PATH: process.env.PATH }, cwd: dir, script: link });
+  assert.equal(codexCommand(stdout), JSON.stringify(link), 'a stable link survives the target moving');
+});
+
+test('help clients names QUOTIENT_LAUNCHER, a wrapper\'s own path, over the script it runs', () => {
+  const { env, dir } = workspace(validPolicy());
+  const run = (launcher: string) =>
+    codexCommand(quotient(['help', 'clients'], '', { env: { ...env, PATH: process.env.PATH, QUOTIENT_LAUNCHER: launcher }, cwd: dir }).stdout);
+  assert.equal(run('/opt/quotient/bin/quotient'), JSON.stringify('/opt/quotient/bin/quotient'));
+  assert.equal(run('relative/quotient'), JSON.stringify(CLI), 'a relative launcher is ignored');
 });
 
 test('help with an unreadable help layer exits 1 and names it', () => {

@@ -160,7 +160,7 @@ export type RenderContext = {
 /** The render context for a server, or a `quotient help`, launched in LAUNCHDIR
  *  with these LOCATIONS and PROFILES: the policy is read now. */
 export function renderContext(locations: Locations, profiles: readonly Profile[], launchDir: string): RenderContext {
-  return { profiles, policy: policyView(locations.policyPath), bin: runningBin(), launchDir };
+  return { profiles, policy: policyView(locations.policyPath), bin: locations.launcher ?? runningBin(), launchDir };
 }
 
 const cell = (text: string): string => text.replaceAll('|', '\\|');

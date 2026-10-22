@@ -6,7 +6,7 @@
 // Only an unset QUOTIENT_* variable falls through — a set but empty or relative
 // value is unusable, so a typo never silently moves the policy. An unusable
 // location is the caller's `policy-unavailable`.
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, normalize } from 'node:path';
 
 export type Env = Readonly<Record<string, string | undefined>>;
 
@@ -20,11 +20,15 @@ export type Locations = {
   profileLayers: string[];
   /** [<launch>/.quotient/help, <xdgConfig>/quotient/help], highest first. */
   helpLayers: string[];
+  /** The path a wrapper was run as, for the client snippets; null when unset or
+   *  not absolute. A hint, not a location the server reads, so it never refuses. */
+  launcher: string | null;
 };
 
 export const POLICY_VAR = 'QUOTIENT_POLICY';
 export const RUN_DIR_VAR = 'QUOTIENT_RUN_DIR';
 export const SESSION_HOME_VAR = 'QUOTIENT_SESSION_HOME';
+export const LAUNCHER_VAR = 'QUOTIENT_LAUNCHER';
 
 /** A resolved path, or null when unusable: the shape the evidence writers take. */
 export const usable = (resolved: Resolved): string | null => (resolved.ok ? resolved.path : null);
@@ -52,6 +56,11 @@ function located(env: Env, name: string, base: Resolved, under: string): Resolve
   return { ok: true, path: join(base.path, under) };
 }
 
+const launcherPath = (env: Env): string | null => {
+  const value = absolute(env[LAUNCHER_VAR]);
+  return value === null ? null : normalize(value);
+};
+
 export function resolveLocations(env: Env, launchDir: string): Locations {
   const config = xdgBase(env, 'XDG_CONFIG_HOME', '.config');
   const state = xdgBase(env, 'XDG_STATE_HOME', '.local/state');
@@ -65,5 +74,6 @@ export function resolveLocations(env: Env, launchDir: string): Locations {
     sessionHome: located(env, SESSION_HOME_VAR, state, 'quotient/sessions'),
     profileLayers: layers('profiles'),
     helpLayers: layers('help'),
+    launcher: launcherPath(env),
   };
 }

@@ -15,6 +15,7 @@ launched from.
 | `QUOTIENT_POLICY` | absolute path of the policy file | `<xdgConfig>/quotient/policy.json` |
 | `QUOTIENT_RUN_DIR` | absolute path of the run evidence directory | `<xdgState>/quotient/runs` |
 | `QUOTIENT_SESSION_HOME` | absolute path of the session home | `<xdgState>/quotient/sessions` |
+| `QUOTIENT_LAUNCHER` | absolute path a wrapper was run as; `quotient help clients` prints it as the command | the path the bin script was run as |
 
 - `<xdgConfig>` is the value of `XDG_CONFIG_HOME` when it is absolute, else
   `$HOME/.config`. `<xdgState>` is the value of `XDG_STATE_HOME` when it is
@@ -24,6 +25,10 @@ launched from.
   but empty or relative refuses the call `policy-unavailable`, so a typo never
   silently moves the policy. So does having neither a usable XDG base nor an
   absolute `HOME`.
+- `QUOTIENT_LAUNCHER` is a hint for the client snippets, not a location: an
+  empty or relative value is ignored and never refuses a call. A wrapper sets
+  it so the snippet names the stable path a client should run, not the script
+  behind the wrapper.
 - The run directory and session home are created on first use.
 - No `QUOTIENT_*` variable reaches a delegate: the child's environment is the
   server's minus every `QUOTIENT_*` variable and minus any value naming the run's

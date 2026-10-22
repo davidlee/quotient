@@ -94,3 +94,13 @@ test('profiles and help layer launch dir over XDG; the policy is never read from
   const noXdg = resolveLocations({}, launch);
   assert.ok(!noXdg.policyPath.ok, 'with no XDG base the policy is unavailable, not found in the launch dir');
 });
+
+test('QUOTIENT_LAUNCHER names the launcher only when absolute; it never refuses', () => {
+  assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/bin/quotient' }, LAUNCH).launcher, '/opt/q/bin/quotient');
+  assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/./bin/quotient' }, LAUNCH).launcher, '/opt/q/bin/quotient', 'normalised');
+  for (const value of [undefined, '', 'bin/quotient']) {
+    const locations = resolveLocations({ HOME, QUOTIENT_LAUNCHER: value }, LAUNCH);
+    assert.equal(locations.launcher, null);
+    assert.ok(locations.policyPath.ok, 'an unusable launcher does not touch the policy');
+  }
+});
