@@ -190,6 +190,7 @@ test('clients: both snippets carry the absolute bin path; tool_timeout_sec is wa
   const json = text.match(/```json\n([\s\S]*?)```/);
   assert.ok(json, 'a json block');
   assert.deepEqual(JSON.parse(json[1]), { mcpServers: { quotient: { command: '/abs/bin/quotient' } } });
+  assert.ok(text.includes('[mcp_servers.quotient]'), 'the Codex table');
   assert.match(text, /\[mcp_servers\.quotient\]\ncommand = "\/abs\/bin\/quotient"\ncwd = "\/abs\/project"/);
   assert.match(text, /^tool_timeout_sec = 360 /m);
 });
