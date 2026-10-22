@@ -1,10 +1,10 @@
-// pi-run-reduce — turn a pi `--mode json` event stream into the signal an
+// The reducer — turn a pi `--mode json` event stream into the signal an
 // orchestrator actually needs: a budgeted transcript, a status record, and alert
 // lines for patterns the caller declared it cares about.
 //
-// Pure: lines in, `Reduced` out. No I/O, no argv, no process. The shell entry
-// point (`bin/pi-run-reduce` → `cli.ts`) and the future pi-agent MCP server both
-// call this, so there is one reducer and one idea of what a run was.
+// Pure: lines in, `Reduced` out. No I/O, no argv, no process. `quotient reduce`
+// (`cli.ts`) and the MCP server (`src/server`) both call this, so there is one
+// reducer and one idea of what a run was.
 //
 // Fidelity rules, in order of importance:
 //   1. The final assistant answer is always present and always last.

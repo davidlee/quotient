@@ -127,7 +127,7 @@ async function oneShot(t: TestContext, env: Env, request: string): Promise<Recor
   while (!out.join('').includes('\n')) {
     if (Date.now() > deadline) {
       child.kill('SIGKILL');
-      throw new Error(`no answer from pi-mcp: ${err.join('')}`);
+      throw new Error(`no answer from the server: ${err.join('')}`);
     }
     await pause(5);
   }

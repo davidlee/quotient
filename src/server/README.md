@@ -23,7 +23,7 @@ environment:
 | `PI_MCP_SESSION_HOME` | absolute path of the session home |
 
 Each value must be absolute. These three variables are the server's whole
-configuration surface: `main.ts` hands the process environment to `serve`, and
+configuration surface: `src/cli.ts` hands the process environment to `serve`, and
 the server reads no argv and discovers no config file. A missing, empty or
 relative `PI_MCP_POLICY`, `PI_MCP_RUN_DIR` or `PI_MCP_SESSION_HOME` refuses the
 call `policy-unavailable` before the policy is read (`admitCall` in

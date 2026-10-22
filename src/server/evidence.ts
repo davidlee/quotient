@@ -130,7 +130,7 @@ export function evidenceStores(runDir: string): EvidenceStores {
  */
 export function appendAttempt(runDir: string | null, attempt: AttemptRecord): boolean {
   if (runDir === null) {
-    process.stderr.write(`pi-mcp: not recording ${attempt.reason}: no absolute PI_MCP_RUN_DIR\n`);
+    process.stderr.write(`quotient: not recording ${attempt.reason}: no absolute PI_MCP_RUN_DIR\n`);
     return false;
   }
   const line: Record<string, unknown> = {
@@ -151,7 +151,7 @@ export function appendAttempt(runDir: string | null, attempt: AttemptRecord): bo
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`pi-mcp: could not append ${attemptsPath(runDir)}: ${message}\n`);
+    process.stderr.write(`quotient: could not append ${attemptsPath(runDir)}: ${message}\n`);
     return false;
   }
 }
@@ -170,7 +170,7 @@ export function writeAttemptProbe(runDir: string): boolean {
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`pi-mcp: ${ledger} cannot be appended to: ${message}\n`);
+    process.stderr.write(`quotient: ${ledger} cannot be appended to: ${message}\n`);
     return false;
   }
 }
@@ -198,7 +198,7 @@ export function appendAudit(layout: RunLayout, record: AuditRecord): boolean {
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`pi-mcp: could not append ${layout.audit}: ${message}\n`);
+    process.stderr.write(`quotient: could not append ${layout.audit}: ${message}\n`);
     return false;
   }
 }
@@ -213,7 +213,7 @@ export function removeRun(layout: RunLayout): void {
     rmSync(layout.dir, { recursive: true, force: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`pi-mcp: could not discard ${layout.dir}: ${message}\n`);
+    process.stderr.write(`quotient: could not discard ${layout.dir}: ${message}\n`);
   }
 }
 

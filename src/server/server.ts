@@ -28,9 +28,9 @@ import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe } from './evi
 import type { CallId, RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
 import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
+import { packageVersion } from '../root.ts';
 
-export const SERVER_NAME = 'pi-mcp';
-export const SERVER_VERSION = '0';
+export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
 export const PROTOCOL_VERSION = '2025-06-18';
 
@@ -232,7 +232,7 @@ function writeRunFiles(layout: RunLayout, reduced: Reduced): boolean {
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`pi-mcp: could not write ${layout.transcript} / ${layout.status}: ${message}\n`);
+    process.stderr.write(`quotient: could not write ${layout.transcript} / ${layout.status}: ${message}\n`);
     return false;
   }
 }
@@ -451,7 +451,7 @@ async function callTool(
     // layout, with the reducer's verdict on an unread stream. The detail is
     // diagnostics, not reduced markdown, so it never enters the envelope.
     const detail = error instanceof Error ? error.message : String(error);
-    context.diagnostics.write(`pi-mcp: call ${String(id)} failed while running: ${detail}\n`);
+    context.diagnostics.write(`quotient: call ${String(id)} failed while running: ${detail}\n`);
     return toolResult(failedResult('error', ['error'], session.session, reduce([], {}).status, layout));
   } finally {
     gate.close();
@@ -472,11 +472,11 @@ async function handleLine(line: string, context: Context): Promise<void> {
   try {
     message = JSON.parse(line);
   } catch {
-    context.diagnostics.write('pi-mcp: unparsable JSON-RPC line dropped\n');
+    context.diagnostics.write('quotient: unparsable JSON-RPC line dropped\n');
     return;
   }
   if (!isRecord(message)) {
-    context.diagnostics.write('pi-mcp: JSON-RPC message is not an object; dropped\n');
+    context.diagnostics.write('quotient: JSON-RPC message is not an object; dropped\n');
     return;
   }
 
@@ -503,7 +503,7 @@ async function handleLine(line: string, context: Context): Promise<void> {
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+          serverInfo: { name: SERVER_NAME, version: packageVersion() },
         },
       });
       return;
@@ -532,7 +532,7 @@ async function handleLine(line: string, context: Context): Promise<void> {
           if (!context.closed) reply(context, { id, result });
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
-          context.diagnostics.write(`pi-mcp: call ${String(id)} failed while running: ${detail}\n`);
+          context.diagnostics.write(`quotient: call ${String(id)} failed while running: ${detail}\n`);
           if (!context.closed) {
             // Every step that precedes the run answers a refusal rather than
             // throwing, so this catch only sees a failure before the run was
@@ -609,7 +609,7 @@ export async function serve(
   if (!profiles.ok) {
     // One line, naming the path: the server refuses from here on, and an
     // operator needs to know which document to fix (EX-2).
-    diagnostics.write(`pi-mcp: the profile snapshot did not load: ${profiles.path}: ${profiles.detail}\n`);
+    diagnostics.write(`quotient: the profile snapshot did not load: ${profiles.path}: ${profiles.detail}\n`);
   }
   const context: Context = {
     output,

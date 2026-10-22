@@ -1,9 +1,10 @@
-// pi-run-reduce CLI — I/O, argv and exit codes for the reducer.
+// `quotient reduce` — I/O, argv and exit codes for the reducer. src/cli.ts
+// dispatches here; this module has no side effects at import.
 //
 // Quiet by default: one status line on stdout, nothing else. Alerts are the only
 // thing that may appear unprompted, on stderr, because the caller declared them.
 //
-//   pi-run-reduce [FILE]            FILE defaults to stdin
+//   quotient reduce [FILE]          FILE defaults to stdin
 //     --out DIR                     artefact dir (default: FILE's dir, or cwd)
 //     --budget-bytes N              transcript ceiling (default 8192, 0 = none)
 //     --full                        alias for --budget-bytes 0
@@ -25,8 +26,8 @@ type Args = {
   quiet: boolean;
 };
 
-const USAGE = `usage: pi-run-reduce [FILE] [--out DIR] [--budget-bytes N | --full]
-                     [--alert RE]... [-v|--verbose] [-q|--quiet]
+const USAGE = `usage: quotient reduce [FILE] [--out DIR] [--budget-bytes N | --full]
+                       [--alert RE]... [-v|--verbose] [-q|--quiet]
 
 Reads a pi --mode json event stream (FILE or stdin) and writes <out>/transcript.md
 and <out>/status.json. Prints one status line to stdout, or the transcript with -v.
@@ -79,7 +80,7 @@ export function main(argv: string[]): number {
   try {
     args = parseArgs(argv);
   } catch (error) {
-    process.stderr.write(`pi-run-reduce: ${(error as Error).message}\n${USAGE}\n`);
+    process.stderr.write(`quotient reduce: ${(error as Error).message}\n${USAGE}\n`);
     return 2;
   }
 
@@ -87,7 +88,7 @@ export function main(argv: string[]): number {
   try {
     input = args.file === '-' ? readFileSync(0, 'utf8') : readFileSync(args.file, 'utf8');
   } catch (error) {
-    process.stderr.write(`pi-run-reduce: cannot read ${args.file}: ${(error as Error).message}\n`);
+    process.stderr.write(`quotient reduce: cannot read ${args.file}: ${(error as Error).message}\n`);
     return 2;
   }
 
@@ -95,7 +96,7 @@ export function main(argv: string[]): number {
   try {
     reduced = reduce(input.split('\n'), { budgetBytes: args.budget, alerts: args.alerts });
   } catch (error) {
-    process.stderr.write(`pi-run-reduce: ${(error as Error).message}\n`);
+    process.stderr.write(`quotient reduce: ${(error as Error).message}\n`);
     return 2;
   }
 
@@ -114,8 +115,4 @@ export function main(argv: string[]): number {
     stream.write(`${statusLine(reduced.status, transcriptPath)}\n`);
   }
   return reduced.status.state === 'completed' ? 0 : 1;
-}
-
-if (import.meta.main ?? process.argv[1]?.endsWith('cli.ts')) {
-  process.exitCode = main(process.argv.slice(2));
 }

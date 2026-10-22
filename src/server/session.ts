@@ -342,7 +342,7 @@ function dropClaim(paths: SessionPaths): void {
   try {
     unlinkSync(paths.claim);
   } catch (error) {
-    process.stderr.write(`pi-mcp: could not clear the claim ${paths.claim}: ${errorCode(error)}\n`);
+    process.stderr.write(`quotient: could not clear the claim ${paths.claim}: ${errorCode(error)}\n`);
   }
 }
 
@@ -609,19 +609,19 @@ export function releaseSession(
   const observed = readOwnership(paths.lock);
   if (!observed.ok) {
     if (observed.missing) return;
-    diagnostics.write(`pi-mcp: leaving ${paths.lock} in place: ${observed.detail}\n`);
+    diagnostics.write(`quotient: leaving ${paths.lock} in place: ${observed.detail}\n`);
     return;
   }
   const holder = observed.record;
   if (holder.pid !== record.pid || holder.starttime !== record.starttime || holder.call_id !== record.call_id) {
     diagnostics.write(
-      `pi-mcp: leaving ${paths.lock} in place: it is not this owner's record (pid ${holder.pid}, start time ${holder.starttime}, call ${JSON.stringify(holder.call_id)})\n`,
+      `quotient: leaving ${paths.lock} in place: it is not this owner's record (pid ${holder.pid}, start time ${holder.starttime}, call ${JSON.stringify(holder.call_id)})\n`,
     );
     return;
   }
   try {
     unlinkSync(paths.lock);
   } catch (error) {
-    diagnostics.write(`pi-mcp: could not release ${paths.lock} (${errorCode(error)})\n`);
+    diagnostics.write(`quotient: could not release ${paths.lock} (${errorCode(error)})\n`);
   }
 }

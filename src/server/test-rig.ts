@@ -22,8 +22,8 @@ import { attemptsPath } from './evidence.ts';
 
 export type Env = Record<string, string | undefined>;
 
-/** The server as a real process: the command and argv that start it on stdio. */
-export const serverCommand: [string, string[]] = [process.execPath, [new URL('./main.ts', import.meta.url).pathname]];
+/** The server as a real process: the bare bin, which serves MCP on stdio. */
+export const serverCommand: [string, string[]] = [process.execPath, [new URL('../cli.ts', import.meta.url).pathname]];
 
 export const line = (message: Record<string, unknown>): string => JSON.stringify({ jsonrpc: '2.0', ...message });
 export const callLine = (id: number | string, args: Record<string, unknown>): string =>

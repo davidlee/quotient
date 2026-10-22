@@ -1,5 +1,5 @@
-// Behaviour tests for pi-run-reduce. The reducer is the contract: the CLI, the
-// shell wrappers and (later) the MCP server all report through it, so these
+// Behaviour tests for the reducer. The reducer is the contract: `quotient
+// reduce`, the shell wrappers and the MCP server all report through it, so these
 // assert the rendering rules and the status derivation, not the internals.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { reduce } from './reduce.ts';
 import type { Reduced } from './reduce.ts';
 
-const cli = new URL('./cli.ts', import.meta.url).pathname;
+const cli = new URL('../cli.ts', import.meta.url).pathname;
 
 const ev = (type: string, extra: Record<string, unknown> = {}): string => JSON.stringify({ type, ...extra });
 
@@ -501,7 +501,7 @@ test('malformed lines are counted, not fatal', () => {
 });
 
 test('cli: one status line by default, exit 0 when completed', () => {
-  const stdout = execFileSync('node', [cli, '--out', mkdtempSync(join(tmpdir(), 'reduce-'))], {
+  const stdout = execFileSync('node', [cli, 'reduce', '--out', mkdtempSync(join(tmpdir(), 'reduce-'))], {
     input: run(says('ok', 'stop', tokenUsage())).join('\n'),
     encoding: 'utf8',
   });
@@ -520,7 +520,7 @@ test('cli: writes transcript.md and status.json beside the input, exit 1 when fa
 
   let code = 0;
   try {
-    execFileSync('node', [cli, events], { encoding: 'utf8', stdio: 'pipe' });
+    execFileSync('node', [cli, 'reduce', events], { encoding: 'utf8', stdio: 'pipe' });
   } catch (error) {
     code = (error as { status: number }).status;
   }
@@ -539,9 +539,9 @@ test('cli: writes transcript.md and status.json beside the input, exit 1 when fa
 test('cli: alerts go to stderr, status line stays parseable; -q is silent', () => {
   const dir = mkdtempSync(join(tmpdir(), 'reduce-'));
   const input = run(result('touched .doctrine/state/x'), assistant([{ type: 'text', text: 'ok' }])).join('\n');
-  const stdout = execFileSync('node', [cli, '--out', dir, '--alert', '\\.doctrine/'], { input, encoding: 'utf8' });
+  const stdout = execFileSync('node', [cli, 'reduce', '--out', dir, '--alert', '\\.doctrine/'], { input, encoding: 'utf8' });
   assert.match(stdout, /^completed /);
-  const quiet = execFileSync('node', [cli, '--out', dir, '-q'], { input, encoding: 'utf8' });
+  const quiet = execFileSync('node', [cli, 'reduce', '--out', dir, '-q'], { input, encoding: 'utf8' });
   assert.equal(quiet, '');
 });
 
@@ -549,7 +549,7 @@ test('cli: usage errors exit 2 and name the problem', () => {
   let code = 0;
   let stderr = '';
   try {
-    execFileSync('node', [cli, '--budget-bytes', 'lots'], { encoding: 'utf8', stdio: 'pipe' });
+    execFileSync('node', [cli, 'reduce', '--budget-bytes', 'lots'], { encoding: 'utf8', stdio: 'pipe' });
   } catch (error) {
     code = (error as { status: number }).status;
     stderr = String((error as { stderr: string }).stderr);

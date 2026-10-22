@@ -304,7 +304,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
         spawnFailed = true;
         exit = { code: null, signal: null };
       }
-      process.stderr.write(`pi-mcp: the launch form ${plan.form.path} failed: ${error.message}\n`);
+      process.stderr.write(`quotient: the launch form ${plan.form.path} failed: ${error.message}\n`);
       resolve();
     });
   });

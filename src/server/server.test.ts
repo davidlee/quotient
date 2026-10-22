@@ -2,7 +2,7 @@
 // for the pi-agent-result/1 payload every tools/call answers with.
 //
 // In-process: `serve(input, output, env)` takes streams, so the protocol is
-// driven without a child. One real subprocess test proves `bin/pi-mcp` starts,
+// driven without a child. One real subprocess test proves the bin starts,
 // answers `initialize`, and exits 0 on stdin EOF.
 //
 // Hermetic: every test mints its own temp tree; the ambient environment is
@@ -13,7 +13,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, SERVER_NAME, PI_AGENT_TOOL } from './server.ts';
+import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
+import { packageVersion } from '../root.ts';
 import { attempts, converse, jsonLines, line, serverCommand, validPolicy, workspace } from './test-rig.ts';
 import type { Env } from './test-rig.ts';
 
@@ -41,7 +42,7 @@ const callTool = (args: unknown): Record<string, unknown> => ({ name: 'pi_agent'
 
 // ── The wire (EX-1) ────────────────────────────────────────────────────────
 
-test('initialize answers protocolVersion, a tools capability and serverInfo', async () => {
+test('initialize answers protocolVersion, a tools capability and serverInfo: quotient at the package version', async () => {
   const { replies } = await converse([line({ id: 1, method: 'initialize' })], workspace().env);
   assert.equal(replies.length, 1);
   assert.equal(replies[0].jsonrpc, '2.0');
@@ -49,7 +50,7 @@ test('initialize answers protocolVersion, a tools capability and serverInfo', as
   assert.equal(replies[0].result.protocolVersion, PROTOCOL_VERSION);
   assert.equal(PROTOCOL_VERSION, '2025-06-18');
   assert.deepEqual(replies[0].result.capabilities, { tools: {} });
-  assert.equal(replies[0].result.serverInfo.name, SERVER_NAME);
+  assert.deepEqual(replies[0].result.serverInfo, { name: 'quotient', version: packageVersion() });
 });
 
 test('notifications/initialized is a no-op and ping is served, neither rejected as an unknown method', async () => {
@@ -122,7 +123,7 @@ test('an unparsable line produces no response, only a stderr note, and the loop 
   );
   assert.equal(replies.length, 1);
   assert.equal(replies[0].id, 9);
-  assert.match(stderr, /unparsable/);
+  assert.match(stderr, /^quotient: unparsable/m);
 });
 
 test('the server process starts, answers initialize and exits 0 on stdin EOF', () => {
