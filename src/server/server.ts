@@ -24,7 +24,7 @@ import { resolveLocations, usable } from '../config.ts';
 import type { Locations } from '../config.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
 import type { Snapshot } from './profiles.ts';
-import { loadHelp, policyView, sectionText } from '../help/help.ts';
+import { loadHelp, renderContext, sectionText } from '../help/help.ts';
 import type { HelpSnapshot, Section } from '../help/help.ts';
 import { acquireSession } from './session.ts';
 import { checkChildView } from './childview.ts';
@@ -32,7 +32,7 @@ import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe } from './evi
 import type { CallId, RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
 import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
-import { packageVersion, runningBin } from '../root.ts';
+import { packageVersion } from '../root.ts';
 
 export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
@@ -587,12 +587,8 @@ function selfDescription(context: Context, section: Extract<Section, 'agent' | '
   if (!context.startup.ok) {
     return `quotient refused start-up: every pi_agent call answers profile-invalid. ${startupFailure(context.startup)}\n`;
   }
-  return sectionText(context.startup.help, section, {
-    profiles: [...context.startup.profiles.profiles.values()],
-    policy: policyView(context.locations.policyPath),
-    bin: runningBin(),
-    launchDir: context.launchDir,
-  });
+  const profiles = [...context.startup.profiles.profiles.values()];
+  return sectionText(context.startup.help, section, renderContext(context.locations, profiles, context.launchDir));
 }
 
 /** What a caller may override; production takes every default. */

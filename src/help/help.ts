@@ -14,11 +14,11 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageRoot } from '../root.ts';
+import { packageRoot, runningBin } from '../root.ts';
 import { readPolicy } from '../server/policy.ts';
 import { absent, errorCode } from '../server/paths.ts';
 import type { Filesystem, Profile } from '../server/profiles.ts';
-import type { Resolved } from '../config.ts';
+import type { Locations, Resolved } from '../config.ts';
 import { USAGE as REDUCE_USAGE } from '../reduce/cli.ts';
 
 export const HELP_SECTIONS = ['agent', 'tool', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce'] as const;
@@ -157,6 +157,12 @@ export type RenderContext = {
   launchDir: string;
 };
 
+/** The render context for a server, or a `quotient help`, launched in LAUNCHDIR
+ *  with these LOCATIONS and PROFILES: the policy is read now. */
+export function renderContext(locations: Locations, profiles: readonly Profile[], launchDir: string): RenderContext {
+  return { profiles, policy: policyView(locations.policyPath), bin: runningBin(), launchDir };
+}
+
 const cell = (text: string): string => text.replaceAll('|', '\\|');
 
 /** The snapshot's profiles with the capability the policy pins, as read now. */
@@ -199,7 +205,7 @@ export function clientsSnippets(context: RenderContext): string {
     : `tool_timeout_sec = ${PLACEHOLDER_TIMEOUT_S}     # placeholder: no readable policy (${context.policy.detail}); set maxima.wall_clock_s + ${TIMEOUT_MARGIN_S}`;
   return `# Clients
 
-Claude Code (\`.mcp.json\` in the project, or \`claude mcp add-json quotient '<json>'\`):
+Claude Code (\`.mcp.json\` in the project):
 
 \`\`\`json
 ${JSON.stringify({ mcpServers: { quotient: { command: context.bin } } }, null, 2)}

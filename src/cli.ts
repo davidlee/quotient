@@ -4,30 +4,52 @@
 //
 //   quotient                 serve (exit 0 after shutdown)
 //   quotient reduce …        the reducer (exit 0 completed, 1 failed or incomplete, 2 usage)
-//   quotient help [SECTION]  one section, or the list (exit 2 for an unknown section)
+//   quotient help [SECTION]  one section, or the list (exit 2 for an unknown section,
+//                            1 for an unreadable help layer)
 //   quotient --version       the package version
 import { serve } from './server/server.ts';
 import { main as reduce } from './reduce/cli.ts';
 import { packageVersion } from './root.ts';
+import { resolveLocations } from './config.ts';
+import type { Env } from './config.ts';
+import { loadProfiles } from './server/profiles.ts';
+import { HELP_SECTIONS, loadHelp, renderContext, sectionName, sectionText } from './help/help.ts';
 
 const USAGE = `usage: quotient                 serve MCP on stdio
        quotient reduce [ARGS]   reduce a pi --mode json event stream
        quotient help [SECTION]  print a help section, or list them
        quotient --version`;
 
-// The help sections (design sec-2). Their text arrives with the help source.
-const HELP_SECTIONS = ['agent', 'tool', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce'];
-
-function help(section: string | undefined): number {
+/**
+ * One help section, or the list. It reads the same layers a server launched
+ * here would, so it prints what that server would say. An unreadable help layer
+ * is the server's start-up refusal and exits 1; a profile snapshot that does
+ * not load is only warned about, so `quotient help profiles` still works while
+ * an operator fixes one.
+ */
+function help(section: string | undefined, env: Env, launchDir: string): number {
   if (section === undefined) {
-    process.stdout.write(`sections:\n${HELP_SECTIONS.map((name) => `  ${name}\n`).join('')}`);
+    const aliases = (name: string): string => (name === 'result' ? ' (alias: refusals)' : '');
+    process.stdout.write(`sections:\n${HELP_SECTIONS.map((name) => `  ${name}${aliases(name)}\n`).join('')}`);
     return 0;
   }
-  if (!HELP_SECTIONS.includes(section)) {
+  const name = sectionName(section);
+  if (name === null) {
     process.stderr.write(`quotient: no help section "${section}"\n`);
     return 2;
   }
-  process.stdout.write(`${section}: not yet written\n`);
+  const locations = resolveLocations(env, launchDir);
+  const loaded = loadHelp(locations.helpLayers);
+  if (!loaded.ok) {
+    process.stderr.write(`quotient: ${loaded.path}: ${loaded.detail}\n`);
+    return 1;
+  }
+  const profiles = loadProfiles(locations.profileLayers);
+  if (!profiles.ok) {
+    process.stderr.write(`quotient: the profile snapshot did not load, so a server started here refuses every call: ${profiles.path}: ${profiles.detail}\n`);
+  }
+  const text = sectionText(loaded.snapshot, name, renderContext(locations, profiles.ok ? [...profiles.snapshot.profiles.values()] : [], launchDir));
+  process.stdout.write(text.endsWith('\n') ? text : `${text}\n`);
   return 0;
 }
 
@@ -53,7 +75,7 @@ async function run(argv: string[]): Promise<number> {
     case 'reduce':
       return reduce(rest);
     case 'help':
-      return help(rest[0]);
+      return help(rest[0], process.env, process.cwd());
     case '--version':
       process.stdout.write(`${packageVersion()}\n`);
       return 0;

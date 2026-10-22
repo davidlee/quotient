@@ -273,7 +273,7 @@ function filesUnder(path: string): string[] {
 }
 
 /** The shipped text: what a reader of the package sees. */
-const SHIPPED_TEXT = ['docs', 'examples', 'README.md'];
+const SHIPPED_TEXT = ['docs', 'examples', 'help', 'README.md'];
 
 function doctrineIdViolations(files: readonly string[]): string[] {
   return files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(DOCTRINE_ID)].map((m) => `${file}: cites ${m[0]}`));
@@ -305,9 +305,10 @@ test('policy: every key validatePolicy accepts and every env var config.ts reads
   assert.deepEqual(inadmissibleBlocks(`\`\`\`json\n${read('examples/policy.json')}\`\`\``, 'examples/policy.json'), []);
 });
 
-test('no doctrine ids: nothing under docs/, examples/ or the README cites one', () => {
+test('no doctrine ids: nothing under docs/, examples/, help/ or the README cites one', () => {
   const files = SHIPPED_TEXT.flatMap((path) => filesUnder(repo(path)));
   assert.ok(files.some((file) => file.endsWith('design.md')), 'the scan reaches docs/');
+  assert.ok(files.some((file) => file.endsWith('help/agent.md')), 'the scan reaches help/');
   assert.deepEqual(doctrineIdViolations(files), []);
 });
 
