@@ -20,7 +20,7 @@ quotient needs Node 22 or later, and `pi` installed where your forms can run it.
 pi is a prerequisite, not a dependency.
 
 ```sh
-npm install -g @davidlee/quotient
+npm install -g @davlee/quotient
 ```
 
 or, with nix:
