@@ -74,3 +74,7 @@ changing them. The policy is read on every call.
 
 `quotient reduce` is the reducer on its own: it turns a `pi --mode json` event
 stream into the same transcript and status.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).

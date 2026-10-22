@@ -1,6 +1,7 @@
 {
   "name": "@davidlee/quotient",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "bin": { "quotient": "dist/cli.js" },
   "files": ["dist", "help", "docs", "examples"],
