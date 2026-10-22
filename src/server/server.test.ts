@@ -98,7 +98,8 @@ test('tools/list exposes exactly one tool, pi_agent, with its declared inputSche
   const tools = replies[0].result.tools as Record<string, any>[];
   assert.equal(tools.length, 1);
   assert.equal(tools[0].name, 'pi_agent');
-  assert.deepEqual(tools[0], PI_AGENT_TOOL);
+  assert.deepEqual(Object.keys(tools[0]), ['name', 'description', 'inputSchema']);
+  assert.deepEqual(tools[0].inputSchema, PI_AGENT_TOOL.inputSchema);
   assert.deepEqual(tools[0].inputSchema.required, ['prompt', 'profile']);
   assert.equal(tools[0].inputSchema.additionalProperties, false);
   assert.equal(tools[0].inputSchema.properties.ceilings.additionalProperties, false);

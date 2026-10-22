@@ -81,6 +81,7 @@ function planFor(rig: Rig, overrides: Partial<SpawnPlan> = {}): SpawnPlan {
     prompt: 'review the change\n',
     policyDigest: 'a'.repeat(64),
     profileDigest: 'b'.repeat(64),
+    helpDigest: 'c'.repeat(64),
     ...overrides,
   };
 }

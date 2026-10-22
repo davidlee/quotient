@@ -23,24 +23,25 @@ import { admitCall, clampCeilings, formExtensions, selectForm, transcriptBudget 
 import { resolveLocations, usable } from '../config.ts';
 import type { Locations } from '../config.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
-import type { SnapshotLoad } from './profiles.ts';
+import type { Snapshot } from './profiles.ts';
+import { loadHelp, policyView, sectionText } from '../help/help.ts';
+import type { HelpSnapshot, Section } from '../help/help.ts';
 import { acquireSession } from './session.ts';
 import { checkChildView } from './childview.ts';
 import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe } from './evidence.ts';
 import type { CallId, RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
 import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
-import { packageVersion } from '../root.ts';
+import { packageVersion, runningBin } from '../root.ts';
 
 export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
 export const PROTOCOL_VERSION = '2025-06-18';
 
-/** The one tool this server exposes, with its declared input schema. */
+/** The one tool this server exposes, with its declared input schema. Its
+ *  description is the `tool` help section, read at start-up. */
 export const PI_AGENT_TOOL = {
   name: 'pi_agent',
-  description:
-    'Run one one-shot pi agent under the operator policy and answer with its reduced transcript, status and verdict.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -102,8 +103,8 @@ type Context = {
   output: Writable;
   diagnostics: Writable;
   env: Record<string, string | undefined>;
-  /** The start-up snapshot, or the failure that put the server in the start-up-refused state. */
-  profiles: SnapshotLoad;
+  /** The start-up snapshots, or the failure that put the server in the start-up-refused state. */
+  startup: Startup;
   /** What an absent `cwd` resolves to, through the same allowlist as any root. */
   launchDir: string;
   /** Where the policy, evidence and sessions are: resolved once, from the launch
@@ -263,16 +264,9 @@ async function callTool(
 ): Promise<ToolResult> {
   // A snapshot that did not load is a start-up-refused server, not a per-call
   // discovery: every call answers the reason and the path, whatever its shape.
-  if (!context.profiles.ok) {
-    return refused(
-      context,
-      id,
-      'profile-invalid',
-      `the profile snapshot did not load at start-up: ${context.profiles.path}: ${context.profiles.detail}`,
-    );
-  }
+  if (!context.startup.ok) return refused(context, id, 'profile-invalid', startupFailure(context.startup));
 
-  const snapshot = context.profiles.snapshot;
+  const snapshot = context.startup.profiles;
   const parsed = readToolCall(params);
   if (!parsed.ok) return refused(context, id, 'request-invalid', parsed.detail);
   const request = parsed.request;
@@ -397,6 +391,7 @@ async function callTool(
         prompt: request.prompt,
         policyDigest: admission.digest,
         profileDigest: snapshot.digest,
+        helpDigest: context.startup.help.digest,
         layout,
       },
       { signal: controller.signal, graceMs: context.graceMs, env: context.env, onRecord: gate.tick },
@@ -505,6 +500,7 @@ async function handleLine(line: string, context: Context): Promise<void> {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: { name: SERVER_NAME, version: packageVersion() },
+          instructions: selfDescription(context, 'agent'),
         },
       });
       return;
@@ -512,7 +508,10 @@ async function handleLine(line: string, context: Context): Promise<void> {
       reply(context, { id, result: { pong: true } });
       return;
     case 'tools/list':
-      reply(context, { id, result: { tools: [PI_AGENT_TOOL] } });
+      reply(context, {
+        id,
+        result: { tools: [{ name: PI_AGENT_TOOL.name, description: selfDescription(context, 'tool'), inputSchema: PI_AGENT_TOOL.inputSchema }] },
+      });
       return;
     case 'tools/call': {
       // The one method that overlaps the reader (design sec-4: "a blocking result
@@ -561,6 +560,39 @@ async function handleLine(line: string, context: Context): Promise<void> {
     default:
       reply(context, { id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
+}
+
+/** What the server reads once at start-up: the profiles, then the help. The
+ *  first that does not load puts the server in the start-up-refused state. */
+type Startup = { ok: true; profiles: Snapshot; help: HelpSnapshot } | { ok: false; path: string; detail: string };
+
+function loadStartup(locations: Locations): Startup {
+  const profiles = loadProfiles(locations.profileLayers);
+  if (!profiles.ok) return profiles;
+  const help = loadHelp(locations.helpLayers);
+  if (!help.ok) return help;
+  return { ok: true, profiles: profiles.snapshot, help: help.snapshot };
+}
+
+const startupFailure = (failed: { path: string; detail: string }): string =>
+  `start-up did not complete: ${failed.path}: ${failed.detail}`;
+
+/**
+ * The `agent` section (the `initialize` instructions) or the `tool` section
+ * (the tool description). The profile table pins capabilities from the policy
+ * as read now. A start-up-refused server says so instead, naming the path, so
+ * the orchestrator learns why every call refuses.
+ */
+function selfDescription(context: Context, section: Extract<Section, 'agent' | 'tool'>): string {
+  if (!context.startup.ok) {
+    return `quotient refused start-up: every pi_agent call answers profile-invalid. ${startupFailure(context.startup)}\n`;
+  }
+  return sectionText(context.startup.help, section, {
+    profiles: [...context.startup.profiles.profiles.values()],
+    policy: policyView(context.locations.policyPath),
+    bin: runningBin(),
+    launchDir: context.launchDir,
+  });
 }
 
 /** What a caller may override; production takes every default. */
@@ -615,8 +647,9 @@ async function* inputChunks(input: Readable, diagnostics: Writable, signal?: Abo
  * environment and its two deployment locations, so the protocol is driven
  * in-process by the tests; `src/cli.ts` wires the process's own.
  *
- * The profile layers are read once, here, before the first line: one snapshot
- * for the process lifetime, so an edit on disk is inert until a restart.
+ * The profile and help layers are read once, here, before the first line: one
+ * snapshot each for the process lifetime, so an edit on disk is inert until a
+ * restart.
  */
 export async function serve(
   input: Readable,
@@ -627,17 +660,15 @@ export async function serve(
 ): Promise<void> {
   const launchDir = options.launchDir ?? process.cwd();
   const locations = resolveLocations(env, launchDir);
-  const profiles = loadProfiles(locations.profileLayers);
-  if (!profiles.ok) {
-    // One line, naming the path: the server refuses from here on, and an
-    // operator needs to know which document to fix (EX-2).
-    diagnostics.write(`quotient: the profile snapshot did not load: ${profiles.path}: ${profiles.detail}\n`);
-  }
+  const startup = loadStartup(locations);
+  // One line, naming the path: the server refuses from here on, and an operator
+  // needs to know which file to fix.
+  if (!startup.ok) diagnostics.write(`quotient: ${startupFailure(startup)}\n`);
   const context: Context = {
     output,
     diagnostics,
     env,
-    profiles,
+    startup,
     launchDir,
     locations,
     inFlight: new Map(),

@@ -85,6 +85,8 @@ export type SpawnPlan = {
   policyDigest: string;
   /** sha256 of the start-up profile snapshot: on the `spawn` record. */
   profileDigest: string;
+  /** sha256 of the start-up help snapshot: on the `spawn` record. */
+  helpDigest: string;
   /** A test's seam: an already-named run directory instead of a fresh one. */
   layout?: RunLayout;
 };
@@ -282,6 +284,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
       profile: plan.profile.name,
       profile_digest: plan.profileDigest,
       profile_source: plan.profile.source,
+      help_digest: plan.helpDigest,
       argv,
     })
   ) {

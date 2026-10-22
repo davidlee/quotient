@@ -11,8 +11,21 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packageRoot } from '../root.ts';
+import { resolveLocations } from '../config.ts';
 import { PROFILE_NAME, THINKING_LEVELS, loadProfiles } from '../server/profiles.ts';
-import { profileDocument, workspace, writeProfiles } from '../server/test-rig.ts';
+import {
+  callLine,
+  converse,
+  jsonLines,
+  line,
+  onlyRunDir,
+  profileDocument,
+  validPolicy,
+  workspace,
+  writeProfiles,
+  xdgHelpLayer,
+} from '../server/test-rig.ts';
+import type { Env } from '../server/test-rig.ts';
 import { HELP_SECTIONS, clientsSnippets, loadHelp, policyView, profileTable, sectionName, sectionText } from './help.ts';
 import type { HelpSnapshot, RenderContext } from './help.ts';
 
@@ -194,4 +207,85 @@ test('policyView: a readable policy gives its pins and wall clock; otherwise why
   if (missing.ok) assert.fail('an absent policy has no view');
   assert.match(missing.detail, /ENOENT/);
   assert.equal(policyView({ ok: false, detail: 'QUOTIENT_POLICY is set but empty' }).ok, false);
+});
+
+// ── The server's self-description ──────────────────────────────────────────
+
+/** The agent and tool sections a server launched with ENV in LAUNCH would
+ *  assemble, computed by the same loaders and renderer. */
+function expected(env: Env, launchDir: string): { agent: string; tool: string; digest: string } {
+  const locations = resolveLocations(env, launchDir);
+  const profiles = loadProfiles(locations.profileLayers);
+  if (!profiles.ok) assert.fail(profiles.detail);
+  const snapshot = loaded(locations.helpLayers);
+  const context: RenderContext = {
+    profiles: [...profiles.snapshot.profiles.values()],
+    policy: policyView(locations.policyPath),
+    bin: '/unused',
+    launchDir,
+  };
+  return { agent: sectionText(snapshot, 'agent', context), tool: sectionText(snapshot, 'tool', context), digest: snapshot.digest };
+}
+
+async function selfDescription(env: Env, launchDir: string): Promise<{ instructions: string; description: string; stderr: string }> {
+  const { replies, stderr } = await converse([line({ id: 1, method: 'initialize' }), line({ id: 2, method: 'tools/list' })], env, { launchDir });
+  return { instructions: replies[0].result.instructions, description: replies[1].result.tools[0].description, stderr };
+}
+
+test('server: initialize instructions equals the assembled agent section; the tool description equals tool', async () => {
+  const { env, dir } = workspace();
+  const launchDir = join(dir, 'launch');
+  const { instructions, description } = await selfDescription(env, launchDir);
+  const want = expected(env, launchDir);
+  assert.equal(instructions, want.agent);
+  assert.equal(description, want.tool);
+  assert.match(instructions, /\| `read` \| .* \| read \|/, 'the table pins read as the policy reads');
+});
+
+test('server: an override wins for agent and tool, as read at start-up', async () => {
+  const { env, dir } = workspace();
+  const launchDir = join(dir, 'launch');
+  write(xdgHelpLayer(dir), 'agent', 'operator agent text\n');
+  write(join(launchDir, '.quotient', 'help'), 'tool', 'project tool text\n');
+  const { instructions, description } = await selfDescription(env, launchDir);
+  assert.ok(instructions.startsWith('operator agent text\n'));
+  assert.equal(description, 'project tool text\n');
+});
+
+test('server: an unreadable policy at initialize reads unknown, and the server still starts', async () => {
+  const { env, dir } = workspace('{', { raw: true });
+  const { instructions } = await selfDescription(env, join(dir, 'launch'));
+  assert.match(instructions, /\| `read` \| .* \| unknown \(policy unavailable\) \|/);
+});
+
+test('server: an unreadable help layer refuses start-up: every call is profile-invalid with the help path', async () => {
+  const { env, dir } = workspace();
+  const layer = xdgHelpLayer(dir);
+  mkdirSync(join(layer, '..'), { recursive: true });
+  symlinkSync(join(tmpdir(), 'quotient-no-such-target'), layer);
+  const { replies, stderr } = await converse(
+    [line({ id: 1, method: 'initialize' }), line({ id: 2, method: 'tools/list' }), callLine(3, { prompt: 'hi', profile: 'read' })],
+    env,
+    { launchDir: join(dir, 'launch') },
+  );
+  assert.match(replies[0].result.instructions, /refused start-up/);
+  assert.ok(replies[0].result.instructions.includes(layer));
+  assert.ok(replies[1].result.tools[0].description.includes(layer));
+  const doc = JSON.parse(replies[2].result.content[0].text);
+  assert.equal(doc.state, 'refused');
+  assert.equal(doc.refusal.reason, 'profile-invalid');
+  assert.ok(doc.refusal.detail.includes(layer), 'the help path is in detail');
+  assert.ok(stderr.includes(layer), 'one stderr line names it');
+});
+
+test('server: help_digest is on the spawn record', async () => {
+  const root = join(mkdtempSync(join(tmpdir(), 'quotient-help-root-')), 'root');
+  mkdirSync(root, { recursive: true });
+  const { env, dir, runDir } = workspace(validPolicy({ roots: [root] }));
+  const launchDir = join(dir, 'launch');
+  write(xdgHelpLayer(dir), 'setup', 'local setup\n');
+  await converse([callLine(1, { prompt: 'hi', profile: 'read', cwd: root })], env, { launchDir });
+  const audit = jsonLines(join(onlyRunDir(runDir), 'audit.jsonl'));
+  assert.equal(audit[0].record, 'spawn');
+  assert.equal(audit[0].help_digest, expected(env, launchDir).digest);
 });
