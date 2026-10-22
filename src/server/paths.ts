@@ -8,7 +8,7 @@
 // canonicalisation: `/work/oneevil` shares the text `/work/one` and names nothing
 // inside it, and a path through a symlinked ancestor names its target. The two
 // functions below are the whole of that reasoning.
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
@@ -47,4 +47,23 @@ export function within(outer: string, inner: string): boolean {
   if (rel === '') return true;
   if (isAbsolute(rel)) return false;
   return rel !== '..' && !rel.startsWith(`..${sep}`);
+}
+
+/** A filesystem error's code (`ENOENT`, `EACCES` …), for a refusal's detail. */
+export const errorCode = (error: unknown): string =>
+  error instanceof Error && 'code' in error ? String((error as { code?: unknown }).code) : 'unknown error';
+
+/**
+ * Whether a failed read of PATH means PATH is absent. Only an absent entry is:
+ * a symlink that does not resolve also reads ENOENT, and it is a broken
+ * deployment, not an absent one. The profile and help layers share the rule.
+ */
+export function absent(path: string, error: unknown): boolean {
+  if (errorCode(error) !== 'ENOENT') return false;
+  try {
+    lstatSync(path);
+    return false;
+  } catch {
+    return true;
+  }
 }

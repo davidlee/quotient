@@ -38,10 +38,10 @@
 // expression can parse, so the loader needs no YAML or markdown dependency.
 // Everything after the header is prose for a human and is not parsed.
 import { createHash } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { canonicalPath, within } from './paths.ts';
+import { absent, canonicalPath, errorCode, within } from './paths.ts';
 
 /** The profile-name grammar (design sec-2 step 3): 1-32 characters, lower-case. */
 export const PROFILE_NAME = /^[a-z][a-z0-9-]{0,31}$/;
@@ -111,9 +111,6 @@ const HEADER_FIELDS = [...REQUIRED_HEADER_FIELDS, 'thinking'];
 const HEADER_LINE = /^([a-z][a-z0-9_]*):([ \t].*)?$/;
 const MODEL = /^\S+$/;
 const TOOL_NAME = /^[a-z][a-z0-9_-]*$/;
-
-const errorCode = (error: unknown): string =>
-  error instanceof Error && 'code' in error ? String((error as { code?: unknown }).code) : 'unknown error';
 
 /**
  * Parse one document's header. Every failure names the file and, where there is
@@ -212,24 +209,13 @@ function parseDocument(
 
 type Loaded = { profile: Profile; bytes: Buffer };
 
-const lexicallyPresent = (path: string): boolean => {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 /** One layer's documents, in name order; a missing layer is empty. */
 function readLayer(layer: string): { ok: true; documents: string[] } | { ok: false; path: string; detail: string } {
   let entries: Dirent<string>[];
   try {
     entries = readdirSync(layer, { withFileTypes: true });
   } catch (error) {
-    // Only an absent entry is an empty layer: a symlink that does not resolve
-    // also reads ENOENT, and it is a broken deployment, not an absent one.
-    if (errorCode(error) === 'ENOENT' && !lexicallyPresent(layer)) return { ok: true, documents: [] };
+    if (absent(layer, error)) return { ok: true, documents: [] };
     return { ok: false, path: layer, detail: `${layer} could not be read (${errorCode(error)})` };
   }
   const documents = entries

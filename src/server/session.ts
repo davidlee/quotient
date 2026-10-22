@@ -34,6 +34,7 @@ import {
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import { errorCode } from './paths.ts';
 import { appendAttempt } from './evidence.ts';
 import type { CallId } from './evidence.ts';
 import type { Filesystem } from './profiles.ts';
@@ -133,9 +134,6 @@ export type SessionAcquisition =
       release: () => void;
     }
   | { ok: false; reason: SessionRefusal; detail: string };
-
-const errorCode = (error: unknown): string =>
-  error instanceof Error && 'code' in error ? String((error as { code?: unknown }).code) : 'unknown error';
 
 /** A fresh id from the CSPRNG: 32 lowercase hex characters, alnum at both ends. */
 export function mintSessionId(): string {

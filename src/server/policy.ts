@@ -15,6 +15,7 @@ import { isAbsolute } from 'node:path';
 import { usable } from '../config.ts';
 import type { Locations } from '../config.ts';
 import { appendAttempt, sha256Hex } from './evidence.ts';
+import { errorCode } from './paths.ts';
 import type { CallId } from './evidence.ts';
 import { MCP_EXTENSION, PROFILE_NAME, isFilesystem } from './profiles.ts';
 import type { Filesystem } from './profiles.ts';
@@ -124,8 +125,7 @@ export function readPolicy(policyPath: string): { ok: true; policy: Policy; dige
   try {
     raw = readFileSync(policyPath);
   } catch (error) {
-    const code = error instanceof Error && 'code' in error ? String((error as { code?: unknown }).code) : 'unknown error';
-    return { ok: false, reason: 'policy-unavailable', detail: `${policyPath} could not be read (${code})`, digest: null };
+    return { ok: false, reason: 'policy-unavailable', detail: `${policyPath} could not be read (${errorCode(error)})`, digest: null };
   }
   const digest = sha256Hex(raw);
   let parsed: unknown;
