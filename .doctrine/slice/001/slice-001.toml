@@ -1,7 +1,7 @@
 id = 1
 slug = "peak-request-context-ceiling"
 title = "Measure peak request context for token ceilings"
-status = "started"
+status = "audit"
 created = "2026-10-23"
 updated = "2026-10-23"
 tags = []

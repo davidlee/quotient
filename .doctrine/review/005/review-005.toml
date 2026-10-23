@@ -1,0 +1,88 @@
+id    = 5
+slug  = "sl-001-implementation-conformance-audit"
+title = "SL-001 implementation conformance audit"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "reconciliation"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Audited all three implementation phases against the locked design, plan, accepted decisions and constraints, and ran doctrine slice conformance. Reviewed PHASE-01 through PHASE-03 evidence, per-phase code reviews, full tests, typecheck, build, scripts, dry-run package contents and the installed committed 0.2.0 tarball. Two design/selector divergences were verified and mapped to direct design plus selector-registry reconciliation; expected Doctrine review/lifecycle artifacts were not treated as product scope. Real-form confinement and supported-pi/provider/resume probes remain unperformed under ASM-001. The publication checkpoint remains user-owned and precedes reconciliation.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-001"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "minor"
+title = "Active policy-reference docs are missing from design targets"
+detail = """
+Expected: the code-impact section and design-target selector set document every active policy reference that changes with the policy schema.
+Observed: PHASE-02 changed the current protected-store/unconfined references in `docs/contract/form-1.md` and current policy references in `examples/profiles/read.md`, `research.md`, and `write.md` from policy/1 to policy/2. These four source paths are absent from the design-target selectors and the code-impact table; `doctrine slice conformance 1` reports them as undeclared. The changes correctly keep current docs aligned with the active contract, so reverting them would restore stale references.
+Reconciliation needed: add these paths to design §4's code-impact and documentation-verification commitments, then register `docs/contract/form-1.md` and `examples/profiles/*.md` as design-target selectors. The immutable plan criteria need no edits.
+"""
+disposition = "design-wrong"
+response = """
+Verified. The four active policy-reference edits were coherent, but design §4 and its design-target registry omitted them. The reconciliation brief now names the direct design update and the exact selector addition; preserve the active-reference edits.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Verified. The four active policy-reference edits were coherent, but design §4 and its design-target registry omitted them. The reconciliation brief now names the direct design update and the exact selector addition; preserve the active-reference edits.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "minor"
+title = "src/root.test.ts is a stale design-target selector"
+detail = """
+Expected: a design-target selector names a path intended to change in the slice's conformance surface.
+Observed: `src/root.test.ts` is selected as design-target and listed in the §4 verification-test row, but it was not changed. Its existing tests already verify that `packageVersion()` reads `package.json` in both source and built package trees; the CLI and MCP tests cover their emitted version surfaces, and the committed installed-package check reports 0.2.0. Conformance therefore reports `src/root.test.ts` as undelivered, with no behavioral gap found.
+Reconciliation needed: reclassify this selector as scope-relevant and remove it from the planned changed-test list (or explicitly mark it as existing inspection evidence in §4). Do not edit the immutable phase plan or add a duplicate version constant/assertion.
+"""
+disposition = "design-wrong"
+response = """
+Verified. The existing source/build packageVersion test was correctly left untouched, and the CLI/MCP version surfaces plus installed 0.2.0 package were verified. The design-target intent overstates the code delta; the reconciliation brief reclassifies it as scope-relevant and clarifies the §4 row without changing immutable criteria.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Verified. The existing source/build packageVersion test was correctly left untouched, and the CLI/MCP version surfaces plus installed 0.2.0 package were verified. The design-target intent overstates the code delta; the reconciliation brief reclassifies it as scope-relevant and clarifies the §4 row without changing immutable criteria.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

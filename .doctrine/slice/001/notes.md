@@ -6,16 +6,17 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-24 · PHASE-03 · 61fd1a9
+fresh-as-of: 2026-10-24 · audit · 45187c3
 
 ### Produced
 
-- PHASE-03 — version 0.2.0, policy/2 generated fixtures and installed pack-check assertions in 61fd1a9; all four installed checks passed on that exact HEAD.
-- RV-004 — PHASE-03 code review concluded with no findings.
+- SL-001 — phases 01–03 committed in 1f0ac6a, 7a37daa and 61fd1a9; installed 0.2.0 pack-check passed on the candidate HEAD.
+- RV-005 — conformance audit; F-1/F-2 and their design/selector reconciliation brief.
 
 ### Learned
 
 - mem.pattern.quotient.delegated-write-verification — verify delegated writes in the shared tree before relying on a worker report; use the authorized fallback after refusal or no-op.
+- RV-001 F-1 — installed-package verification uses a clone of committed HEAD.
 - RV-001 F-3 — accounting and context gap counters overlap rather than partition requests.
 
 ### Open
@@ -24,12 +25,13 @@ fresh-as-of: 2026-10-24 · PHASE-03 · 61fd1a9
 
 ## Further review
 
-PHASE-03's installed stub package passed the committed 0.2.0 gate, including
-result/2, status/3, peak 16 and zero context gaps. This does not establish
-real-form confinement, launched-pi normalization or resumed-session event
-shape. The hostile-audit and live pi/provider/session probes remain unperformed
-because their real form/model/provider and supported-runtime trace prerequisites
-were not supplied. Preserve those limits under ASM-001 for audit.
+The audit confirmed the installed stub package passed the committed 0.2.0 gate,
+including result/2, status/3, peak 16 and zero context gaps. This does not
+establish real-form confinement, launched-pi normalization or resumed-session
+event shape. The hostile-audit and live pi/provider/session probes remain
+unperformed because their real form/model/provider and supported-runtime trace
+prerequisites were not supplied. Preserve those limits under ASM-001 through
+reconciliation.
 
 ## Release sequencing
 
@@ -45,10 +47,9 @@ The user approved the current plan after the 0d9af3b refinement: “yes, approve
 then pull up for handover”. PHASE-01 is committed in 1f0ac6a and PHASE-02 in
 7a37daa.
 
-All three implementation phases are complete. The next unit is the slice audit,
-followed by reconciliation. The user-owned 0.2.0 publication checkpoint remains
-after audit and before reconciliation; wait for the user's publication outcome
-before entering reconciliation.
+All three implementation phases and the slice audit are complete. Before
+reconciliation, remind the user to run `npm publish` for 0.2.0 and wait for their
+publication outcome. Do not enter reconciliation until the user reports it.
 
 ## Environment for continuation
 
