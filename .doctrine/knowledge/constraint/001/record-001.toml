@@ -1,0 +1,32 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 1
+slug = "sl-001-must-bump-quotient-to-020"
+title = "SL-001 must bump quotient to 0.2.0"
+record_kind = "constraint"
+status = "active"
+created = "2026-10-23"
+updated = "2026-10-23"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+statement     = ""
+source        = ""             # canon | adr | external | technical | legal | compatibility | operator
+applies_to    = []
+waiver_reason = ""
+waived_by     = ""
+waived_on     = ""
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-001"

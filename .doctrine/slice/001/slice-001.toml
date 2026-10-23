@@ -1,7 +1,7 @@
 id = 1
 slug = "peak-request-context-ceiling"
 title = "Measure peak request context for token ceilings"
-status = "proposed"
+status = "plan"
 created = "2026-10-23"
 updated = "2026-10-23"
 tags = []
@@ -24,7 +24,7 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "examples/policy.json"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "help/**"
@@ -32,7 +32,123 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "README.md"
-intent = "scope-relevant"
+intent = "design-target"
+
+[[selector]]
+selector = "src/reduce/reduce.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/reduce/cli.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/policy.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/server.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/gate.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/spawn.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/result.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/help/help.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/test-rig.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/reduce/reduce.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/gate.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/policy.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/result.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/server.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/spawn.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/profiles.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/drift.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/help/help.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/cli.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/root.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/quotient-policy-2.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/pi-agent-result-2.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/design.md"
+intent = "design-target"
+
+[[selector]]
+selector = "help/setup.md"
+intent = "design-target"
+
+[[selector]]
+selector = "help/agent.md"
+intent = "design-target"
+
+[[selector]]
+selector = "package.json"
+intent = "design-target"
+
+[[selector]]
+selector = "package-lock.json"
+intent = "design-target"
+
+[[selector]]
+selector = "scripts/pack-check"
+intent = "design-target"
+
+[[selector]]
+selector = "scripts/hostile-audit"
+intent = "design-target"
 
 [[relation]]
 label = "related"

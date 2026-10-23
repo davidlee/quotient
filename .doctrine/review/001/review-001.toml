@@ -1,0 +1,180 @@
+id    = 1
+slug  = "design-review-of-sl-001"
+title = "design review of SL-001"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "design"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Independent quotient/pi review session 9bcf77a5bf2e8b5d42a0501744d1c4f9 examined SL-001 design, scope, completed research and reducer/gate/policy/server/spawn/result, active docs and packaging scripts. Six findings were raised and answered; independent focused recheck session 7db7f56784f3e8bcd30c25de31944ff2 verified all six design repairs and reported no new defects. Scope now includes scripts/pack-check and hostile-audit, precise counter semantics, active-contract prose migration and crossing-prefix evidence. No implementation, build/test, installed-package check or provider/session probe was performed by this pass. Installed-pi normalization and resumed-session event shape remain explicit unverified assumptions; the required installed-package gate and any supported-runtime trace are future verification evidence, not satisfied claims."
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-001"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "blocker"
+title = "Migration scope omits installed-package and hostile-audit scripts"
+detail = "External pi review B-1. Design section 4 code-impact table and release verification omit scripts/pack-check and scripts/hostile-audit. Verified scripts/pack-check:248,252 and scripts/hostile-audit:196,199 generate quotient-policy/1 policies with maxima.tokens. Pack-check:403-408 requires a completed final call, which the new policy/2-only server will refuse. Pack-check:104-118 clones HEAD and tests the installed tarball, not uncommitted source. Add both scripts to migration scope and require the installed-package check on the intended 0.2.0 release commit. Reviewer called this a publish blocker; npm publish does not automatically run pack-check under current package.json, so the claim of an automatic npm hook is not verified."
+disposition = "fix-now"
+route = "review"
+response = "Verified migration omission. Added both scripts to the section 4 impact set and design-target selectors, required scripts/pack-check against the intended committed 0.2.0 release tree, and required explicit installed result/status/context assertions. Clarified that pack-check clones HEAD and is an explicit gate, not an automatic npm publish hook. Updated hostile-audit fixture migration and distinguished its real-provider prerequisite from package stub verification. This repairs design scope; implementation scripts have not been changed or executed."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified migration omission. Added both scripts to the section 4 impact set and design-target selectors, required scripts/pack-check against the intended committed 0.2.0 release tree, and required explicit installed result/status/context assertions. Clarified that pack-check clones HEAD and is an explicit gate, not an automatic npm publish hook. Updated hostile-audit fixture migration and distinguished its real-provider prerequisite from package stub verification. This repairs design scope; implementation scripts have not been changed or executed."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "External quotient/pi recheck session 7db7f56784f3e8bcd30c25de31944ff2 verified migration scope, installed committed-tree package check and explicit non-hook semantics. Verification concerns the repaired design; scripts remain unimplemented/unexecuted."
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "major"
+title = "Make active result contract prose migration obligations explicit"
+detail = "External pi review M-1. Existing docs/contract/pi-agent-result-1.md:25-27,55,62,95-96,119-120,134 contain old completion/accounting/cumulative-token/policy-schema wording. Design section 3 already explicitly requires new cost-validity and completion meanings, so there is no current contrary design rule. However its complete-contract instruction does not enumerate all prose/table projections that must change, and src/drift.test.ts cannot validate arbitrary explanatory prose. Clarify the new result contract migration obligations without editing historical /1."
+disposition = "fix-now"
+route = "review"
+response = "The existing design already required cost-only accounting validity and revised completion meanings; it did not prescribe copying the old contradictory prose, so the major-severity claim overstates the defect. Nevertheless section 3 now enumerates the envelope predicate, status accounting and counter descriptions, States and Terminations rows and policy-invalid schema reference, with historical /1 left intact. Verification includes prose semantics as well as drift keys and enum tables."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "The existing design already required cost-only accounting validity and revised completion meanings; it did not prescribe copying the old contradictory prose, so the major-severity claim overstates the defect. Nevertheless section 3 now enumerates the envelope predicate, status accounting and counter descriptions, States and Terminations rows and policy-invalid schema reference, with historical /1 left intact. Verification includes prose semantics as well as drift keys and enum tables."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "External quotient/pi recheck verified explicit active-contract prose/table migration list and historical /1 preservation. This hardens an already stated semantic requirement; no major contrary design rule was established."
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "major"
+title = "Specify the retained accounting unmeasured counter by its increment set"
+detail = "External pi review M-2. Design section 2 says top-level requests_unmeasured keeps its accounting role without defining that role. Verified src/reduce/reduce.ts:460-464 and :488-494 increment it for summarization_retry_scheduled and failed/aborted sends without observed valid price. Ordinary missing usage instead marks accounting unknown at :471-474 without incrementing the counter. Define this existing behavior explicitly under status/3 and distinguish it from context.requests_unmeasured, including overlap/non-additivity and known-accounting exceptions."
+disposition = "fix-now"
+route = "review"
+response = "Verified ambiguous counter definition. Section 2 now specifies the exact existing top-level increment set, ordinary cost-invalid behavior, each counter bounded by requests, overlap and non-additivity, examples where either count is larger, and known accounting despite tolerated cost gaps. Section 3 requires the active /2 contract to carry those exact definitions. No new top-level counting behavior is introduced."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified ambiguous counter definition. Section 2 now specifies the exact existing top-level increment set, ordinary cost-invalid behavior, each counter bounded by requests, overlap and non-additivity, examples where either count is larger, and known accounting despite tolerated cost gaps. Section 3 requires the active /2 contract to carry those exact definitions. No new top-level counting behavior is introduced."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "External quotient/pi recheck verified exact legacy counter increment set and independent context counter, overlap/non-additivity, ordinary cost-invalid behavior and exception-aware known-accounting meaning."
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "minor"
+title = "Distinguish crossing-prefix audit values from final drained peak"
+detail = "External pi review m-1. Design section 2 correctly specifies prefix equality, while section 4 item 7 leaves audit/live/replay agreement unqualified. Verified src/server/spawn.ts:332-359 keeps observing buffered records and terminate at :403-414 snapshots the tally at trigger time. Subsequent buffered/drained records can increase the final replay peak after the gate stops. Specify crossing-time observed versus end-of-run peak and add a buffered-drain test."
+disposition = "fix-now"
+route = "review"
+response = "Verified snapshot timing issue. Sections 2 and 3 now distinguish crossing-prefix abort observations from the final drained status peak. Section 4 and the section 2 test summary qualify equality by event prefix and require a buffered/drained larger-record case that preserves the original abort value while increasing the final peak."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified snapshot timing issue. Sections 2 and 3 now distinguish crossing-prefix abort observations from the final drained status peak. Section 4 and the section 2 test summary qualify equality by event prefix and require a buffered/drained larger-record case that preserves the original abort value while increasing the final peak."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "External quotient/pi recheck verified crossing-prefix/final-drain distinction, prefix-scoped equality and the specified fake-child buffered/drain test. No runtime test was executed."
+
+[[finding]]
+id = "F-5"
+status = "verified"
+severity = "minor"
+title = "Label resumed-session event-shape assumptions rather than claim runtime proof"
+detail = "External pi review m-2. Design section 2 says the first resumed request measures retained history and section 4 makes it a verification obligation. No exact installed-pi resumed-session trace was collected. The existing assistant message_end counting assumes historical assistant messages are not replayed as fresh sends. This is a distinct event-shape assumption; mark it beside runtime parity and scope fixture evidence accordingly. A live provider probe is not performed by this design review."
+disposition = "fix-now"
+route = "review"
+response = "Accepted the limit on evidence, not a demonstrated replay defect. Sections 2 and 4 explicitly identify the installed-pi resumed-event shape as unverified and qualify fixture evidence as arithmetic only. No source or runtime claim now certifies historical assistant replay behavior. No live provider/session probe was run. Route review settles the unsupported design assertion; this is not an instrument obligation claimed satisfied by prose."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Accepted the limit on evidence, not a demonstrated replay defect. Sections 2 and 4 explicitly identify the installed-pi resumed-event shape as unverified and qualify fixture evidence as arithmetic only. No source or runtime claim now certifies historical assistant replay behavior. No live provider/session probe was run. Route review settles the unsupported design assertion; this is not an instrument obligation claimed satisfied by prose."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "External quotient/pi recheck verified unsupported resumed-event claims are now explicit unverified assumptions and fixtures prove arithmetic only. No historical-replay defect or installed-runtime trace is claimed verified; a supported-runtime trace is required before claiming that behavior."
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "minor"
+title = "Remove obsolete totalTokens rationale with the gate migration"
+detail = "External pi review m-3. src/server/gate.ts:141 claims pi totalTokens is the sum of four components. Design section 2 already forbids using provider-dependent totalTokens as a fallback, so it does not authorize that shortcut. Clarify the gate impact row to remove/update the obsolete rationale and sweep touched comments for that claim."
+disposition = "fix-now"
+route = "review"
+response = "The existing design already prohibited totalTokens fallback. Section 4 now explicitly requires removing/updating the obsolete gate rationale and sweeping touched accounting comments for the claim. No new arithmetic or authority is introduced."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "The existing design already prohibited totalTokens fallback. Section 4 now explicitly requires removing/updating the obsolete gate rationale and sweeping touched accounting comments for the claim. No new arithmetic or authority is introduced."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "External quotient/pi recheck verified explicit gate rationale removal and touched-comment sweep; the no-totalTokens-fallback rule was already present."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

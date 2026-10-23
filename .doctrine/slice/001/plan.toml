@@ -1,0 +1,90 @@
+schema = "doctrine.plan.overview"
+version = 1
+slice = "SL-001"
+
+[specs]
+primary = []
+collaborators = []
+
+[requirements]
+targets = []
+dependencies = []
+
+[[phase]]
+id = "PHASE-01"
+name = "Accumulate request context independently"
+objective = "Add the internal shared-tally context observer and gap counter without changing public schemas, policy semantics, gate enforcement or the existing cost-accounting path."
+entrance_criteria = [
+  { id = "EN-1", text = "The design is locked and the implementation plan has user approval before code changes begin." },
+  { id = "EN-2", text = "Read design sections 1-2, DEC-001/DEC-002 and ASM-001; establish the reducer/gate/full-suite/type-check baseline and distinguish pre-existing failures." }
+]
+exit_criteria = [
+  { id = "EX-1", text = "Tally/createTally own context.peak_tokens=null and context.requests_unmeasured=0; countRecord gives every counted request exactly one context measurement or gap." },
+  { id = "EX-2", text = "Footprint uses finite nonnegative input/output/cacheRead/cacheWrite with a finite sum. Failed/aborted all-zero placeholders are gaps; successful explicit zero is measured; valid positive failed-send usage affects context without cumulative failed-send tokens." },
+  { id = "EX-3", text = "Preserve classification: assistant/compaction result sends count once; updates/replays/non-assistant/result-less compaction do not count; summarization retries disclose one context gap. No totalTokens or nested-subset fallback." },
+  { id = "EX-4", text = "Keep public status/schema constants, old policy enforcement and coupled cost-accounting behavior unchanged in this preparatory phase; migrate necessary typed-tally fixtures without weakening unrelated assertions." },
+  { id = "EX-5", text = "Focused reducer/gate and full-suite tests, TypeScript checking and build pass; record red/green/refactor evidence and baseline limitations in the runtime sheet." }
+]
+verification = [
+  { id = "VT-1", expects = "Behavioral tally tests exercise full footprint, peak, gaps, zero versus null, failed placeholders and invalid/overflowing sums; execute the reducer tests.", test_file = "src/reduce/reduce.test.ts", keywords = ["createTally","countRecord","peak_tokens","requests_unmeasured"], waived = false },
+  { id = "VT-2", expects = "Existing request-counting and cumulative-accounting regressions pass, including compaction/retries and failed-send exclusion.", test_file = "src/reduce/reduce.test.ts", keywords = ["compaction_end","summarization_retry_scheduled","cache_write"], waived = false },
+  { id = "VA-1", expects = "Inspect the diff for the sole countRecord owner, unchanged public schema/policy/gate behavior and no installed-runtime claims from fixtures. Record actual full-suite/type-check/build outcomes." }
+]
+specs = []
+requirements = []
+
+[[phase]]
+id = "PHASE-02"
+name = "Cut over context enforcement and public contracts"
+objective = "Atomically replace cumulative enforcement with policy/2 context_tokens, independent cost validity, status/3 and result/2, including gate, audit, CLI, active contracts, help, examples and behavioral fixtures."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-01 exits hold; read design sections 2-4 and DEC-003 through DEC-006." },
+  { id = "EN-2", text = "Read RV-001 F-2 through F-6: exact legacy counter increments, crossing-prefix evidence, active-contract prose projections and unverified resumed-session event shape. Historical /1 contracts remain migration source material." }
+]
+exit_criteria = [
+  { id = "EX-1", text = "Serve policy/2 only with required context_tokens. Rename MCP schema/type/closed-field and clamping units. Old schema, old/mixed fields and unknown keys refuse with guidance; no automatic threshold conversion." },
+  { id = "EX-2", text = "The gate reads the shared peak under the fixed admission snapshot, uses strict greater-than, preserves precedence/lifetime/abort ladder and emits unit context_tokens. Many small requests may exceed the old cumulative budget without a context stop." },
+  { id = "EX-3", text = "Cost and tokens validate independently: known cost/missing tokens continues with disclosure; ordinary missing cost stops; valid ordinary tokens accrue independently of cost. Preserve failed-send/retry exceptions, legacy counter increments and failed-send cumulative exclusion." },
+  { id = "EX-4", text = "Status/audit expose context; reducer status is /3 and every result including refusals is /2. Known accounting and final=true do not promise context completeness or remove tolerated cost gaps." },
+  { id = "EX-5", text = "Abort observed/usage freeze at the crossing prefix; buffered/drained records may raise the final peak. A fake-child test verifies original observed plus larger final peak (RV-001 F-4)." },
+  { id = "EX-6", text = "Active /2 contracts, help routes, README/setup/agent guidance, current example and drift fixtures match. Sweep RV-001 F-2/F-3 prose/table projections, keep historical /1 intact, and remove obsolete totalTokens rationale from touched code." },
+  { id = "EX-7", text = "Focused/full tests, TypeScript checking, build and static documentation/contract checks pass. Shipped text has no private Doctrine IDs. Do not treat resumed fixtures as supported-runtime evidence." }
+]
+verification = [
+  { id = "VT-1", expects = "Reducer tests verify independent cost/context validity, exact counter populations/overlap, exceptions, zero/null and status/3 projection.", test_file = "src/reduce/reduce.test.ts", keywords = ["pi-run-status/3","peak_tokens","requests_unmeasured","accounting"], waived = false },
+  { id = "VT-2", expects = "Gate tests prove equality/crossing, many small requests, output/cache inclusion, null peak, precedence and context crossing values.", test_file = "src/server/gate.test.ts", keywords = ["context_tokens","peak_tokens","observed","limit"], waived = false },
+  { id = "VT-3", expects = "Policy tests reject /1 and old/mixed fields, require /2 context maximum and prove inherited/downward/above-maximum caller bounds.", test_file = "src/server/policy.test.ts", keywords = ["quotient-policy/2","context_tokens","ceiling-above-maximum"], waived = false },
+  { id = "VT-4", expects = "Fake-child tests preserve crossing-time observed while buffered/drained records raise final peak.", test_file = "src/server/spawn.test.ts", keywords = ["context_tokens","peak_tokens","observed"], waived = false },
+  { id = "VT-5", expects = "Result tests cover /2 envelopes, /3 status, null refusal status and completed final answers despite disclosed context gaps.", test_file = "src/server/result.test.ts", keywords = ["pi-agent-result/2","requests_unmeasured","final"], waived = false },
+  { id = "VT-6", expects = "Bidirectional active-contract/fixture drift checks and negative controls pass for fields/types/vocabularies and accepted policies.", test_file = "src/drift.test.ts", keywords = ["pi-agent-result-2.md","quotient-policy-2.md","keysAndTypesViolations"], waived = false },
+  { id = "VT-7", expects = "MCP server tests advertise/accept context_tokens, reject old caller ceilings and produce the new result contract through the real call flow.", test_file = "src/server/server.test.ts", keywords = ["context_tokens","pi-agent-result/2"], waived = false },
+  { id = "VA-1", expects = "Review explanatory contract prose, both counter populations/non-additivity, help routes, historical docs, CLI disclosure and no totalTokens fallback. Record full-suite/type-check/build evidence without weakening assertions." }
+]
+specs = []
+requirements = []
+
+[[phase]]
+id = "PHASE-03"
+name = "Prepare and verify the committed 0.2.0 package"
+objective = "Migrate packaging/probe scripts and version metadata; exercise the intended committed 0.2.0 artifact through the installed-package gate without publishing."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-02 exits hold; read release/publication requirements, CON-001, RV-001 F-1 and pack-check HEAD-clone behavior." },
+  { id = "EN-2", text = "Identify package/lockfile version owners and generated policy fixtures in both scripts; preserve the user-owned post-audit/pre-reconcile publication boundary." }
+]
+exit_criteria = [
+  { id = "EX-1", text = "package.json and both package-version locations in package-lock.json agree on 0.2.0, without dependency upgrades or lockfile-format change. CLI/MCP retain packageVersion as their source." },
+  { id = "EX-2", text = "Both scripts generate policy/2 with context_tokens and update explanatory text. pack-check explicitly asserts result/2, status/3 and expected context facts, retaining its four installed-bin checks." },
+  { id = "EX-3", text = "Full suite, TypeScript checking, build, both script syntax checks and npm pack --dry-run pass; packed files include active/historical contracts, help/examples and correct metadata." },
+  { id = "EX-4", text = "Commit the intended 0.2.0 implementation before scripts/pack-check; record exact tested HEAD and a passing installed-tarball gate for that commit. After repairs, commit and repeat. Older HEAD or only dry-run evidence does not satisfy this criterion." },
+  { id = "EX-5", text = "Record real-form hostile-audit and installed-pi/provider/session probes as executed with evidence or explicitly unperformed with prerequisites and ASM-001 retained. Stub tests do not validate live normalization or resume events." },
+  { id = "EX-6", text = "Do not npm publish in an implementation phase. Preserve the reminder for the user to publish after audit and before reconciliation and hand that checkpoint forward." }
+]
+verification = [
+  { id = "VT-1", expects = "The installed-package script migrates policy and asserts actual nested result/status/context schema and measurements, then passes on the recorded committed candidate.", test_file = "scripts/pack-check", keywords = ["quotient-policy/2","context_tokens","pi-agent-result/2","pi-run-status/3","peak_tokens"], waived = false },
+  { id = "VT-2", expects = "Existing CLI tests exercise emitted --version against package metadata; confirm 0.2.0 without another version constant.", test_file = "src/cli.test.ts", keywords = ["--version","packageVersion"], waived = false },
+  { id = "VT-3", expects = "Existing initialization tests verify MCP serverInfo.version comes from the same package version owner.", test_file = "src/server/server.test.ts", keywords = ["serverInfo","packageVersion"], waived = false },
+  { id = "VA-1", expects = "Inspect version consistency/packed contents and record syntax/full-suite/type-check/build/installed-gate results. Confirm tested HEAD contains the actual 0.2.0 migration; packing is not publication." },
+  { id = "VA-2", expects = "Carry ASM-001 and unperformed real-form/runtime probes into audit without claiming validation. Preserve the post-audit/pre-reconcile publication reminder." }
+]
+specs = []
+requirements = []

@@ -11,21 +11,26 @@ that measurement mismatch while preserving cumulative usage reporting.
 
 ## Scope & Objectives
 
-- Measure the largest per-request input context observed in a run, with the
-  exact treatment of fresh input, cache reads, and any other usage fields
-  settled during design against pi's usage contract.
-- Enforce a policy ceiling against that peak and expose the peak in the run
-  status, so callers can distinguish context pressure from cumulative usage.
-- Define what happens to the existing cumulative `maxima.tokens` limit and
-  the compatibility/migration path for existing policy files and result
-  consumers.
+- Measure each request's full context footprint as pi's normalized input,
+  cache-read, cache-write and output tokens, including measured assistant and
+  compaction-summary requests; retain the largest observed footprint.
+- Enforce the fixed context ceiling retrospectively at each measurement and
+  expose the peak and unmeasured-request count in status. Continue through
+  context gaps with disclosure; validate cost independently and retain its
+  accounting stop and existing failed-send/retry exceptions.
+- Replace cumulative `maxima.tokens` enforcement with `maxima.context_tokens`
+  and the corresponding caller ceiling. Require explicit migration to policy
+  `/2`, status `/3` and result `/2`, preserving cumulative token reporting and
+  historical contracts.
 - Update the relevant policy and result contracts, help/examples, and focused
   reducer/gate tests to match the chosen semantics.
+- Release the slice as package version 0.2.0 with consistent lockfile metadata.
 
 The implementation surface is expected to include `src/reduce/`,
 `src/server/`, `docs/contract/`, `examples/policy.json`, and the rendered help
-or setup documentation that explains these limits. Design will refine the
-exact touch set.
+or setup documentation that explains these limits, plus package release
+metadata. The design's code-impact section and design-target selectors define
+the intended touch set.
 
 ## Non-Goals
 
@@ -40,13 +45,14 @@ exact touch set.
 
 Replace the cumulative token ceiling as the proxy for per-request context
 pressure with an explicit peak-context measurement and limit. Preserve
-cumulative token totals for accounting/status. Whether cumulative token
-enforcement remains alongside the new limit, and how policy/result schema
-versions change, are design decisions rather than assumptions of this scope.
+cumulative token totals for accounting/status. The accepted design decisions
+DEC-001 through DEC-006 settle measurement, disclosure, independent cost
+validity and explicit migration; CON-001 requires package version 0.2.0.
 
 ## Follow-Ups
 
-- Before design, verify pi's usage-field semantics and the provider event path
-  used by the reducer; use those findings to define the peak calculation.
-- Research and design the policy migration and result/status compatibility
-  before implementation.
+- Keep the inspected-pi-source versus installed-runtime parity limit explicit;
+  fixture tests do not establish every launched provider's reporting behavior.
+- After audit and before reconciliation, remind the user to run `npm publish`
+  for 0.2.0 and obtain the publication outcome before continuing. The user owns
+  publication; the reminder does not authorize the agent to publish.
