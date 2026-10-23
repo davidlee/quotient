@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-23 · PHASE-01 · 1f0ac6a
+fresh-as-of: 2026-10-23 · PHASE-01 · e648ff4
 
 ### Produced
 
@@ -17,6 +17,7 @@ fresh-as-of: 2026-10-23 · PHASE-01 · 1f0ac6a
 
 ### Learned
 
+- mem.pattern.quotient.delegated-write-verification — verify delegated writes in the shared tree before relying on a worker report; use the authorized fallback after refusal or no-op.
 - RV-001 F-1 — installed-package verification uses a clone of committed HEAD.
 - RV-001 F-3 — accounting and context gap counters overlap rather than partition requests.
 

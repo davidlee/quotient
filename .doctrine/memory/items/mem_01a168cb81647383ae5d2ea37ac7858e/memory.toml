@@ -1,0 +1,42 @@
+memory_uid = "mem_01a168cb81647383ae5d2ea37ac7858e"
+memory_key = "mem.pattern.quotient.delegated-write-verification"
+schema_version = 1
+lifespan = "procedural"
+memory_type = "pattern"
+status = "active"
+title = "Verify Quotient delegated writes in the shared tree"
+summary = "Confirm delegated edits in git before relying on a worker write report; use the authorized fallback after a protected-path refusal or no-op."
+created = "2026-10-23"
+updated = "2026-10-23"
+
+[scope]
+paths = [".quotient/profiles"]
+globs = ["src/**"]
+commands = []
+tags = ["orchestration", "quotient"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "commit"
+commit = "e648ff48eb00d25e02f767cfd024fde75df18a37"
+tree = "ea134d5fbc8d7fa5b75981e877b613298bfb47f3"
+ref_name = "refs/heads/main"
+checkout_state_id = ""
+base_commit = "e648ff48eb00d25e02f767cfd024fde75df18a37"
+verified_sha = ""
+normalizer = ""
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "low"
+weight = 0
