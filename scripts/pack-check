@@ -13,7 +13,8 @@
 #   3. an MCP `initialize` over stdio answers serverInfo.name = "quotient" and a
 #      non-empty `instructions`;
 #   4. one `pi_agent` call, under a temp policy through this script's own stub
-#      form, answers a pi-agent-result/1 with `final: true`.
+#      form, answers a pi-agent-result/2 with status /3 and the exact context
+#      footprint measured from the fixture.
 #
 # The stub is this gate's, not the test rig's: a canned pi event stream (JSONL,
 # the shape pi --mode json emits for one successful turn), a fake `pi` that emits
@@ -245,11 +246,11 @@ node - "$deploy/policy.json" "$root" "$form" <<'JS'
 const fs = require('node:fs');
 const [policyPath, rootPath, form] = process.argv.slice(2);
 const policy = {
-  schema: 'quotient-policy/1',
+  schema: 'quotient-policy/2',
   mode: 'per-call',
   enabled: true,
   roots: [rootPath],
-  maxima: { requests: 4, tokens: 100000, cost_usd: 0.25, wall_clock_s: 120 },
+  maxima: { requests: 4, context_tokens: 100000, cost_usd: 0.25, wall_clock_s: 120 },
   profiles: { write: 'write' },
   forms: { write: form },
   exposure: [],
@@ -402,6 +403,18 @@ try {
     doc = JSON.parse(content[0].text);
   } catch (error) {
     fail(`the call's text is not pi-agent-result JSON: ${String(error)}`);
+  }
+  if (doc.schema !== 'pi-agent-result/2') {
+    fail(`the call's schema is ${JSON.stringify(doc.schema)}, expected pi-agent-result/2`);
+  }
+  if (doc.status?.schema !== 'pi-run-status/3') {
+    fail(`the call's status schema is ${JSON.stringify(doc.status?.schema)}, expected pi-run-status/3`);
+  }
+  if (doc.status?.context?.peak_tokens !== 16) {
+    fail(`the call's context peak is ${JSON.stringify(doc.status?.context?.peak_tokens)}, expected 16`);
+  }
+  if (doc.status?.context?.requests_unmeasured !== 0) {
+    fail(`the call's unmeasured context count is ${JSON.stringify(doc.status?.context?.requests_unmeasured)}, expected 0`);
   }
   if (doc.state !== 'completed' || doc.final !== true) {
     const refusal = doc.refusal ? ` refusal=${doc.refusal.reason}: ${doc.refusal.detail}` : '';

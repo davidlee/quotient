@@ -13,7 +13,7 @@
 # conformant. The other guarantees are the form implementer's to show;
 # docs/contract/form-1.md lists each guarantee quotient does not verify.
 #
-# The fixture writes a temporary `quotient-policy/1` policy and a temporary
+# The fixture writes a temporary `quotient-policy/2` policy and a temporary
 # launch directory holding `.quotient/profiles/probe.md`, then runs the server
 # from this package (`src/cli.ts`, i.e. packageRoot) with the launch directory as
 # its working directory. The form itself must confine the child; a stub launcher
@@ -193,10 +193,10 @@ node - "${policy_args[@]}" <<'JS'
 const fs = require('node:fs');
 const [policyPath, root, capability, form, ...exposure] = process.argv.slice(2);
 const policy = {
-  schema: 'quotient-policy/1',
+  schema: 'quotient-policy/2',
   mode: 'per-call',
   roots: [root],
-  maxima: { requests: 6, tokens: 150000, cost_usd: 0.5, wall_clock_s: 240 },
+  maxima: { requests: 6, context_tokens: 150000, cost_usd: 0.5, wall_clock_s: 240 },
   profiles: { probe: capability },
   forms: { [capability]: form },
   exposure,
