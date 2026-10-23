@@ -6,14 +6,12 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-23 · PHASE-01 · e648ff4
+fresh-as-of: 2026-10-24 · PHASE-02 · 7a37daa
 
 ### Produced
 
-- SL-001 — design and initial plan in 551d87a; exact package measurement criterion in 0d9af3b; review alias in 7c44f09.
-- RV-001 — external quotient/pi design review and focused repair recheck.
-- SL-001 — plan approval and continuation instructions in 7f05b91.
-- PHASE-01 — internal context tally, tests, and RV-002 code review in 1f0ac6a.
+- PHASE-02 — context enforcement, policy/2, status/3, result/2, active contracts and caller guidance; 328/328 suite, typecheck and build passed in 7a37daa.
+- RV-003 — PHASE-02 code review concluded with no findings in 7a37daa.
 
 ### Learned
 
@@ -25,15 +23,14 @@ fresh-as-of: 2026-10-23 · PHASE-01 · e648ff4
 
 - ASM-001 — launched-pi normalization and resumed-event compatibility.
 - CON-001 — version 0.2.0 release requirement.
-- DEC-001 through DEC-006 — governing measurement, migration and accounting choices.
 
 ## Further review
 
-PHASE-01 establishes reducer arithmetic with fixtures; it does not establish
-launched-pi normalization or resumed-session event shape. The later
-implementation phases and audit must preserve that limit under ASM-001. The
-remaining implementation and release evidence includes independent cost/context
-validity, buffered shutdown accounting, and the installed 0.2.0 package.
+PHASE-02 establishes reducer arithmetic, enforcement, audit-prefix behavior and
+contract migration with source and fixture evidence; it does not establish
+launched-pi normalization or resumed-session event shape. Preserve that limit
+under ASM-001. PHASE-03 still owns the committed 0.2.0 package metadata and
+installed-package verification.
 
 ## Release sequencing
 
@@ -46,13 +43,13 @@ the agent to publish.
 ## Implementation authorization and next entry
 
 The user approved the current plan after the 0d9af3b refinement: “yes, approve.
-then pull up for handover”. PHASE-01 is implemented and committed in 1f0ac6a.
+then pull up for handover”. PHASE-01 is committed in 1f0ac6a and PHASE-02 in
+7a37daa.
 
-The next unit is PHASE-02. Expand its runtime sheet from the approved plan and
-design sections 2-4, then use phase-plan and execute. Preserve the settled
-decisions absent new evidence or a material plan change. PHASE-03's package
-verification, the 0.2.0 publication checkpoint, audit, and reconciliation remain
-ahead.
+The next unit is PHASE-03. Expand its runtime sheet from the approved plan and
+design release section, then use phase-plan and execute. Preserve the settled
+decisions absent new evidence or a material plan change. The 0.2.0 publication
+checkpoint, audit, and reconciliation remain ahead.
 
 ## Environment for continuation
 
@@ -62,7 +59,7 @@ In this environment, `command -v doctrine` resolves to
 from the primary checkout.
 
 This checkout has no `just gate` or `just prove` recipe, so Doctrine's gate/prove
-commands cannot run. PHASE-01 used the direct suite, typecheck, and build checks;
-they passed, but the Doctrine cadence gate is not claimed. The user's earlier
-`.codex/config.toml` and `.gitignore` changes were committed separately from the
-phase code.
+commands cannot run. PHASE-01 and PHASE-02 used direct suite, typecheck, and
+build checks; they passed, but the Doctrine cadence gate is not claimed. The
+PHASE-02 `doctrine check gate` attempt failed with `justfile does not contain
+recipe 'gate'`.
