@@ -1,0 +1,48 @@
+id    = 2
+slug  = "phase-01-reducer-context-tally-implementation"
+title = "PHASE-01 reducer context tally implementation"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "code-review"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Reviewed the PHASE-01 reducer and test diff against the locked design and EX/VT/VA criteria; verified request classification, context math and gaps, failed-send semantics, unchanged legacy accounting and public boundaries, focused/reducer/full-suite/typecheck/build results. Raised one minor test-coverage finding, verified it fixed, and found no remaining correctness defects. Installed-pi and resumed-session runtime behavior remain outside fixture proof."
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-001"
+phase = "PHASE-01"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "minor"
+title = "Expected context-gap and missing-compaction cases were not covered in the initial test delta"
+detail = "Expected: PHASE-01 tests pin the monotonic peak across a later measurement gap and ensure every counted result-bearing compaction without usage increments the context gap exactly once (plan EX-1; design §2). Observed: the initial test delta covered assistant gaps and measured compaction results but omitted both cases, so resetting the peak on a gap or omitting the compaction context gap could regress unnoticed. Repair: the final test delta now asserts peak 155 remains after a subsequent invalid vector at src/reduce/reduce.test.ts:258-265, and asserts the missing-usage compaction result yields one context gap without changing the legacy counter at lines 305-314. The final focused context suite passes 6/6."
+disposition = "fix-now"
+response = "The tests were extended before phase closure. The retained-peak case at src/reduce/reduce.test.ts:258-265 measures 155 tokens, then observes an invalid vector and verifies peak remains 155 with one context gap. The unpriced-compaction case at lines 305-314 asserts one counted request, one context gap, no increment to the legacy top-level gap count, and unchanged accounting='unknown'. The final focused context suite passed 6/6; the full suite passed 321/321."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "The tests were extended before phase closure. The retained-peak case at src/reduce/reduce.test.ts:258-265 measures 155 tokens, then observes an invalid vector and verifies peak remains 155 with one context gap. The unpriced-compaction case at lines 305-314 asserts one counted request, one context gap, no increment to the legacy top-level gap count, and unchanged accounting='unknown'. The final focused context suite passed 6/6; the full suite passed 321/321."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified the added assertions and the delegated final test results; the gap is addressed."
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

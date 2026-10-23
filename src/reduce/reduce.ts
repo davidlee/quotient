@@ -87,6 +87,7 @@ export type Reduced = {
 export type Tally = {
   requests: number;
   requests_unmeasured: number;
+  context: { peak_tokens: number | null; requests_unmeasured: number };
   tokens: { input: number; output: number; cached: number; cache_write: number };
   cost: number | null;
   accounting: Accounting;
@@ -99,6 +100,7 @@ export function createTally(): Tally {
   return {
     requests: 0,
     requests_unmeasured: 0,
+    context: { peak_tokens: null, requests_unmeasured: 0 },
     tokens: { input: 0, output: 0, cached: 0, cache_write: 0 },
     cost: null,
     accounting: 'known',
@@ -442,7 +444,9 @@ export function countRecord(event: any, tally: Tally): void {
       const message = event.message ?? {};
       if (message.role !== 'assistant') return; // context echo, not a send
       tally.requests += 1;
-      if (NO_TOKEN_STOP_REASONS.has(message.stopReason)) {
+      const failedSend = NO_TOKEN_STOP_REASONS.has(message.stopReason);
+      observeContext(message.usage, tally, failedSend);
+      if (failedSend) {
         countFailedSend(message.usage, tally);
         return;
       }
@@ -453,6 +457,7 @@ export function countRecord(event: any, tally: Tally): void {
     case 'compaction_end': {
       if (!event.result || typeof event.result !== 'object') return;
       tally.requests += 1;
+      observeContext(event.result.usage, tally);
       accrue(readUsage(event.result.usage), tally);
       return;
     }
@@ -462,8 +467,36 @@ export function countRecord(event: any, tally: Tally): void {
       // no usage evidence for this one, so it is counted and disclosed.
       tally.requests += 1;
       tally.requests_unmeasured += 1;
+      tally.context.requests_unmeasured += 1;
       return;
   }
+}
+
+/** Record the independent context observation for one already-classified send.
+ *  Missing/invalid token components are gaps, never inferred from totalTokens.
+ *  Failed sends with an all-zero vector carry provider placeholders, not a
+ *  measured zero. This intentionally does not alter cost or cumulative tokens. */
+function observeContext(usage: any, tally: Tally, failedSend = false): void {
+  const input = nonNegative(usage?.input);
+  const output = nonNegative(usage?.output);
+  const cacheRead = nonNegative(usage?.cacheRead);
+  const cacheWrite = nonNegative(usage?.cacheWrite);
+  if (input === null || output === null || cacheRead === null || cacheWrite === null) {
+    tally.context.requests_unmeasured += 1;
+    return;
+  }
+
+  if (failedSend && input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0) {
+    tally.context.requests_unmeasured += 1;
+    return;
+  }
+
+  const footprint = input + cacheRead + cacheWrite + output;
+  if (!Number.isFinite(footprint)) {
+    tally.context.requests_unmeasured += 1;
+    return;
+  }
+  tally.context.peak_tokens = Math.max(tally.context.peak_tokens ?? footprint, footprint);
 }
 
 /** The one accrual path: observed usage adds tokens and cost; absent or invalid

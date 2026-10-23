@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { reduce } from './reduce.ts';
+import { countRecord, createTally, reduce } from './reduce.ts';
 import type { Reduced } from './reduce.ts';
 
 const cli = new URL('../cli.ts', import.meta.url).pathname;
@@ -199,6 +199,133 @@ test('tokens and cost accumulate across turns, once', () => {
   assert.deepEqual(status.tokens, { input: 200, output: 20, cached: 80, cache_write: 0 });
   assert.equal(status.cost_usd?.toFixed(4), '0.0040');
   assert.equal(status.requests, 2); // `agent_end` replays messages; it is not a send
+});
+
+const assistantRecord = (usage: unknown, stopReason = 'stop') => ({
+  type: 'message_end',
+  message: { role: 'assistant', stopReason, usage },
+});
+
+const countRecords = (...records: any[]) => {
+  const tally = createTally();
+  for (const record of records) countRecord(record, tally);
+  return tally;
+};
+
+test('context tally: starts empty and tracks the full footprint peak', () => {
+  const tally = createTally();
+  assert.deepEqual(tally.context, { peak_tokens: null, requests_unmeasured: 0 });
+
+  countRecord(assistantRecord(tokenUsage({ input: 100, cacheRead: 40, cacheWrite: 5, output: 10 })), tally);
+  countRecord(assistantRecord(tokenUsage({ input: 7, cacheRead: 3, cacheWrite: 0, output: 2 })), tally);
+
+  assert.equal(tally.context.peak_tokens, 155);
+  assert.equal(tally.context.requests_unmeasured, 0);
+  assert.equal(tally.requests, 2);
+});
+
+test('context tally: complete successful zero is measured; invalid vectors are gaps', () => {
+  const zero = countRecords(assistantRecord(emptyUsage));
+  assert.equal(zero.context.peak_tokens, 0);
+  assert.equal(zero.context.requests_unmeasured, 0);
+
+  const invalid: unknown[] = [
+    undefined,
+    tokenUsage({ input: undefined }),
+    tokenUsage({ output: -1 }),
+    tokenUsage({ cacheRead: Number.POSITIVE_INFINITY }),
+  ];
+  for (const usage of invalid) {
+    const tally = countRecords(assistantRecord(usage));
+    assert.equal(tally.requests, 1);
+    assert.equal(tally.context.peak_tokens, null);
+    assert.equal(tally.context.requests_unmeasured, 1);
+    assert.equal(tally.requests_unmeasured, 0);
+    assert.equal(tally.accounting, 'unknown');
+  }
+
+  const overflow = countRecords(
+    assistantRecord(tokenUsage({ input: Number.MAX_VALUE, output: Number.MAX_VALUE, cacheRead: 0, cacheWrite: 0 })),
+  );
+  assert.equal(overflow.requests, 1);
+  assert.equal(overflow.context.peak_tokens, null);
+  assert.equal(overflow.context.requests_unmeasured, 1);
+  assert.equal(overflow.requests_unmeasured, 0);
+  // The context sum is invalid, but PHASE-01 preserves the legacy accounting path,
+  // which validates each finite component and does not validate their sum.
+  assert.equal(overflow.accounting, 'known');
+
+  const retained = countRecords(
+    assistantRecord(tokenUsage({ input: 100, cacheRead: 40, cacheWrite: 5, output: 10 })),
+    assistantRecord(tokenUsage({ input: 10, cacheRead: undefined })),
+  );
+  assert.equal(retained.requests, 2);
+  assert.equal(retained.context.peak_tokens, 155);
+  assert.equal(retained.context.requests_unmeasured, 1);
+});
+
+test('context tally: failed placeholders are gaps; positive failed usage is measured without accruing tokens', () => {
+  for (const stopReason of ['error', 'aborted']) {
+    for (const usage of [emptyUsage, undefined]) {
+      const tally = countRecords(assistantRecord(usage, stopReason));
+      assert.equal(tally.requests, 1);
+      assert.equal(tally.context.peak_tokens, null);
+      assert.equal(tally.context.requests_unmeasured, 1);
+      assert.equal(tally.requests_unmeasured, 1);
+      assert.deepEqual(tally.tokens, { input: 0, output: 0, cached: 0, cache_write: 0 });
+    }
+
+    const measured = countRecords(
+      assistantRecord(tokenUsage({ input: 80, cacheRead: 20, cacheWrite: 2, output: 5 }), stopReason),
+    );
+    assert.equal(measured.requests, 1);
+    assert.equal(measured.context.peak_tokens, 107);
+    assert.equal(measured.context.requests_unmeasured, 0);
+    assert.deepEqual(measured.tokens, { input: 0, output: 0, cached: 0, cache_write: 0 });
+  }
+});
+
+test('context tally: counted compaction results and retries each contribute once', () => {
+  const compactions = countRecords(
+    { type: 'compaction_end', result: compactionResult(tokenUsage({ input: 10, output: 1, cacheRead: 1, cacheWrite: 1 })) },
+    { type: 'compaction_end', result: compactionResult(tokenUsage({ input: 200, output: 20, cacheRead: 50, cacheWrite: 5 })) },
+  );
+  assert.equal(compactions.requests, 2);
+  assert.equal(compactions.context.peak_tokens, 275);
+  assert.equal(compactions.context.requests_unmeasured, 0);
+  assert.deepEqual(compactions.tokens, { input: 210, output: 21, cached: 51, cache_write: 6 });
+
+  const retry = countRecords({ type: 'summarization_retry_scheduled' });
+  assert.equal(retry.requests, 1);
+  assert.equal(retry.context.peak_tokens, null);
+  assert.equal(retry.context.requests_unmeasured, 1);
+  assert.equal(retry.requests_unmeasured, 1);
+});
+
+test('context tally: unpriced compaction result is a context gap without a legacy gap increment', () => {
+  const tally = countRecords({
+    type: 'compaction_end',
+    result: { summary: 'response returned without usage' },
+  });
+  assert.equal(tally.requests, 1);
+  assert.equal(tally.context.peak_tokens, null);
+  assert.equal(tally.context.requests_unmeasured, 1);
+  assert.equal(tally.requests_unmeasured, 0);
+  assert.equal(tally.accounting, 'unknown');
+});
+
+test('context tally: ignored records create no observation or request', () => {
+  const tally = countRecords(
+    { type: 'message_end', message: { role: 'system', usage: tokenUsage() } },
+    { type: 'message_end', message: { role: 'user', usage: tokenUsage() } },
+    { type: 'message_update', message: { role: 'assistant', usage: tokenUsage() } },
+    { type: 'agent_end', messages: [{ role: 'assistant', usage: tokenUsage() }] },
+    { type: 'auto_retry_start', attempt: 1 },
+    { type: 'compaction_end', reason: 'threshold' },
+  );
+  assert.equal(tally.requests, 0);
+  assert.equal(tally.context.peak_tokens, null);
+  assert.equal(tally.context.requests_unmeasured, 0);
 });
 
 // --- sec-4's counting table: one request per provider send -------------------
