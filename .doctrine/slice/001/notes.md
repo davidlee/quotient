@@ -6,12 +6,14 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-24 · audit · 45187c3
+fresh-as-of: 2026-10-24 · reconcile · d1455ac
 
 ### Produced
 
 - SL-001 — phases 01–03 committed in 1f0ac6a, 7a37daa and 61fd1a9; installed 0.2.0 pack-check passed on the candidate HEAD.
-- RV-005 — conformance audit; F-1/F-2 and their design/selector reconciliation brief.
+- RV-005 — F-1/F-2 reconciled in design §4 and the selector registry; 34 conformant paths and no undelivered selectors.
+- 0.2.0 — user confirmed the published npm package and global install; npm reports `latest` at 0.2.0.
+- Close pre-check — `doctrine check gate` remains unavailable because this checkout has no `just gate` recipe; closure has not been attempted.
 
 ### Learned
 
@@ -47,9 +49,9 @@ The user approved the current plan after the 0d9af3b refinement: “yes, approve
 then pull up for handover”. PHASE-01 is committed in 1f0ac6a and PHASE-02 in
 7a37daa.
 
-All three implementation phases and the slice audit are complete. Before
-reconciliation, remind the user to run `npm publish` for 0.2.0 and wait for their
-publication outcome. Do not enter reconciliation until the user reports it.
+All three implementation phases, audit and reconciliation are complete. The
+user-owned npm publication checkpoint was completed before reconciliation; the
+package registry and global install both reported 0.2.0.
 
 ## Environment for continuation
 

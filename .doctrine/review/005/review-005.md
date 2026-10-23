@@ -81,3 +81,29 @@ The publish waits still
 ### Governance/spec (REV)
 
 - None.
+
+## Reconciliation Outcome
+
+### Direct edits applied
+
+- `design.md` §4 code-impact commitments: added `docs/contract/form-1.md` and
+  `examples/profiles/*.md` as active policy-reference documentation, and added
+  verification that active policy references track policy/2 (F-1).
+- `design.md` §4 test commitments: removed `src/root.test.ts` from changed test
+  targets and recorded its existing package-version coverage as inspected
+  evidence (F-2).
+
+### Selector registry
+
+- F-1: added `docs/contract/form-1.md` and `examples/profiles/*.md` as
+  `design-target` selectors.
+- F-2: changed `src/root.test.ts` from `design-target` to `scope-relevant`.
+  Conformance now reports 34 conformant paths and no undelivered selectors.
+  Seven undeclared paths remain: the phase review outputs and slice lifecycle
+  metadata, which the audit classified as expected Doctrine process outputs.
+
+### Governance/spec (REV)
+
+- None required.
+
+Reconciliation complete; handoff to `/close`.

@@ -1,7 +1,7 @@
 id = 1
 slug = "peak-request-context-ceiling"
 title = "Measure peak request context for token ceilings"
-status = "audit"
+status = "reconcile"
 created = "2026-10-23"
 updated = "2026-10-23"
 tags = []
@@ -111,10 +111,6 @@ selector = "src/cli.test.ts"
 intent = "design-target"
 
 [[selector]]
-selector = "src/root.test.ts"
-intent = "design-target"
-
-[[selector]]
 selector = "docs/contract/quotient-policy-2.md"
 intent = "design-target"
 
@@ -149,6 +145,18 @@ intent = "design-target"
 [[selector]]
 selector = "scripts/hostile-audit"
 intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/form-1.md"
+intent = "design-target"
+
+[[selector]]
+selector = "examples/profiles/*.md"
+intent = "design-target"
+
+[[selector]]
+selector = "src/root.test.ts"
+intent = "scope-relevant"
 
 [[relation]]
 label = "related"
