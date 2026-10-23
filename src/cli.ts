@@ -66,7 +66,7 @@ async function run(argv: string[]): Promise<number> {
   const [verb, ...rest] = argv;
   switch (verb) {
     case undefined:
-      if (process.stdin.isTTY) process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client\n');
+      if (process.stdin.isTTY) process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client. Try `quotient help`. Ctrl-D exits.\n');
       await serve(process.stdin, process.stdout, process.env, process.stderr, {
         launchDir: process.cwd(),
         signal: shutdownSignal(),
