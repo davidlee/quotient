@@ -1,10 +1,16 @@
-# quotient
+# quotient - pi.dev subagents for claude and codex
 
-An MCP server with one tool, `pi_agent`, which delegates a bounded piece of
-work to [pi](https://github.com/earendil-works/pi), a command-line coding agent
-that can run on a cheaper model. MCP (the Model Context Protocol) is how agents
-such as Claude Code and Codex call external tools; quotient speaks it over
-stdin and stdout.
+A stdio MCP server with one tool, `pi_agent`, which delegates a bounded piece of
+work to [pi](https://github.com/earendil-works/pi), harness of kings. 
+
+![quotient](./quotient.jpg)
+
+Essentially, use Pi to give subagents to Claude / Codex.
+
+You might want to do this for many reasons. Deepseek V4.1 Flash is a pretty good one.
+
+A broker like [LiteLLM](https://www.litellm.ai/) is recommended for credential
+management of pi models, but not required.
 
 Each call runs one pi process in a directory you allowlisted, under limits you
 set, confined by a *form*: an executable you choose that decides what the
@@ -14,6 +20,8 @@ a transcript reduced to its essentials, a status (usage, cost, counts) and a
 verdict: whether the run succeeded, and if not, why. Use it to hand recon,
 review or small edits to a cheaper model without handing it your machine.
 
+For a tour of confinement strategies, see [More Convenient Straitjackets](https://doctrine.engineering/articles/more-convenient-straitjackets/)
+
 ## Install
 
 quotient needs Node 22 or later, and `pi` installed where your forms can run it.
@@ -21,22 +29,139 @@ pi is a prerequisite, not a dependency.
 
 ```sh
 npm install -g @davlee/quotient
-```
-
-or, with nix:
-
-```sh
+# or
 nix profile install github:davidlee/quotient
 ```
 
-`quotient --version` confirms the install, and `quotient help` lists the built-in
-help sections.
+`quotient --version` confirms the install. `quotient help` lists the built-in
+help sections; `quotient help <section>` prints one.
 
-## Setup
+## Configure
 
-[`help/setup.md`](help/setup.md) (`quotient help setup`) walks through the
-policy, the profiles, choosing a form and adding the server to Claude Code or
-Codex. It takes about five minutes.
+quotient refuses every call until it has a policy. Three things to put in
+place, all under `~/.config/quotient/` by default:
+
+```
+~/.config/quotient/
+├── policy.json          the policy: roots, limits, profiles, forms (read on every call)
+└── profiles/            one file per profile: model, thinking, tools (read at start-up)
+    ├── read.md
+    ├── research.md
+    └── write.md
+
+~/.local/state/quotient/
+├── runs/                evidence for each call (the result's artifacts.dir)
+└── sessions/            pi sessions, so a call can be continued
+```
+
+`QUOTIENT_POLICY`, `QUOTIENT_RUN_DIR` and `QUOTIENT_SESSION_HOME` move these;
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are honoured. A project can carry its
+own profiles in `.quotient/profiles/`, which win per name over the user's. The
+policy is never read from a project.
+
+Start from the examples in the package:
+
+```sh
+examples="$(npm root -g)/@davlee/quotient/examples"
+# nix: examples=~/.nix-profile/lib/node_modules/@davlee/quotient/examples
+mkdir -p ~/.config/quotient/profiles
+install -m 0444 "$examples/policy.json" ~/.config/quotient/policy.json
+cp "$examples"/profiles/*.md ~/.config/quotient/profiles/
+```
+
+The policy is meant to be read-only (`0444`): edit a copy and reinstall it.
+
+### The policy
+
+```json
+{
+  "schema": "quotient-policy/1",
+  "mode": "per-call",
+  "enabled": true,
+  "roots": ["/home/operator/work"],
+  "maxima": {
+    "requests": 20,
+    "tokens": 200000,
+    "cost_usd": 1,
+    "wall_clock_s": 600
+  },
+  "profiles": { "read": "read", "research": "read", "write": "write" },
+  "forms": {
+    "read": "/home/operator/.local/state/quotient/forms/read/bin/quotient-read",
+    "write": "/home/operator/.local/state/quotient/forms/write/bin/quotient-write"
+  },
+  "exposure": [],
+  "transcript_budget_bytes": 8192
+}
+```
+
+- `roots`: the directories a delegate may work in. A call's `cwd` must be
+  inside one.
+- `maxima`: per-call ceilings. A call may ask for less, never more.
+- `profiles`: every profile a call may use, with its capability.
+- `forms`: the executable that confines pi, one per capability. quotient ships
+  no forms; `quotient help form` says what one must guarantee. Without a write
+  form, `"write": { "unconfined": "/absolute/path/to/pi" }` runs pi directly,
+  with your user's full access. Read `quotient help policy` (The unconfined
+  form) before using it.
+
+`quotient help policy` documents every field.
+
+### A profile
+
+A profile is a Markdown file whose header comment is the configuration; the
+rest is notes for humans. Set `model` to one your pi can reach:
+
+```markdown
+<!-- quotient-profile
+filesystem: read
+model: llm-gateway/deepseek-flash
+thinking: off
+tools: read, grep, find, ls, bash
+-->
+```
+
+`filesystem` must match the capability the policy gives the profile.
+`quotient help profiles` is the grammar.
+
+## Add it to your client
+
+Claude Code, for all your projects:
+
+```sh
+claude mcp add --scope user quotient -- quotient
+```
+
+or for one project, checked in as `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "quotient": { "command": "quotient" }
+  }
+}
+```
+
+Codex, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.quotient]
+command = "quotient"
+cwd = "/home/operator/work"
+tool_timeout_sec = 660     # policy maxima.wall_clock_s + 60
+```
+
+Keep `tool_timeout_sec`: Codex's default of 60 seconds is shorter than most
+delegate runs. `codex mcp add quotient -- quotient` writes the entry without
+it. `cwd` is the launch dir, where `.quotient/profiles/` is looked for.
+
+`quotient help clients` prints both snippets with this install's absolute path
+and a timeout computed from your policy.
+
+Restart the client and call `pi_agent` with a `prompt` and a `profile`. The
+server reads profiles and help once, at start-up, so restart it after changing
+them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
+(`quotient help setup`) is the same walk-through, in the order to do it.
 
 ## Documentation
 
