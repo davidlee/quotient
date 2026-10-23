@@ -1,0 +1,48 @@
+id = 1
+slug = "peak-request-context-ceiling"
+title = "Measure peak request context for token ceilings"
+status = "proposed"
+created = "2026-10-23"
+updated = "2026-10-23"
+tags = []
+
+[relationships]
+needs = []                      # slice→work hard prerequisite
+after = []                      # slice→work soft sequence: { to, rank }
+
+[[selector]]
+selector = "src/reduce/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/server/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "docs/contract/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "examples/policy.json"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "help/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "README.md"
+intent = "scope-relevant"
+
+[[relation]]
+label = "related"
+target = "IMP-001"
+
+# STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
+# `[relationships]` axis. Slices carry no typed STRUCTURAL
+# relation axes — the `[relationships]` table above holds only the dep/seq payload
+# (`needs`/`after`). Author a structural edge with the `doctrine link` verb
+# — it validates the (source, label) pair and resolves the target:
+#   doctrine link SL-NNN specs SPEC-NNN
+#   doctrine link SL-NNN governed_by ADR-NNN
+# `doctrine inspect SL-NNN` renders the inbound + outbound edges.

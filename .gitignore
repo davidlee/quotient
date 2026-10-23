@@ -95,3 +95,4 @@ result
 /.claude/skills/worktree
 /.pi/agents/dispatch-worker.md
 # <<< doctrine managed
+/.doctrine/slice/**/research
