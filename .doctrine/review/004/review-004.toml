@@ -1,0 +1,26 @@
+id    = 4
+slug  = "phase-03-package-metadata-and-installed-gate"
+title = "PHASE-03 package metadata and installed gate"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "code-review"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Reviewed the PHASE-03 package metadata and release scripts against CON-001, the approved phase criteria, and RV-001 F-1. The three version fields agree on 0.2.0 with lockfileVersion 3; both generated policies use policy/2/context_tokens; pack-check retains four installed checks and asserts result/2, status/3, peak 16 and zero context gaps. Full suite, typecheck, build, script syntax, package dry run and version consistency passed. The installed package gate passed all four checks against committed HEAD 61fd1a9513fb7904e5e1b82a1fbce3c81e851a4b. The real-form hostile audit and installed-pi/provider/resume probes were unperformed because prerequisites were not supplied; no publication occurred. The Doctrine cadence gate remains unavailable because no `just gate` recipe exists.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-001"
+phase = "PHASE-03"
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.
