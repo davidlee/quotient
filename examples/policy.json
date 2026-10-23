@@ -9,7 +9,14 @@
     "cost_usd": 1,
     "wall_clock_s": 600
   },
-  "profiles": { "read": "read", "research": "read", "write": "write" },
+  "profiles": {
+    "read": "read",
+    "research": "read",
+    "write": "write",
+    "review": "read",
+    "judgement": "read",
+    "implement": "write"
+  },
   "forms": {
     "read": "/home/operator/.local/state/quotient/forms/read/bin/quotient-read",
     "write": "/home/operator/.local/state/quotient/forms/write/bin/quotient-write"
