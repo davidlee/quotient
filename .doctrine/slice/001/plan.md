@@ -32,6 +32,11 @@ running it, retain the tested commit in execution evidence, and repeat it after
 repairs. Passing an older HEAD does not verify uncommitted 0.2.0 code. This
 commit boundary belongs to verification rather than being deferred to closure.
 
+The existing installed stub supplies 12 input and 4 output tokens, with no cache
+tokens. Its gate must assert a peak of 16 and zero context gaps, not merely the
+new fields' presence. This discriminates the accepted full footprint from an
+incorrect input-only value of 12 at the installed-package boundary.
+
 Keep phases serial because they share accumulator, schema and fixture owners.
 Any later requested worker/worktree strategy must preserve those dependencies.
 

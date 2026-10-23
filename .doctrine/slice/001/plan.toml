@@ -77,14 +77,16 @@ exit_criteria = [
   { id = "EX-3", text = "Full suite, TypeScript checking, build, both script syntax checks and npm pack --dry-run pass; packed files include active/historical contracts, help/examples and correct metadata." },
   { id = "EX-4", text = "Commit the intended 0.2.0 implementation before scripts/pack-check; record exact tested HEAD and a passing installed-tarball gate for that commit. After repairs, commit and repeat. Older HEAD or only dry-run evidence does not satisfy this criterion." },
   { id = "EX-5", text = "Record real-form hostile-audit and installed-pi/provider/session probes as executed with evidence or explicitly unperformed with prerequisites and ASM-001 retained. Stub tests do not validate live normalization or resume events." },
-  { id = "EX-6", text = "Do not npm publish in an implementation phase. Preserve the reminder for the user to publish after audit and before reconciliation and hand that checkpoint forward." }
+  { id = "EX-6", text = "Do not npm publish in an implementation phase. Preserve the reminder for the user to publish after audit and before reconciliation and hand that checkpoint forward." },
+  { id = "EX-7", text = "The installed stub's existing input=12, output=4, cacheRead=0 and cacheWrite=0 produce peak_tokens=16 and context.requests_unmeasured=0. The package gate asserts those values, not just presence or type, so an input-only footprint is rejected." }
 ]
 verification = [
   { id = "VT-1", expects = "The installed-package script migrates policy and asserts actual nested result/status/context schema and measurements, then passes on the recorded committed candidate.", test_file = "scripts/pack-check", keywords = ["quotient-policy/2","context_tokens","pi-agent-result/2","pi-run-status/3","peak_tokens"], waived = false },
   { id = "VT-2", expects = "Existing CLI tests exercise emitted --version against package metadata; confirm 0.2.0 without another version constant.", test_file = "src/cli.test.ts", keywords = ["--version","packageVersion"], waived = false },
   { id = "VT-3", expects = "Existing initialization tests verify MCP serverInfo.version comes from the same package version owner.", test_file = "src/server/server.test.ts", keywords = ["serverInfo","packageVersion"], waived = false },
   { id = "VA-1", expects = "Inspect version consistency/packed contents and record syntax/full-suite/type-check/build/installed-gate results. Confirm tested HEAD contains the actual 0.2.0 migration; packing is not publication." },
-  { id = "VA-2", expects = "Carry ASM-001 and unperformed real-form/runtime probes into audit without claiming validation. Preserve the post-audit/pre-reconcile publication reminder." }
+  { id = "VA-2", expects = "Carry ASM-001 and unperformed real-form/runtime probes into audit without claiming validation. Preserve the post-audit/pre-reconcile publication reminder." },
+  { id = "VT-4", expects = "The installed stub gate asserts context peak 16 and zero unmeasured requests; an input-only value 12 must fail its actual assertion.", test_file = "scripts/pack-check", keywords = ["peak_tokens", "requests_unmeasured", "16"], waived = false }
 ]
 specs = []
 requirements = []
