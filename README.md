@@ -5,7 +5,7 @@ work to [pi](https://github.com/earendil-works/pi), harness of kings.
 
 ![quotient](./quotient.jpg)
 
-Essentially, use Pi to give subagents to Claude / Codex.
+Essentially, use Pi subagents under Claude / Codex.
 
 You might want to do this for many reasons. Deepseek V4.1 Flash is a pretty good one.
 

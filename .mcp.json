@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "doctrine": {
+      "args": [
+        "serve",
+        "--mcp"
+      ],
+      "command": "${DOCTRINE_BIN:-doctrine}"
+    }
+  }
+}

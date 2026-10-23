@@ -1,0 +1,4 @@
+[mcp_servers.doctrine]
+command = "sh"
+args = ["-c", 'exec "${DOCTRINE_BIN:-doctrine}" serve --mcp']
+env_vars = ["DOCTRINE_BIN"]

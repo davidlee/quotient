@@ -1,0 +1,35 @@
+
+[install]
+installed-version = "0.46.10"
+# doctrine.toml — project conduct config (installed starter).
+#
+# This is the single canonical home for project-local config. It is
+# written once by `doctrine install` and then yours to edit; a re-install never
+# clobbers it. Every table below is OPTIONAL — with a key (or the whole file)
+# absent, the baked defaults are in force. Uncomment only what you want to steer.
+#
+# For the exhaustive, annotated catalogue of every knob, see the shipped
+# reference `doctrine.toml.example` (published, not projected).
+
+# --- Conduct axis -------------------------------------------------------
+# Per-lifecycle-state posture; ADVISORY in v1 (printed by `slice status`, never
+# enforced). `autonomy` is EXIT semantics — it governs advancing OUT of a state.
+#   actor    = self | agent | peer | team   (`self` = the human author)
+#   autonomy = auto | draft | gate
+# Baked default: actor = self, autonomy = auto for every state, EXCEPT plan and
+# reconcile which default to gate (the approved-plan and closure gates).
+# [conduct]
+# default-actor    = "self"
+# default-autonomy = "auto"
+
+# --- Install ----------------------------------------------------------------
+# Which Claude settings file doctrine writes its hooks into ("project" |
+# "local"; default "project"). See the shipped reference
+# `lib:reference/claude-activation.md`.
+# [install]
+# claude-settings-scope = "project"
+
+# --- Dispatch -------------------------------------------------------------
+# The trunk delivery ref dispatch advances to / the close gate checks against.
+# [dispatch]
+# deliver-to = "refs/heads/main"

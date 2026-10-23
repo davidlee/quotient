@@ -1,0 +1,58 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "${DOCTRINE_BIN:-doctrine} memory surface --input claude",
+            "type": "command"
+          }
+        ],
+        "matcher": "Read|Edit|Write"
+      },
+      {
+        "hooks": [
+          {
+            "command": "${DOCTRINE_BIN:-doctrine} memory surface --input claude",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "${DOCTRINE_BIN:-doctrine} prompt resolve --role orchestrator",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|clear"
+      },
+      {
+        "hooks": [
+          {
+            "command": "${DOCTRINE_BIN:-doctrine} memory sync",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|clear"
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "command": "${DOCTRINE_BIN:-doctrine} worktree create-fork",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ]
+  },
+  "worktree": {
+    "baseRef": "head"
+  }
+}
