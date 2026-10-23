@@ -36,6 +36,10 @@ function assertConforms(doc: AgentResult, label: string): void {
   if (!check.ok) assert.fail(`${label}: ${check.detail}`);
   assert.equal(doc.schema, RESULT_SCHEMA);
   assert.equal(doc.causes[0], doc.termination, `${label}: termination is always causes[0]`);
+  if (doc.status !== null) {
+    assert.equal(doc.status.schema, 'pi-run-status/3');
+    assert.ok('context' in doc.status, 'every spawned status carries the context disclosure');
+  }
 }
 
 // ── EX-1 / VT-1: the success predicate and every settlement combination ─────
@@ -50,7 +54,7 @@ type Settlement = RunInput & {
   stream: 'completed' | 'failed' | 'incomplete';
 };
 
-test('success is one predicate: an answer-bearing terminal message, agent_settled, exit 0 and known accounting (EX-1, VT-1)', async (t) => {
+test('success is one predicate: an answer-bearing terminal message, agent_settled, exit 0 and known cost accounting (EX-1, VT-1)', async (t) => {
   const cases: Settlement[] = [
     {
       name: 'stop, settled, exit 0',
@@ -66,6 +70,15 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
       lines: [messageEnd('length'), SETTLED_RECORD],
       state: 'completed',
       termination: 'length',
+      final: true,
+      result: 'the answer',
+      stream: 'completed',
+    },
+    {
+      name: 'valid cost and an unmeasured context vector still allow a final answer',
+      lines: [messageEnd('stop', 'the answer', { input: undefined }), SETTLED_RECORD],
+      state: 'completed',
+      termination: 'stop',
       final: true,
       result: 'the answer',
       stream: 'completed',
@@ -190,6 +203,9 @@ test('success is one predicate: an answer-bearing terminal message, agent_settle
       assert.equal(doc.session, 'sess-1');
       assert.equal(doc.status, reduced.status, 'status.state judges the stream');
       assert.equal(doc.status.state, settlement.stream);
+      if (settlement.name.startsWith('valid cost and an unmeasured context')) {
+        assert.deepEqual(doc.status.context, { peak_tokens: null, requests_unmeasured: 1 });
+      }
       assertConforms(doc, settlement.name);
     });
   }
@@ -354,9 +370,9 @@ const PRODUCED: Record<Termination, () => AgentResult> = {
   refused: () => refusedResult('audit-unavailable', 'attempts.jsonl cannot be appended to'),
 };
 
-test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every mapped outcome satisfies pi-agent-result/1 (EX-4, VT-4)', async (t) => {
+test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every mapped outcome satisfies pi-agent-result/2 (EX-4, VT-4)', async (t) => {
   await t.test('the enums are the wire vocabulary', () => {
-    assert.equal(RESULT_SCHEMA, 'pi-agent-result/1');
+    assert.equal(RESULT_SCHEMA, 'pi-agent-result/2');
     assert.deepEqual(
       [...RESULT_STATES],
       ['completed', 'failed', 'incomplete', 'timeout', 'cancelled', 'ceiling_exceeded', 'accounting_unknown', 'audit_failed', 'refused'],

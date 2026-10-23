@@ -34,8 +34,8 @@ type Source = { kind: 'file'; path: string } | { kind: 'contract'; path: string 
 const SOURCES: Readonly<Record<Section, Source>> = {
   agent: { kind: 'file', path: 'help/agent.md' },
   tool: { kind: 'file', path: 'help/tool.md' },
-  result: { kind: 'contract', path: 'docs/contract/pi-agent-result-1.md' },
-  policy: { kind: 'contract', path: 'docs/contract/quotient-policy-1.md' },
+  result: { kind: 'contract', path: 'docs/contract/pi-agent-result-2.md' },
+  policy: { kind: 'contract', path: 'docs/contract/quotient-policy-2.md' },
   form: { kind: 'contract', path: 'docs/contract/form-1.md' },
   profiles: { kind: 'file', path: 'help/profiles.md' },
   setup: { kind: 'file', path: 'help/setup.md' },

@@ -19,5 +19,9 @@ means.
 - Ask for batched reads and a capped answer: a delegate that reads one file per
   turn exhausts its request ceiling before it answers.
 - The evidence for every run is under `artifacts.dir`.
+- `final: true` and `status.accounting: "known"` do not mean every request had
+  a measured context footprint. Check `status.context.requests_unmeasured` and
+  `status.context.peak_tokens`; a context gap leaves the peak as a lower bound.
 
-`quotient help result` is the full result contract.
+`quotient help result` is the full result/2 and status/3 contract, including
+context gaps, cost accounting, states, causes and refusals.

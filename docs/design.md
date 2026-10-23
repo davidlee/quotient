@@ -33,18 +33,21 @@ the operator believes in and does not have.
 ## Accounting is retrospective
 
 The server counts what the delegate spends from pi's event stream, as each
-record arrives, using the usage the provider reported. Ceilings on requests,
-tokens and cost are checked against that count, and a crossing stops the run.
+record arrives, using the usage the provider reported. Request and cost ceilings
+are checked against their cumulative totals. The `context_tokens` ceiling checks
+the largest measured per-request footprint: input, output, cache-read and
+cache-write tokens. Cumulative token totals remain available for accounting.
 
 That is enforcement after the fact, and the ceilings promise less than they
 appear to:
 
-- a request's usage is known only once it has been made, so a run can exceed
-  a ceiling by the request that crossed it;
+- context usage is known only once the request has been made, so a run can exceed
+  the context ceiling by the request that crossed it;
 - cost is the provider's reported cost, not a price the server computes;
-- a request whose usage is missing or invalid makes the run's accounting
-  unknown, and the run stops: a ceiling that cannot be measured is not
-  enforced, so the server does not pretend it is.
+- missing or invalid context usage is disclosed as a measurement gap and does
+  not alone stop the run; missing or invalid cost on an ordinary response makes
+  cost accounting unknown and stops the run because the cost ceiling cannot be
+  enforced.
 
 The wall clock is the hard backstop. It holds whatever the stream says, and it
 also catches a delegate that has gone quiet: the server evaluates its limits

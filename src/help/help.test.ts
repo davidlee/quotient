@@ -83,8 +83,8 @@ test('help: contract sections print docs/contract verbatim and ignore an overrid
     write(xdg, section, 'xdg override\n');
   }
   const snapshot = loaded(all);
-  assert.equal(sectionText(snapshot, 'result', CONTEXT), builtin('docs/contract/pi-agent-result-1.md'));
-  assert.equal(sectionText(snapshot, 'policy', CONTEXT), builtin('docs/contract/quotient-policy-1.md'));
+  assert.equal(sectionText(snapshot, 'result', CONTEXT), builtin('docs/contract/pi-agent-result-2.md'));
+  assert.equal(sectionText(snapshot, 'policy', CONTEXT), builtin('docs/contract/quotient-policy-2.md'));
   assert.equal(sectionText(snapshot, 'form', CONTEXT), builtin('docs/contract/form-1.md'));
 });
 

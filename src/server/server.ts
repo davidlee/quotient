@@ -4,7 +4,7 @@
 // version, a tools capability and serverInfo; `notifications/initialized` is a
 // no-op; `ping` answers `{pong: true}`; `tools/list` lists the tool; an unknown
 // method answers -32601. One difference is the contract: a `tools/call` always
-// answers a tool result (`content` + `isError`) carrying a `pi-agent-result/1`
+// answers a tool result (`content` + `isError`) carrying a `pi-agent-result/2`
 // document — a refusal is a successful call that ran nothing, never a JSON-RPC
 // error (design sec-5).
 //
@@ -64,11 +64,11 @@ export const PI_AGENT_TOOL = {
         type: 'object',
         properties: {
           requests: { type: 'number' },
-          tokens: { type: 'number' },
+          context_tokens: { type: 'number' },
           cost_usd: { type: 'number' },
           wall_clock_s: { type: 'number' },
         },
-        description: 'Per-call ceilings. May only lower the policy maxima.',
+        description: 'Per-call requests, peak context_tokens, cost and wall-clock ceilings. May only lower the policy maxima.',
         additionalProperties: false,
       },
       transcript_budget_bytes: {
@@ -88,7 +88,7 @@ export type AgentRequest = {
   cwd?: string;
   session?: string;
   tools?: string[];
-  ceilings?: { requests?: number; tokens?: number; cost_usd?: number; wall_clock_s?: number };
+  ceilings?: { requests?: number; context_tokens?: number; cost_usd?: number; wall_clock_s?: number };
   transcript_budget_bytes?: number;
 };
 
@@ -128,7 +128,7 @@ type Context = {
 /** A request id as a map key: `1` and `"1"` name different calls. */
 const callKey = (id: WireId): string => `${typeof id}:${String(id)}`;
 
-const CEILING_FIELDS = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
+const CEILING_FIELDS = ['requests', 'context_tokens', 'cost_usd', 'wall_clock_s'];
 const ARGUMENT_FIELDS = [
   'prompt',
   'profile',
@@ -183,6 +183,9 @@ function readAgentRequest(value: Record<string, unknown>): { ok: true; request: 
     const ceilings = value.ceilings;
     if (!isRecord(ceilings)) return { ok: false, detail: 'ceilings must be an object' };
     for (const field of Object.keys(ceilings)) {
+      if (field === 'tokens') {
+        return { ok: false, detail: 'ceilings.tokens is no longer supported; use ceilings.context_tokens' };
+      }
       if (!CEILING_FIELDS.includes(field)) return { ok: false, detail: `unknown field: ceilings.${field}` };
       const limit = ceilings[field];
       if (typeof limit !== 'number' || !Number.isFinite(limit)) {

@@ -26,7 +26,7 @@ export type PolicyMode = 'per-call';
 
 export type Maxima = {
   requests?: number;
-  tokens?: number;
+  context_tokens?: number;
   cost_usd?: number;
   wall_clock_s?: number;
 };
@@ -53,7 +53,7 @@ export function formExtensions(form: Form): readonly string[] {
 export type Forms = { read?: Form; write?: Form };
 
 /** The schema tag this build reads. */
-export const POLICY_SCHEMA = 'quotient-policy/1';
+export const POLICY_SCHEMA = 'quotient-policy/2';
 
 export type Policy = {
   schema: typeof POLICY_SCHEMA;
@@ -99,7 +99,7 @@ export const OPTIONAL_FIELDS: readonly string[] = ['transcript_budget_bytes'];
  * for what it serves (design sec-1, EX-4).
  */
 export const STATIC_ONLY_FIELDS: readonly string[] = ['agent', 'root', 'filesystem', 'session_home', 'run_dir', 'evidence_dir'];
-export const MAXIMA_FIELDS: readonly string[] = ['requests', 'tokens', 'cost_usd', 'wall_clock_s'];
+export const MAXIMA_FIELDS: readonly string[] = ['requests', 'context_tokens', 'cost_usd', 'wall_clock_s'];
 export const FORM_KEYS: readonly string[] = ['path', 'extensions', 'unconfined'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };
@@ -198,6 +198,9 @@ function validatePolicy(value: unknown): PolicyCheck {
   // against it, so no later check reports on a shape it was never written for.
   if (!Object.hasOwn(value, 'schema')) return invalid('missing policy field: schema');
   if (value.schema !== POLICY_SCHEMA) {
+    if (value.schema === 'quotient-policy/1') {
+      return invalid('quotient-policy/1 is not supported; migrate to quotient-policy/2 by choosing maxima.context_tokens and removing maxima.tokens');
+    }
     return invalid(`schema ${JSON.stringify(value.schema)} is not one this build reads: expected "${POLICY_SCHEMA}"`);
   }
 
@@ -237,6 +240,9 @@ function validatePolicy(value: unknown): PolicyCheck {
   const maxima = value.maxima;
   if (!isRecord(maxima)) return invalid('maxima must be an object');
   for (const field of Object.keys(maxima)) {
+    if (field === 'tokens') {
+      return invalid('maxima.tokens is not supported; choose maxima.context_tokens and remove maxima.tokens');
+    }
     if (!MAXIMA_FIELDS.includes(field)) return invalid(`unknown policy field: maxima.${field}`);
     const limit = maxima[field];
     if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {

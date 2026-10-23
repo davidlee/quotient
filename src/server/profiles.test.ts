@@ -580,15 +580,19 @@ test('a capability with no wrapper form refuses wrapper-unavailable', async () =
   assert.match(doc.refusal.detail, /write/);
 });
 
-test('a ceiling above a policy maximum is refused, naming the unit and both numbers', async () => {
+test('context ceiling bounds are enforced, and the retired tokens field is refused with guidance', async () => {
   const wire = mintWire();
-  const doc = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { tokens: 100001 } }, wire);
+  const legacy = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { tokens: 100001 } }, wire);
+  assert.equal(legacy.refusal.reason, 'request-invalid');
+  assert.match(legacy.refusal.detail, /ceilings\.context_tokens/);
+
+  const doc = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { context_tokens: 100001 } }, wire);
   assert.equal(doc.refusal.reason, 'ceiling-above-maximum');
-  assert.match(doc.refusal.detail, /tokens/);
+  assert.match(doc.refusal.detail, /context_tokens/);
   assert.match(doc.refusal.detail, /100001/);
   assert.match(doc.refusal.detail, /100000/);
 
-  const clamped = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { tokens: 10 } }, wire);
+  const clamped = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { context_tokens: 10 } }, wire);
   assert.equal(clamped.state, 'failed', 'a ceiling at or below the maximum is clamped, not refused');
 });
 

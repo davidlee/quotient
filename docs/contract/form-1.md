@@ -52,7 +52,7 @@ everything else  form's choice       no         <- G5
 
 G5 and G6 are what make the server's own check sound. Before a run, the server
 checks that the root, the session directory and `exposure` do not overlap the
-stores the child must not write (`quotient-policy-1.md`, Protected stores).
+stores the child must not write (`quotient-policy-2.md`, Protected stores).
 That check only means something if the form adds nothing writable and hides
 what must stay unreachable.
 
@@ -103,4 +103,4 @@ conformant.
 
 A policy may name pi itself as an unconfined write form. That runs
 `<pi> <pi argv…>`, with no session positional, and none of G1–G8 hold.
-`quotient-policy-1.md` says what it gives up.
+`quotient-policy-2.md` says what it gives up.

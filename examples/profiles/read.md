@@ -21,7 +21,7 @@ This profile runs with thinking off: it is the recon delegate, and judgement is
 the `research` profile's job.
 
 This profile names no `mcp__*` tool, so the form it runs under passes no `-e`
-beyond the default of no extensions (`docs/contract/quotient-policy-1.md`, Fields). A
+beyond the default of no extensions (`docs/contract/quotient-policy-2.md`, Fields). A
 profile that needed an MCP tool would require the form to re-enable
 `builtin:mcp`, and the server refuses a profile whose tools it can never receive.
 

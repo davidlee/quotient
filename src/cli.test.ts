@@ -70,8 +70,10 @@ test('help lists the sections; an unknown section exits 2', () => {
 
 test('help prints a contract section verbatim; refusals is result', () => {
   const policy = quotient(['help', 'policy']);
-  assert.equal(policy.stdout, readFileSync(join(packageRoot, 'docs/contract/quotient-policy-1.md'), 'utf8'));
-  assert.equal(quotient(['help', 'refusals']).stdout, quotient(['help', 'result']).stdout);
+  assert.equal(policy.stdout, readFileSync(join(packageRoot, 'docs/contract/quotient-policy-2.md'), 'utf8'));
+  const result = quotient(['help', 'result']);
+  assert.equal(result.stdout, readFileSync(join(packageRoot, 'docs/contract/pi-agent-result-2.md'), 'utf8'));
+  assert.equal(quotient(['help', 'refusals']).stdout, result.stdout);
 });
 
 test('help clients prints both snippets with the running bin and the policy timeout', () => {

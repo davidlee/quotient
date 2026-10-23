@@ -1,7 +1,7 @@
 # quotient - pi.dev subagents for claude and codex
 
 A stdio MCP server with one tool, `pi_agent`, which delegates a bounded piece of
-work to [pi](https://github.com/earendil-works/pi), harness of kings. 
+work to [pi](https://github.com/earendil-works/pi), harness of kings.
 
 ![quotient](./quotient.jpg)
 
@@ -16,7 +16,8 @@ Each call runs one pi process in a directory you allowlisted, under limits you
 set, confined by a *form*: an executable you choose that decides what the
 delegate can read and write. Each profile has a *capability*, `read` or
 `write`, and the policy names one form per capability. The call answers with
-a transcript reduced to its essentials, a status (usage, cost, counts) and a
+a transcript reduced to its essentials, a status (request-context peak, usage,
+cost, counts) and a
 verdict: whether the run succeeded, and if not, why. Use it to hand recon,
 review or small edits to a cheaper model without handing it your machine.
 
@@ -79,13 +80,13 @@ The policy is meant to be read-only (`0444`): edit a copy and reinstall it.
 
 ```json
 {
-  "schema": "quotient-policy/1",
+  "schema": "quotient-policy/2",
   "mode": "per-call",
   "enabled": true,
   "roots": ["/home/operator/work"],
   "maxima": {
     "requests": 20,
-    "tokens": 200000,
+    "context_tokens": 180000,
     "cost_usd": 1,
     "wall_clock_s": 600
   },
@@ -109,6 +110,9 @@ The policy is meant to be read-only (`0444`): edit a copy and reinstall it.
 - `roots`: the directories a delegate may work in. A call's `cwd` must be
   inside one.
 - `maxima`: per-call ceilings. A call may ask for less, never more.
+- `maxima.context_tokens`: the maximum measured input + output + cache-read +
+  cache-write footprint of one request. Choose this for your model and workload;
+  the old cumulative `maxima.tokens` value cannot be converted automatically.
 - `profiles`: every profile a call may use, with its capability.
 - `forms`: the executable that confines pi, one per capability. quotient ships
   no forms; `quotient help form` says what one must guarantee. Without a write
@@ -198,11 +202,13 @@ them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
 - `quotient help`: built-in help, including the agent-facing guide, which is
   also what the server tells the calling agent.
 - [`docs/contract/pi-agent-result-1.md`](docs/contract/pi-agent-result-1.md):
-  the result document every call answers with: fields, states, causes and
-  refusals.
-- [`docs/contract/quotient-policy-1.md`](docs/contract/quotient-policy-1.md):
-  the policy schema, where files are found, the admission order, the protected
-  stores, and what the unconfined form gives up.
+  historical result fields, states, causes and refusals. The active result
+  contract is [`docs/contract/pi-agent-result-2.md`](docs/contract/pi-agent-result-2.md)
+  and distinguishes context completeness from cost accounting.
+- [`docs/contract/quotient-policy-2.md`](docs/contract/quotient-policy-2.md):
+  the active policy schema, where files are found, the admission order, the
+  protected stores, and what the unconfined form gives up. Policy /1 is retained
+  as historical documentation.
 - [`docs/contract/form-1.md`](docs/contract/form-1.md): what a form must
   guarantee, and which guarantees quotient verifies.
 - [`docs/design.md`](docs/design.md): why it is built this way.

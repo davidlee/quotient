@@ -42,8 +42,10 @@ import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD, workspace } from '.
 const repo = (path: string): string => new URL(`../${path}`, import.meta.url).pathname;
 const read = (path: string): string => readFileSync(repo(path), 'utf8');
 
-const RESULT_CONTRACT = 'docs/contract/pi-agent-result-1.md';
-const POLICY_CONTRACT = 'docs/contract/quotient-policy-1.md';
+const RESULT_CONTRACT = 'docs/contract/pi-agent-result-2.md';
+const POLICY_CONTRACT = 'docs/contract/quotient-policy-2.md';
+const HISTORICAL_RESULT_CONTRACT = 'docs/contract/pi-agent-result-1.md';
+const HISTORICAL_POLICY_CONTRACT = 'docs/contract/quotient-policy-1.md';
 
 // ── Reading the documents ──────────────────────────────────────────────────
 
@@ -197,7 +199,7 @@ function fixtures(): Record<string, AgentResult> {
     timeout: buildResult({ lines: answering, causes: ['timeout'] }).doc,
     cancelled: buildResult({ lines: answering, causes: ['cancelled'] }).doc,
     ceiling_exceeded: buildResult({ lines: answering, causes: ['ceiling'] }).doc,
-    accounting_unknown: buildResult({ lines: [messageEnd('stop', 'the answer', { input: undefined }), SETTLED_RECORD] }).doc,
+    accounting_unknown: buildResult({ lines: [messageEnd('stop', 'the answer', { cost: {} }), SETTLED_RECORD] }).doc,
     audit_failed: buildResult({ lines: answering, causes: ['audit'] }).doc,
     refused: refusedResult('disabled', 'the operator switch is off'),
   };
@@ -262,6 +264,28 @@ function policyViolations(contract: string): string[] {
   ];
 }
 
+/** Validate policy-shaped JSON examples embedded in general guidance text. */
+function embeddedPolicyViolations(text: string, label: string): { found: number; violations: string[] } {
+  const policies: unknown[] = [];
+  for (const [, block] of text.matchAll(/```json\n([\s\S]*?)```/g)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(block);
+    } catch (error) {
+      return { found: policies.length, violations: [`${label} has invalid JSON: ${(error as Error).message}`] };
+    }
+    if (typeof parsed === 'object' && parsed !== null && 'schema' in parsed && String(parsed.schema).startsWith('quotient-policy/')) {
+      policies.push(parsed);
+    }
+  }
+  return {
+    found: policies.length,
+    violations: policies.flatMap((policy, index) =>
+      inadmissibleBlocks(`\`\`\`json\n${JSON.stringify(policy)}\n\`\`\``, `${label} policy ${index + 1}`),
+    ),
+  };
+}
+
 // ── No doctrine ids ────────────────────────────────────────────────────────
 
 const DOCTRINE_ID = /\b(?:SL|DEC|RV|ADR|REQ|POL|IMP|ISS|SPEC|RFC|REV|CHR|IDE|RSK)-\d{3}\b/g;
@@ -281,7 +305,7 @@ function doctrineIdViolations(files: readonly string[]): string[] {
 
 // ── The tests ──────────────────────────────────────────────────────────────
 
-test('refusal tokens: the sources\' refusal unions equal the pi-agent-result-1.md Refusals table, both ways', () => {
+test('refusal tokens: the sources\' refusal unions equal the active pi-agent-result/2 Refusals table, both ways', () => {
   const reasons = codeRefusals();
   assert.ok(reasons.includes('session-busy') && reasons.includes('view-overlaps-protected'), 'the union scan finds the declared reasons');
   assert.deepEqual(refusalViolations(read(RESULT_CONTRACT), reasons), []);
@@ -303,6 +327,34 @@ test('policy: every key validatePolicy accepts and every env var config.ts reads
   assert.ok(configVars().includes('HOME') && configVars().includes('QUOTIENT_POLICY'), 'the env scan finds the reads');
   assert.deepEqual(policyViolations(read(POLICY_CONTRACT)), []);
   assert.deepEqual(inadmissibleBlocks(`\`\`\`json\n${read('examples/policy.json')}\`\`\``, 'examples/policy.json'), []);
+  const readmePolicies = embeddedPolicyViolations(read('README.md'), 'README.md');
+  assert.ok(readmePolicies.found > 0, 'README includes a detectable policy example');
+  assert.deepEqual(readmePolicies.violations, []);
+});
+
+test('active contracts migrate explicitly while historical /1 references remain available', () => {
+  const result = read(RESULT_CONTRACT);
+  const policy = read(POLICY_CONTRACT);
+  assert.ok(result.includes('`pi-agent-result/2`'));
+  assert.ok(result.includes('`pi-run-status/3`'));
+  assert.ok(policy.includes('`quotient-policy/2`'));
+  assert.ok(policy.includes('`maxima.context_tokens`'));
+  assert.ok(policy.includes('No automatic conversion'));
+  assert.ok(read(HISTORICAL_RESULT_CONTRACT).includes('`pi-agent-result/1`'));
+  assert.ok(read(HISTORICAL_POLICY_CONTRACT).includes('`quotient-policy/1`'));
+});
+
+test('result contract defines the two unmeasured populations and their non-additivity', () => {
+  const result = read(RESULT_CONTRACT).replace(/\s+/g, ' ');
+  for (const phrase of [
+    'legacy accounting-gap count',
+    'every counted request that lacks a valid context footprint',
+    'not a partition',
+    'not context completeness',
+    'not establish that behavior',
+  ]) {
+    assert.ok(result.includes(phrase), `active result contract explains ${phrase}`);
+  }
 });
 
 test('no doctrine ids: nothing under docs/, examples/, help/ or the README cites one', () => {

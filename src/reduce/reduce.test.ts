@@ -241,7 +241,7 @@ test('context tally: complete successful zero is measured; invalid vectors are g
     assert.equal(tally.context.peak_tokens, null);
     assert.equal(tally.context.requests_unmeasured, 1);
     assert.equal(tally.requests_unmeasured, 0);
-    assert.equal(tally.accounting, 'unknown');
+    assert.equal(tally.accounting, usage === undefined ? 'unknown' : 'known');
   }
 
   const overflow = countRecords(
@@ -251,8 +251,8 @@ test('context tally: complete successful zero is measured; invalid vectors are g
   assert.equal(overflow.context.peak_tokens, null);
   assert.equal(overflow.context.requests_unmeasured, 1);
   assert.equal(overflow.requests_unmeasured, 0);
-  // The context sum is invalid, but PHASE-01 preserves the legacy accounting path,
-  // which validates each finite component and does not validate their sum.
+  // The context sum is invalid, but every cost observation is valid; accounting
+  // reports cost validity and the context gap remains separate.
   assert.equal(overflow.accounting, 'known');
 
   const retained = countRecords(
@@ -312,6 +312,36 @@ test('context tally: unpriced compaction result is a context gap without a legac
   assert.equal(tally.context.requests_unmeasured, 1);
   assert.equal(tally.requests_unmeasured, 0);
   assert.equal(tally.accounting, 'unknown');
+});
+
+test('context and cost observations are independent, and their gap populations may differ', () => {
+  const contextWithoutCost = countRecords(
+    assistantRecord(tokenUsage({ input: 8, output: 2, cacheRead: 1, cacheWrite: 0, cost: undefined })),
+  );
+  assert.equal(contextWithoutCost.context.peak_tokens, 11);
+  assert.equal(contextWithoutCost.context.requests_unmeasured, 0);
+  assert.equal(contextWithoutCost.accounting, 'unknown');
+  assert.equal(contextWithoutCost.requests_unmeasured, 0);
+  assert.deepEqual(contextWithoutCost.tokens, { input: 8, output: 2, cached: 1, cache_write: 0 });
+
+  const costWithoutContext = countRecords(
+    assistantRecord(tokenUsage({ input: undefined, output: 2, cacheRead: 1, cacheWrite: 0, cost: cost(0.25) })),
+  );
+  assert.equal(costWithoutContext.context.peak_tokens, null);
+  assert.equal(costWithoutContext.context.requests_unmeasured, 1);
+  assert.equal(costWithoutContext.accounting, 'known');
+  assert.equal(costWithoutContext.requests_unmeasured, 0);
+  assert.equal(costWithoutContext.cost, 0.25);
+  assert.deepEqual(costWithoutContext.tokens, { input: 0, output: 0, cached: 0, cache_write: 0 });
+
+  const failedSend = countRecords(
+    assistantRecord(tokenUsage({ input: 8, output: 2, cacheRead: 1, cacheWrite: 0, cost: undefined }), 'error'),
+  );
+  assert.equal(failedSend.context.peak_tokens, 11);
+  assert.equal(failedSend.context.requests_unmeasured, 0);
+  assert.equal(failedSend.requests_unmeasured, 1);
+  assert.equal(failedSend.accounting, 'known');
+  assert.deepEqual(failedSend.tokens, { input: 0, output: 0, cached: 0, cache_write: 0 });
 });
 
 test('context tally: ignored records create no observation or request', () => {
@@ -484,12 +514,12 @@ test('a zero-priced usage is a price, not missing data', () => {
   assert.equal(status.tokens.cached, 400);
 });
 
-test('usage that is absent, non-finite or negative marks accounting unknown', () => {
+test('absent, non-finite or negative cost marks accounting unknown independently of tokens', () => {
   const bad: (Record<string, unknown> | undefined)[] = [
     undefined,
-    tokenUsage({ input: Number.NaN }),
-    tokenUsage({ output: -1 }),
-    tokenUsage({ cacheWrite: undefined }),
+    tokenUsage({ cost: undefined }),
+    tokenUsage({ cost: { total: Number.NaN } }),
+    tokenUsage({ cost: cost(-1) }),
   ];
   for (const usage of bad) {
     const { status } = reduceLines(run(says('answered', 'stop', usage)));
@@ -597,7 +627,7 @@ test('length sets truncated and is answer-bearing; stop is neither truncated nor
 
 // --- the status every consumer reads ---------------------------------------
 
-test('status carries requests, requests_unmeasured, cache_write and accounting under pi-run-status/2', () => {
+test('status carries cost and context disclosures under pi-run-status/3', () => {
   const reduced = reduceLines(
     run(
       compactionEnd({ result: compactionResult(tokenUsage({ cacheWrite: 25 })) }),
@@ -606,9 +636,10 @@ test('status carries requests, requests_unmeasured, cache_write and accounting u
     ),
   );
   const { status } = reduced;
-  assert.equal(status.schema, 'pi-run-status/2');
+  assert.equal(status.schema, 'pi-run-status/3');
   assert.equal(status.requests, 3);
   assert.equal(status.requests_unmeasured, 1);
+  assert.deepEqual(status.context, { peak_tokens: 135, requests_unmeasured: 1 });
   assert.equal(status.tokens.cache_write, 30);
   assert.equal(status.accounting, 'known');
   // `turns` keeps its own meaning: assistant messages, not sends.
@@ -636,7 +667,7 @@ test('cli: one status line by default, exit 0 when completed', () => {
   // The line gained the accounting fields; every existing field keeps its place.
   assert.match(
     stdout.trim(),
-    /^completed turns=1 requests=1 unmeasured=0 accounting=known tools=0 tokens=100\/10 cost=0\.0100 transcript=.*transcript\.md$/,
+    /^completed turns=1 requests=1 unmeasured=0 accounting=known context_peak=110 context_unmeasured=0 tools=0 tokens=100\/10 cost=0\.0100 transcript=.*transcript\.md$/,
   );
 });
 
@@ -659,8 +690,9 @@ test('cli: writes transcript.md and status.json beside the input, exit 1 when fa
   assert.match(transcript, /^broke$/m);
   const status = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8'));
   assert.equal(status.state, 'failed');
-  assert.equal(status.schema, 'pi-run-status/2');
+  assert.equal(status.schema, 'pi-run-status/3');
   assert.equal(status.requests_unmeasured, 1);
+  assert.deepEqual(status.context, { peak_tokens: null, requests_unmeasured: 1 });
 });
 
 test('cli: alerts go to stderr, status line stays parseable; -q is silent', () => {

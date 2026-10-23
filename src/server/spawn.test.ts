@@ -367,6 +367,7 @@ test('the ladder signals the child\'s own group: SIGTERM, then SIGKILL after the
   assert.deepEqual(records.map((record) => record.record), ['spawn', 'abort', 'exit']);
   assert.equal(records[1].cause, 'cancelled');
   assert.equal(records[1].usage.requests, 0);
+  assert.deepEqual(records[1].usage.context, { peak_tokens: null, requests_unmeasured: 0 });
   assert.equal(records[2].signal, 'SIGKILL');
 });
 

@@ -503,6 +503,7 @@ function usageOf(tally: Tally): Record<string, unknown> {
   return {
     requests: tally.requests,
     requests_unmeasured: tally.requests_unmeasured,
+    context: { ...tally.context },
     tokens: { ...tally.tokens },
     cost_usd: tally.cost,
     accounting: tally.accounting,

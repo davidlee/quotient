@@ -1,5 +1,5 @@
 // Tests for the stdio wire (design sec-1, sec-2; the satan-mcp precedent) and
-// for the pi-agent-result/1 payload every tools/call answers with.
+// for the pi-agent-result/2 payload every tools/call answers with.
 //
 // In-process: `serve(input, output, env)` takes streams, so the protocol is
 // driven without a child. Real subprocess tests prove the bin starts, answers
@@ -36,7 +36,7 @@ import type { Env, Rig } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
 
-/** The pi-agent-result/1 document inside a tool result, plus its isError flag. */
+/** The pi-agent-result/2 document inside a tool result, plus its isError flag. */
 function payload(reply: Record<string, any>): { doc: Record<string, any>; isError: boolean } {
   assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
   assert.equal(reply.result.content.length, 1);
@@ -103,6 +103,9 @@ test('tools/list exposes exactly one tool, pi_agent, with its declared inputSche
   assert.deepEqual(tools[0].inputSchema.required, ['prompt', 'profile']);
   assert.equal(tools[0].inputSchema.additionalProperties, false);
   assert.equal(tools[0].inputSchema.properties.ceilings.additionalProperties, false);
+  assert.deepEqual(Object.keys(tools[0].inputSchema.properties.ceilings.properties), [
+    'requests', 'context_tokens', 'cost_usd', 'wall_clock_s',
+  ]);
   assert.equal(tools[0].inputSchema.properties.transcript_budget_bytes.type, 'integer');
   assert.equal(tools[0].inputSchema.properties.tools.items.type, 'string');
 });
@@ -250,6 +253,7 @@ test('a malformed params object is refused request-invalid, naming the field', a
     { params: callTool({ prompt: 7, profile: 'read' }), field: /prompt/ },
     { params: callTool({ prompt: 'hi', profile: 'read', tools: 'bash' }), field: /tools/ },
     { params: callTool({ prompt: 'hi', profile: 'read', ceilings: { requests: '20' } }), field: /ceilings\.requests/ },
+    { params: callTool({ prompt: 'hi', profile: 'read', ceilings: { tokens: 20 } }), field: /ceilings\.context_tokens/ },
     {
       params: callTool({ prompt: 'hi', profile: 'read', transcript_budget_bytes: 1.5 }),
       field: /transcript_budget_bytes/,
@@ -260,7 +264,7 @@ test('a malformed params object is refused request-invalid, naming the field', a
     const { doc, isError, reply } = await call(params);
     assert.equal(reply.error, undefined);
     assert.equal(isError, true);
-    assert.equal(doc.schema, 'pi-agent-result/1');
+    assert.equal(doc.schema, 'pi-agent-result/2');
     assert.equal(doc.state, 'refused');
     assert.equal(doc.termination, 'refused');
     assert.deepEqual(doc.causes, ['refused']);
@@ -311,7 +315,7 @@ test('a launch form that cannot be executed reports failed with termination spaw
   );
   assert.equal(reply.error, undefined);
   assert.equal(isError, true);
-  assert.equal(doc.schema, 'pi-agent-result/1');
+  assert.equal(doc.schema, 'pi-agent-result/2');
   assert.equal(doc.state, 'failed');
   assert.equal(doc.termination, 'spawn');
   assert.deepEqual(doc.causes, ['spawn']);

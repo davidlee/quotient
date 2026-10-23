@@ -22,11 +22,10 @@
 // never sees the child's exit — so it reports the stream-side inputs the server
 // derives it from: `terminalReason`, `settled`, and the accounting signal.
 
-export const SCHEMA = 'pi-run-status/2';
+export const SCHEMA = 'pi-run-status/3';
 
-/** Whether every counted request's usage was observed. A consumer must read this
- *  rather than infer completeness from a zero: a cached read priced at zero is a
- *  price, and a failed send's placeholder zeros are not. */
+/** Whether every ordinary cost observation needed for the result was valid.
+ *  Context completeness is reported independently in `Status.context`. */
 export type Accounting = 'known' | 'unknown';
 
 export type ReduceOptions = {
@@ -47,8 +46,9 @@ export type Status = {
   tool_calls: number;
   /** Provider sends this run made — one per counting record (design sec-4). */
   requests: number;
-  /** Requests whose usage could not be measured: counted, disclosed, never zeroed. */
+  /** Legacy tolerated cost gaps: failed sends and scheduled summarization retries. */
   requests_unmeasured: number;
+  context: { peak_tokens: number | null; requests_unmeasured: number };
   tokens: { input: number; output: number; cached: number; cache_write: number };
   /** Sum of observed `usage.cost.total`; null when no cost was observed. */
   cost_usd: number | null;
@@ -279,6 +279,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
       tool_calls: toolCalls,
       requests: tally.requests,
       requests_unmeasured: tally.requests_unmeasured,
+      context: { ...tally.context },
       tokens: tally.tokens,
       cost_usd: tally.cost,
       accounting: tally.accounting,
@@ -450,7 +451,7 @@ export function countRecord(event: any, tally: Tally): void {
         countFailedSend(message.usage, tally);
         return;
       }
-      accrue(readUsage(message.usage), tally);
+      accrue(message.usage, tally);
       return;
     }
 
@@ -458,7 +459,7 @@ export function countRecord(event: any, tally: Tally): void {
       if (!event.result || typeof event.result !== 'object') return;
       tally.requests += 1;
       observeContext(event.result.usage, tally);
-      accrue(readUsage(event.result.usage), tally);
+      accrue(event.result.usage, tally);
       return;
     }
 
@@ -499,18 +500,23 @@ function observeContext(usage: any, tally: Tally, failedSend = false): void {
   tally.context.peak_tokens = Math.max(tally.context.peak_tokens ?? footprint, footprint);
 }
 
-/** The one accrual path: observed usage adds tokens and cost; absent or invalid
- *  usage marks the run's accounting unknown rather than adding a zero. */
-function accrue(usage: ObservedUsage | null, tally: Tally): void {
-  if (!usage) {
-    tally.accounting = 'unknown';
-    return;
+/** Observe tokens and cost independently. A missing context vector never hides
+ *  a valid price, and a missing price never discards valid cumulative tokens. */
+function accrue(usage: any, tally: Tally): void {
+  const tokens = readTokens(usage);
+  if (tokens !== null) {
+    tally.tokens.input += tokens.input;
+    tally.tokens.output += tokens.output;
+    tally.tokens.cached += tokens.cached;
+    tally.tokens.cache_write += tokens.cache_write;
   }
-  tally.tokens.input += usage.input;
-  tally.tokens.output += usage.output;
-  tally.tokens.cached += usage.cached;
-  tally.tokens.cache_write += usage.cache_write;
-  tally.cost = (tally.cost ?? 0) + usage.cost;
+
+  const price = readPrice(usage);
+  if (price === null) {
+    tally.accounting = 'unknown';
+  } else {
+    tally.cost = (tally.cost ?? 0) + price;
+  }
 }
 
 /** A failed send was still paid for, so its cost accrues while its tokens do not —
@@ -527,25 +533,21 @@ function countFailedSend(usage: any, tally: Tally): void {
   tally.cost = (tally.cost ?? 0) + price;
 }
 
-type ObservedUsage = {
+type ObservedTokens = {
   input: number;
   output: number;
   cached: number;
   cache_write: number;
-  cost: number;
 };
 
-/** One reader for a usage record, so nothing else can accrue a unit. Missing data
- *  is never headroom: absent, non-finite or negative components, or an absent
- *  `cost.total`, return null and the caller marks the run's accounting unknown. */
-function readUsage(usage: any): ObservedUsage | null {
+/** Read the cumulative token vector independently from cost validity. */
+function readTokens(usage: any): ObservedTokens | null {
   const input = nonNegative(usage?.input);
   const output = nonNegative(usage?.output);
   const cached = nonNegative(usage?.cacheRead);
   const cache_write = nonNegative(usage?.cacheWrite);
-  const cost = readPrice(usage);
-  if (input === null || output === null || cached === null || cache_write === null || cost === null) return null;
-  return { input, output, cached, cache_write, cost };
+  if (input === null || output === null || cached === null || cache_write === null) return null;
+  return { input, output, cached, cache_write };
 }
 
 /** `EMPTY_USAGE`: every component zero, including `cost.total`. Reading it as

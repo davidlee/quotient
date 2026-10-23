@@ -1,11 +1,11 @@
 {
-  "schema": "quotient-policy/1",
+  "schema": "quotient-policy/2",
   "mode": "per-call",
   "enabled": true,
   "roots": ["/home/operator/work"],
   "maxima": {
     "requests": 20,
-    "tokens": 200000,
+    "context_tokens": 180000,
     "cost_usd": 1,
     "wall_clock_s": 600
   },

@@ -23,7 +23,7 @@ through a read-only mount, and removing it would remove the delegate's ability
 to inspect a tree efficiently without making the tree any safer.
 
 This profile names no `mcp__*` tool, so the form it runs under passes no `-e`
-beyond the default of no extensions (`docs/contract/quotient-policy-1.md`, Fields).
+beyond the default of no extensions (`docs/contract/quotient-policy-2.md`, Fields).
 
 ## Document format
 

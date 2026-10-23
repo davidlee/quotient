@@ -7,8 +7,12 @@ Installation ships examples; it does not copy profiles into user configuration.
 
 1. **Write the policy.** Copy the package's `examples/policy.json` to
    `~/.config/quotient/policy.json` (or set `QUOTIENT_POLICY` to its absolute
-   path). List the directories delegates may work in under `roots`. Make the
-   file read-only: `chmod 0444`. `quotient help policy` is the schema.
+   path). List the directories delegates may work in under `roots`. Choose
+   `maxima.context_tokens` for the largest measured request footprint; do not
+   copy an old cumulative `maxima.tokens` value as an automatic conversion.
+   Policy /1 files and `ceilings.tokens` caller fields must be migrated
+   explicitly. Make the file read-only: `chmod 0444`. `quotient help policy`
+   documents the /2 schema and refusal guidance.
 2. **Copy the profiles.** Copy the package's `examples/profiles/*.md` to
    `~/.config/quotient/profiles/`, or to `.quotient/profiles/` in a project to
    make them that project's. Set each profile's `model` to one your pi can

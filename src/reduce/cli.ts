@@ -62,12 +62,15 @@ export function parseArgs(argv: string[]): Args {
 export function statusLine(status: Status, transcriptPath: string): string {
   const { tokens, cost_usd: cost } = status;
   const money = cost === null ? 'n/a' : cost.toFixed(4);
+  const contextPeak = status.context.peak_tokens === null ? 'n/a' : status.context.peak_tokens;
   return [
     status.state,
     `turns=${status.turns}`,
     `requests=${status.requests}`,
     `unmeasured=${status.requests_unmeasured}`,
     `accounting=${status.accounting}`,
+    `context_peak=${contextPeak}`,
+    `context_unmeasured=${status.context.requests_unmeasured}`,
     `tools=${status.tool_calls}`,
     `tokens=${tokens.input}/${tokens.output}`,
     `cost=${money}`,

@@ -1,4 +1,4 @@
-// The `pi-agent-result/1` envelope — the one payload every `tools/call` answers
+// The `pi-agent-result/2` envelope — the one payload every `tools/call` answers
 // with, refusal and failure alike — and the state/cause semantics over it.
 //
 // Design sec-5 is the contract and DEC-093's table is normative here: this module
@@ -9,7 +9,7 @@
 // child's, and `resultFor` is the ONLY place a verdict is derived (EX-8).
 import type { Reduced } from '../reduce/reduce.ts';
 
-export const RESULT_SCHEMA = 'pi-agent-result/1';
+export const RESULT_SCHEMA = 'pi-agent-result/2';
 
 /**
  * sec-5's state vocabulary: the reducer's three stream verdicts (`completed`,
@@ -114,7 +114,7 @@ export type AgentResult = {
   truncated: boolean;
   result: string | null;
   transcript: string;
-  /** `pi-run-status/2`, embedded verbatim from pi/reduce once a run exists. */
+  /** `pi-run-status/3`, embedded verbatim from pi/reduce once a run exists. */
   status: Record<string, unknown> | null;
   artifacts: Artifacts | null;
   /** Present only for a refusal: nothing ran, and this says why. */
@@ -207,7 +207,8 @@ export type ResultInput = {
 /**
  * DEC-093's success predicate: the whole of `completed`, in one place. An
  * answer-bearing terminal message, `agent_settled` observed, child exit 0, and
- * known accounting. Exit 0 alone is never evidence of success — json mode exits 0
+ * known cost accounting. Context measurement gaps are disclosed but do not
+ * independently change completion. Exit 0 alone is never evidence of success — json mode exits 0
  * on a model error — and a valid answer with a nonzero exit is `failed`.
  */
 function succeeded(reduced: Reduced, outcome: RunFacts): boolean {
@@ -419,13 +420,13 @@ export const REACHABILITY: {
   terminations: Record<Termination, Reachability>;
 } = {
   states: {
-    completed: { producedBy: 'resultFor: an answering terminal message with agent_settled, exit 0 and known accounting' },
+    completed: { producedBy: 'resultFor: an answering terminal message with agent_settled, exit 0 and known cost accounting' },
     failed: { producedBy: 'resultFor: an `error`/`aborted` terminal reason, a nonzero (or absent) exit, or a failed spawn' },
     incomplete: { producedBy: 'resultFor: `toolUse`/`deferred`, or a stream that ended without a terminal answer or without settling' },
     timeout: { producedBy: 'resultFor: the wall-clock backstop aborted the run with cause `timeout`' },
     cancelled: { producedBy: 'resultFor: a cancellation notification (`cancelled`), or the switch (`switch`)' },
     ceiling_exceeded: { producedBy: 'resultFor: the gate measured a ceiling crossing and aborted with cause `ceiling`' },
-    accounting_unknown: { producedBy: 'resultFor: a usage-bearing record with absent or invalid usage (cause `accounting`)' },
+    accounting_unknown: { producedBy: 'resultFor: an ordinary response or compaction result with absent or invalid cost (cause `accounting`)' },
     audit_failed: { producedBy: 'resultFor: an evidence append failed on a run that spawned (cause `audit`)' },
     refused: { producedBy: 'refusedResult: nothing spawned (steps 1-8, a pre-spawn audit failure, an unallocatable run directory)' },
   },
@@ -442,8 +443,8 @@ export const REACHABILITY: {
     timeout: { producedBy: 'the gate\'s wall-clock backstop aborted the run' },
     cancelled: { producedBy: 'a cancellation notification aborted the run' },
     switch: { producedBy: 'the gate re-read the policy switch (or lost its source) and aborted the run' },
-    ceiling: { producedBy: 'the gate measured a requests/tokens/cost crossing and aborted the run' },
-    accounting: { producedBy: 'a usage-bearing record whose usage was absent or invalid marked the run\'s accounting unknown' },
+    ceiling: { producedBy: 'the gate measured a requests/context_tokens/cost crossing and aborted the run' },
+    accounting: { producedBy: 'an ordinary response or compaction result with absent or invalid cost marked accounting unknown' },
     audit: { producedBy: 'an evidence append failed on a run that spawned' },
     refused: { producedBy: 'refusedResult: the call ran nothing' },
   },

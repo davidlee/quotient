@@ -18,7 +18,7 @@ same reason `read` does — a shell is how a delegate inspects a tree, and the
 capability is what decides whether a shell can write, not the tool list.
 
 This profile names no `mcp__*` tool, so the form it runs under passes no `-e`
-beyond the default of no extensions (`docs/contract/quotient-policy-1.md`, Fields).
+beyond the default of no extensions (`docs/contract/quotient-policy-2.md`, Fields).
 
 ## Document format
 

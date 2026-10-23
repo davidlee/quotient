@@ -1,0 +1,26 @@
+id    = 3
+slug  = "phase-02-context-enforcement-and-public-contracts"
+title = "PHASE-02 context enforcement and public contracts"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "code-review"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Reviewed the PHASE-02 source and active-contract diff against the locked design, the approved phase plan, and RV-001 F-2..F-6. A delegated independent source review found no verified correctness defects. Worker-run focused suites and the combined full suite, TypeScript check, build, contract drift/help tests, example-policy parse, and whitespace checks passed. Installed pi normalization and resumed-session event behavior remain unverified; no release-script or package-version evidence is claimed.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-001"
+phase = "PHASE-02"
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

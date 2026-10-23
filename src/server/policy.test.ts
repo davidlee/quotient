@@ -96,7 +96,7 @@ test('a wrong-typed policy value refuses policy-invalid, naming the field', () =
 test('maxima that do not bound the run refuse policy-invalid: all four are required and positive', () => {
   // A delegate with no ceiling is unbounded spend: the wall clock bounds time, not
   // money, so a spend ceiling may not be left out (design sec-1; REQ-004, DEC-057).
-  const full = { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
+  const full = { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
   const without = (field: string): Record<string, unknown> =>
     Object.fromEntries(Object.entries(full).filter(([key]) => key !== field));
   const cases: [Record<string, unknown>, RegExp][] = [
@@ -270,17 +270,34 @@ test('a form may declare the extensions it passes, and nothing else', () => {
   assert.match(foreign.detail, /other\.ts/, 'and the offending entry');
 });
 
-// ── quotient-policy/1: the schema tag, the profiles map, unconfined, exposure ─
+// ── quotient-policy/2: the schema tag, the profiles map, unconfined, exposure ─
 
-test('quotient-policy/1: schema is required and checked first; an unknown value is policy-invalid', () => {
+test('quotient-policy/2: schema is required and checked first; /1 is refused with migration guidance', () => {
   const missing = validPolicy();
   delete missing.schema;
   refuse(admit(workspace(missing).env, 1), 'policy-invalid', /missing policy field: schema/);
   // First: before the static-only posture check and the unknown-key check.
   refuse(admit(workspace({ ...missing, agent: 'x', speed: 'fast' }).env, 1), 'policy-invalid', /schema/);
-  for (const schema of ['quotient-policy/2', 'pi-mcp-policy/1', 1, null]) {
+  refuse(admit(workspace(validPolicy({ schema: 'quotient-policy/1' })).env, 1), 'policy-invalid', /context_tokens/);
+  for (const schema of ['pi-mcp-policy/1', 1, null]) {
     refuse(admit(workspace(validPolicy({ schema })).env, 1), 'policy-invalid', /schema/);
   }
+});
+
+test('policy/2 refuses old or mixed token ceiling fields and requires context_tokens', () => {
+  const old = validPolicy();
+  const oldMaxima = old.maxima as Record<string, unknown>;
+  delete oldMaxima.context_tokens;
+  oldMaxima.tokens = 100000;
+  refuse(admit(workspace(old).env, 1), 'policy-invalid', /maxima\.tokens.*context_tokens/);
+
+  const mixed = validPolicy();
+  (mixed.maxima as Record<string, unknown>).tokens = 100000;
+  refuse(admit(workspace(mixed).env, 1), 'policy-invalid', /maxima\.tokens.*context_tokens/);
+
+  const missing = validPolicy();
+  delete (missing.maxima as Record<string, unknown>).context_tokens;
+  refuse(admit(workspace(missing).env, 1), 'policy-invalid', /maxima\.context_tokens/);
 });
 
 test('child_binds is now an unknown field; exposure replaces it', () => {
@@ -324,13 +341,13 @@ test('a write form may be unconfined; read unconfined, path with unconfined, and
 // ── Ceilings clamp downward and refuse an above-maximum request (EX-6) ─────
 
 test('ceilings clamp to the maxima, refuse an above-maximum request, and take the maximum when absent', () => {
-  const maxima = { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
+  const maxima = { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
 
-  const narrowed = clampCeilings({ requests: 5, tokens: 1000 }, maxima);
+  const narrowed = clampCeilings({ requests: 5, context_tokens: 1000 }, maxima);
   if (!narrowed.ok) assert.fail(`expected a clamp, got ${narrowed.reason}: ${narrowed.detail}`);
   assert.deepEqual(
     narrowed.ceilings,
-    { requests: 5, tokens: 1000, cost_usd: 1.5, wall_clock_s: 600 },
+    { requests: 5, context_tokens: 1000, cost_usd: 1.5, wall_clock_s: 600 },
     'an absent ceiling takes the maximum',
   );
 
@@ -341,7 +358,7 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
 
   for (const [unit, requested, maximum] of [
     ['requests', 21, 20],
-    ['tokens', 100001, 100000],
+    ['context_tokens', 100001, 100000],
     ['cost_usd', 1.6, 1.5],
     ['wall_clock_s', 601, 600],
   ] as const) {
@@ -357,9 +374,9 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
   if (!unbounded.ok) assert.fail('no maximum and no request is not a refusal');
   assert.deepEqual(unbounded.ceilings, {}, 'no maximum and no request leaves the ceiling absent');
 
-  const requestedOnly = clampCeilings({ tokens: 10 }, {});
+  const requestedOnly = clampCeilings({ context_tokens: 10 }, {});
   if (!requestedOnly.ok) assert.fail('a request under no maximum is admitted');
-  assert.deepEqual(requestedOnly.ceilings, { tokens: 10 });
+  assert.deepEqual(requestedOnly.ceilings, { context_tokens: 10 });
 });
 
 // ── The transcript budget: the one clamp that narrows silently ─────────────

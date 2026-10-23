@@ -8,7 +8,7 @@
 // cancellation is never delayed by a pending read.
 //
 // A tick evaluates, in design sec-4's order:
-//   - the ceilings (requests, tokens, cost) against the ADMISSION SNAPSHOT —
+//   - the ceilings (requests, context tokens, cost) against the ADMISSION SNAPSHOT —
 //     what `clampCeilings` returned, for the run's whole life;
 //   - the wall clock, the hard backstop;
 //   - the switch — the policy file re-read and re-parsed. Absent, unreadable,
@@ -35,7 +35,7 @@ import type { Tally } from '../reduce/reduce.ts';
 export type GateCause = 'ceiling' | 'timeout' | 'switch' | 'accounting';
 
 /** The unit that crossed. `enabled` and `accounting` are verdicts, not numbers. */
-export type GateUnit = 'requests' | 'tokens' | 'cost_usd' | 'wall_clock_s' | 'enabled' | 'accounting';
+export type GateUnit = 'requests' | 'context_tokens' | 'cost_usd' | 'wall_clock_s' | 'enabled' | 'accounting';
 
 /** One fired evaluation: which unit crossed, what it read, and the bound it was
  *  judged against. The ceiling units carry the accumulator's number. */
@@ -138,11 +138,9 @@ export function createGate(config: GateConfig): Gate {
   const judge = (tally: Tally): void => {
     if (stopped) return;
     const ceilings = config.ceilings;
-    // pi's `totalTokens` is the sum of the four components the accumulator keeps.
-    const tokens = tally.tokens.input + tally.tokens.output + tally.tokens.cached + tally.tokens.cache_write;
     const trigger =
       ceiling('requests', tally.requests, ceilings.requests) ??
-      ceiling('tokens', tokens, ceilings.tokens) ??
+      ceiling('context_tokens', tally.context.peak_tokens, ceilings.context_tokens) ??
       ceiling('cost_usd', tally.cost, ceilings.cost_usd) ??
       wallClock() ??
       policySwitch() ??

@@ -55,10 +55,10 @@ const QUIET = `${SETTLED}\nexit 0`;
 /** A policy with every declared field present, per the schema in EX-6. */
 export function validPolicy(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    schema: 'quotient-policy/1',
+    schema: 'quotient-policy/2',
     mode: 'per-call',
     roots: ['/work/one'],
-    maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
+    maxima: { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 },
     profiles: { read: 'read', write: 'write' },
     forms: { read: '/nix/store/aaa/bin/pi-mcp-read', write: '/nix/store/aaa/bin/pi-mcp-write' },
     exposure: ['/home/operator/.pi'],
@@ -496,7 +496,7 @@ export async function converse(
   return { replies: server.replies(), stderr: server.stderr() };
 }
 
-/** The pi-agent-result/1 document inside one tool result. */
+/** The pi-agent-result/2 document inside one tool result. */
 export function resultDocument(reply: Record<string, any>): Record<string, any> {
   assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
   return JSON.parse(reply.result.content[0].text) as Record<string, any>;

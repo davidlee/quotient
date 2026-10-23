@@ -133,14 +133,14 @@ function unitGate(rig: Rig, overrides: Partial<GateConfig> = {}): { gate: Gate; 
 
 // ── VT-1: a crossing aborts, per unit, through the same abort hook ─────────
 
-test('ceiling: a requests, tokens and cost_usd crossing each abort with cause ceiling and the value it observed (VT-1)', (t) => {
+test('ceiling: requests, peak context and cost_usd crossing each abort with cause ceiling and the value it observed (VT-1)', (t) => {
   const rig = newRig(t);
-  // Two counted sends: 2 requests, 220 tokens, 0.02 usd — the accumulator's units.
+  // Two counted sends: 2 requests, 110 peak context tokens, 0.02 usd.
   const tally = tallyOf([send('toolUse'), send('stop')]);
 
   const crossings = [
     { unit: 'requests', ceilings: { requests: 1 }, observed: 2, limit: 1 },
-    { unit: 'tokens', ceilings: { tokens: 200 }, observed: 220, limit: 200 },
+    { unit: 'context_tokens', ceilings: { context_tokens: 100 }, observed: 110, limit: 100 },
     { unit: 'cost_usd', ceilings: { cost_usd: 0.01 }, observed: 0.02, limit: 0.01 },
   ];
   for (const crossing of crossings) {
@@ -159,12 +159,35 @@ test('ceiling: a requests, tokens and cost_usd crossing each abort with cause ce
 
   // A ceiling a unit does not exceed fires nothing: a value equal to the bound is
   // within it, and a gate that has not fired reports no trigger.
-  const { gate, causes } = unitGate(rig, { ceilings: { requests: 2, tokens: 220, cost_usd: 0.02 } });
+  const { gate, causes } = unitGate(rig, { ceilings: { requests: 2, context_tokens: 110, cost_usd: 0.02 } });
   gate.tick(tally);
   gate.close();
   assert.deepEqual(causes, [], 'no crossing, no abort');
   assert.deepEqual(gate.triggers(), []);
   assert.equal(gate.cause(), null);
+});
+
+test('context ceiling judges peak rather than cumulative tokens and ignores an unobserved peak', (t) => {
+  const rig = newRig(t);
+  const manySmall = tallyOf([send('toolUse'), send('stop')]);
+  assert.equal(manySmall.tokens.input + manySmall.tokens.output, 220);
+  assert.equal(manySmall.context.peak_tokens, 110);
+
+  const equal = unitGate(rig, { ceilings: { context_tokens: 110 } });
+  equal.gate.tick(manySmall);
+  equal.gate.close();
+  assert.deepEqual(equal.causes, [], 'a peak equal to the ceiling is allowed');
+
+  const many = unitGate(rig, { ceilings: { context_tokens: 120 } });
+  many.gate.tick(manySmall);
+  many.gate.close();
+  assert.deepEqual(many.causes, [], 'cumulative totals above the limit do not cross the per-request peak ceiling');
+
+  const gap = tallyOf([ev('summarization_retry_scheduled')]);
+  const unobserved = unitGate(rig, { ceilings: { context_tokens: 1 } });
+  unobserved.gate.tick(gap);
+  unobserved.gate.close();
+  assert.deepEqual(unobserved.causes, [], 'a null peak cannot establish a crossing');
 });
 
 // ── VT-2: one accumulator — the gate's inputs are the returned status ──────
@@ -244,7 +267,7 @@ test('a maximum lowered mid-run does not reach the run: the admission snapshot j
   // a zero maximum is malformed and would itself abort `switch`.)
   const { gate, causes } = unitGate(rig, { ceilings: { requests: 1 } });
   gate.tick(tallyOf([send('stop')]));
-  patchPolicy(rig, 'maxima', { requests: 0.5, tokens: 1, cost_usd: 0.000001, wall_clock_s: 600 });
+  patchPolicy(rig, 'maxima', { requests: 0.5, context_tokens: 1, cost_usd: 0.000001, wall_clock_s: 600 });
   await pause(80);
   gate.close();
   assert.deepEqual(causes, [], 'the snapshot judges the run, not the re-read maxima');
@@ -253,18 +276,16 @@ test('a maximum lowered mid-run does not reach the run: the admission snapshot j
 
 // ── VT-5: usage sanity, and the wall-clock backstop ────────────────────────
 
-test('usage sanity: absent, non-finite or negative usage aborts accounting (state accounting_unknown); EMPTY_USAGE and a zero-priced read do not (VT-5)', (t) => {
+test('usage sanity: absent, non-finite or negative cost aborts accounting; tolerated failed placeholders and zero price do not (VT-5)', (t) => {
   const rig = newRig(t);
 
   const unsound: { label: string; line: string }[] = [
     { label: 'usage without cost.total', line: send('stop', { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 12 }) },
-    // `1e999` is a JSON number that parses to a non-finite value: the accumulator
-    // refuses it rather than reading it as headroom.
     {
-      label: 'non-finite component',
-      line: '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","usage":{"input":1e999,"output":2,"cacheRead":0,"cacheWrite":0,"cost":{"total":0.01}}}}',
+      label: 'non-finite cost',
+      line: '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","usage":{"input":1,"output":2,"cacheRead":0,"cacheWrite":0,"cost":{"total":1e999}}}}',
     },
-    { label: 'negative component', line: send('stop', usage({ input: -10, totalTokens: 100 })) },
+    { label: 'negative cost', line: send('stop', usage({ cost: cost(-0.01) })) },
   ];
   for (const case_ of unsound) {
     const tally = tallyOf([case_.line]);
@@ -276,6 +297,14 @@ test('usage sanity: absent, non-finite or negative usage aborts accounting (stat
     const [trigger] = gate.triggers();
     assert.equal(trigger.unit, 'accounting');
   }
+
+  const contextGap = tallyOf([send('stop', usage({ input: -10 }))]);
+  assert.equal(contextGap.context.requests_unmeasured, 1);
+  assert.equal(contextGap.accounting, 'known', 'context gaps do not invalidate a valid cost');
+  const gapGate = unitGate(rig);
+  gapGate.gate.tick(contextGap);
+  gapGate.gate.close();
+  assert.deepEqual(gapGate.causes, [], 'context gaps alone do not abort for accounting');
 
   // A failure message's placeholder zeros are unmeasured, not a fatal
   // accounting_unknown: every provider error would otherwise end the run.
@@ -292,7 +321,7 @@ test('usage sanity: absent, non-finite or negative usage aborts accounting (stat
   assert.equal(cached.accounting, 'known');
   assert.equal(cached.tokens.cached, 5000);
   assert.equal(cached.cost, 0);
-  const priced = unitGate(rig, { ceilings: { cost_usd: 0.005, tokens: 100000 } });
+  const priced = unitGate(rig, { ceilings: { cost_usd: 0.005, context_tokens: 100000 } });
   priced.gate.tick(cached);
   priced.gate.close();
   assert.deepEqual(priced.causes, [], 'a zero-priced cached read does not abort');
@@ -334,7 +363,7 @@ test('timeout: the wall clock fires with no tick at all — the idle poll stands
 test('ceiling: a live crossing aborts the run through the ladder, and the abort record carries the accumulator usage (EX-1)', async (t) => {
   const rig = newRig(t, {
     read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, emit(messageEnd('stop')), SETTLED, 'exit 0'].join('\n'),
-    policy: { maxima: { requests: 20, tokens: 100000, cost_usd: 0.005, wall_clock_s: 600 } },
+    policy: { maxima: { requests: 20, context_tokens: 100000, cost_usd: 0.005, wall_clock_s: 600 } },
   });
   const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'spend', profile: 'read', cwd: rig.root, session: 'ceiling1' }));
@@ -360,6 +389,37 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
   assert.equal(abort.observed, 0.01, 'and the accumulator\'s value at the crossing');
   assert.equal(abort.limit, 0.005, 'and the clamped bound it crossed');
   assert.equal(isAlive(markerPids(rig)[0]), false, 'the child is gone');
+});
+
+test('a context abort freezes crossing-prefix evidence while buffered output raises the final peak (VT-4)', async (t) => {
+  const first = JSON.stringify(messageEnd('toolUse', usage({ input: 150, output: 10 })));
+  const later = JSON.stringify(messageEnd('stop', usage({ input: 200, output: 10 })));
+  const rig = newRig(t, {
+    read: [
+      `printf '%s\\n' $$ > "@MARKER@/pid"`,
+      `printf '%s\\n' '${first}' '${later}'`,
+      SETTLED,
+      'exit 0',
+    ].join('\n'),
+    policy: { maxima: { requests: 20, context_tokens: 150, cost_usd: 1.5, wall_clock_s: 600 } },
+  });
+  const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
+  server.write(callLine(1, { prompt: 'cross', profile: 'read', cwd: rig.root, session: 'context-crossing' }));
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
+
+  const doc = resultDocument(reply);
+  assert.equal(doc.termination, 'ceiling');
+  assert.equal(doc.state, 'ceiling_exceeded');
+  assert.equal(doc.status.context.peak_tokens, 210);
+  const audit = jsonLines(doc.artifacts.audit);
+  const abort = audit.find((record) => record.record === 'abort');
+  assert.ok(abort);
+  assert.equal(abort.unit, 'context_tokens');
+  assert.equal(abort.observed, 160);
+  assert.equal(abort.limit, 150);
+  assert.deepEqual(abort.usage.context, { peak_tokens: 160, requests_unmeasured: 0 });
+  assert.ok(doc.status.context.peak_tokens > abort.observed, 'final drain includes the later buffered usage');
 });
 
 // ── EX-3 / VT-3: the switch halts an in-flight run ────────────────────────
@@ -439,7 +499,7 @@ test('switch: a policy corrupted during an idle run aborts it, and the next call
 test('timeout: the wall clock halts a stalled run with cause timeout and its own state row (EX-6)', async (t) => {
   const rig = newRig(t, {
     read: [`printf '%s\\n' $$ > "@MARKER@/pid"`, 'sleep 60'].join('\n'),
-    policy: { maxima: { requests: 20, tokens: 100000, cost_usd: 1.5, wall_clock_s: 0.2 } },
+    policy: { maxima: { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 0.2 } },
   });
   const server = serveRig(rig, { graceMs: 150, gateIdleMs: 20 });
   server.write(callLine(1, { prompt: 'stall', profile: 'read', cwd: rig.root, session: 'backstop1' }));
