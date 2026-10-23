@@ -159,6 +159,10 @@ selector = "src/root.test.ts"
 intent = "scope-relevant"
 
 [[relation]]
+label = "fulfils"
+target = "IMP-001"
+
+[[relation]]
 label = "related"
 target = "IMP-001"
 

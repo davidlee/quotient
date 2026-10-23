@@ -61,3 +61,20 @@ root, so every call must pass `cwd`.
 - IMP-003 (form builder): per-project toolchains currently also need a
   per-project policy and server, since `forms` maps capability → form, not
   (root, capability) → form.
+
+## Triage (2026-10-24)
+
+- Direction: option 1 — the policy names the profile and help layers
+  (optional `profile_dirs` / `help_dirs`, default the XDG layer); the
+  launch-dir layer goes away. Preferred over deriving layers from the policy
+  file's directory: explicit, and the default install is unchanged.
+- Per-project model: **one policy per project, as an opt-in override** of the
+  global policy. A project needs its own policy only when its profiles, forms
+  (toolchain), roots or maxima differ. Settles IMP-003's selection gap: forms
+  stay keyed by capability.
+- Cost: a project-local `.quotient/profiles` override no longer works without
+  config. Only satan uses it (`~/dev/satan/.quotient/profiles/{read,research,write}.md`);
+  migrate to the global layer or a satan policy.
+- Removes doctrine's workaround (empty launch dir, `cwd` on every call).
+- Breaking server behaviour → version bump and migration note.
+- Deferred: IDE-001 (policy `extends`) for per-project policy duplication.
