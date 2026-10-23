@@ -3,6 +3,8 @@
 quotient needs Node 22 or later, and `pi` installed where your forms can run
 it. `quotient --version` confirms the install.
 
+Installation ships examples; it does not copy profiles into user configuration.
+
 1. **Write the policy.** Copy the package's `examples/policy.json` to
    `~/.config/quotient/policy.json` (or set `QUOTIENT_POLICY` to its absolute
    path). List the directories delegates may work in under `roots`. Make the
@@ -12,6 +14,11 @@ it. `quotient --version` confirms the install.
    make them that project's. Set each profile's `model` to one your pi can
    reach. Every profile a call may use must be listed in the policy's
    `profiles`, with its capability. `quotient help profiles` is the grammar.
+   The examples include `read` (off), `research` (low), `write` (off),
+   `review` (max, read-only), `judgement` (high, read-only) and `implement`
+   (high, writable). Choose a model that supports the selected thinking level.
+   For an existing installation, copy only the profiles you want to add and
+   merge their capability pins into the policy.
 3. **Choose a form for each capability.** A form is the executable that
    confines pi: it decides what the delegate can read and write. Put each
    form's absolute path under `forms.read` and `forms.write`.

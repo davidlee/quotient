@@ -47,7 +47,10 @@ place, all under `~/.config/quotient/` by default:
 └── profiles/            one file per profile: model, thinking, tools (read at start-up)
     ├── read.md
     ├── research.md
-    └── write.md
+    ├── write.md
+    ├── review.md
+    ├── judgement.md
+    └── implement.md
 
 ~/.local/state/quotient/
 ├── runs/                evidence for each call (the result's artifacts.dir)
@@ -59,7 +62,8 @@ place, all under `~/.config/quotient/` by default:
 own profiles in `.quotient/profiles/`, which win per name over the user's. The
 policy is never read from a project.
 
-Start from the examples in the package:
+Installation ships example profiles but does not copy them into user
+configuration. Start from the examples in the package:
 
 ```sh
 examples="$(npm root -g)/@davlee/quotient/examples"
@@ -85,7 +89,14 @@ The policy is meant to be read-only (`0444`): edit a copy and reinstall it.
     "cost_usd": 1,
     "wall_clock_s": 600
   },
-  "profiles": { "read": "read", "research": "read", "write": "write" },
+  "profiles": {
+    "read": "read",
+    "research": "read",
+    "write": "write",
+    "review": "read",
+    "judgement": "read",
+    "implement": "write"
+  },
   "forms": {
     "read": "/home/operator/.local/state/quotient/forms/read/bin/quotient-read",
     "write": "/home/operator/.local/state/quotient/forms/write/bin/quotient-write"
@@ -123,6 +134,25 @@ tools: read, grep, find, ls, bash
 
 `filesystem` must match the capability the policy gives the profile.
 `quotient help profiles` is the grammar.
+
+The package ships six additive examples:
+
+| Profile | Thinking | Filesystem | Intended work |
+|---|---|---|---|
+| `read` | off | read | Cheap recon and evidence gathering |
+| `research` | low | read | Lightweight interpretation and analysis |
+| `write` | off | write | Mechanical edits |
+| `review` | max | read | Deep, adversarial design review |
+| `judgement` | high | read | Reasoning, tradeoffs and decisions |
+| `implement` | high | write | Implementation requiring judgement |
+
+These examples name `llm-gateway/deepseek-flash`; configure a reachable model
+that supports the chosen thinking level. Profile prose is documentation, so
+review criteria and output requirements belong in the call's prompt. Thinking
+also consumes the run's time and token budget: size the policy maxima for the
+work. Existing installations can copy just the new examples and add their
+capability pins to the policy, preserving locally tuned profiles. Restart the
+server/client after changing profiles.
 
 ## Add it to your client
 

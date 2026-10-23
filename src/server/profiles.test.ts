@@ -24,6 +24,7 @@ import {
   toolsArgument,
 } from './profiles.ts';
 import type { Filesystem } from './profiles.ts';
+import { readPolicy } from './policy.ts';
 import {
   attempts,
   callLine,
@@ -116,6 +117,28 @@ test('every example document loads as a profile layer', () => {
   assert.equal(research.filesystem, 'read');
   assert.equal(research.thinking, 'low');
   assert.deepEqual(research.tools, ['read', 'grep', 'find', 'ls', 'bash']);
+
+  for (const [name, thinking, base] of [
+    ['review', 'max', read],
+    ['judgement', 'high', read],
+    ['implement', 'high', write],
+  ] as const) {
+    const profile = snapshot.profiles.get(name);
+    if (profile === undefined) assert.fail(`the ${name} profile is missing`);
+    assert.equal(profile.thinking, thinking);
+    assert.equal(profile.filesystem, base.filesystem);
+    assert.equal(profile.model, base.model);
+    assert.deepEqual(profile.tools, base.tools);
+  }
+
+  // Copying the shipped policy and profiles together must admit every example.
+  const policy = readPolicy(new URL('../../examples/policy.json', import.meta.url).pathname);
+  if (!policy.ok) assert.fail(`the example policy does not validate: ${policy.detail}`);
+  assert.deepEqual(Object.keys(policy.policy.profiles).sort(), shipped);
+  for (const name of shipped) {
+    const result = resolveProfile(snapshot, name, policy.policy.profiles);
+    if (!result.ok) assert.fail(`${name}: ${result.reason}: ${result.detail}`);
+  }
 });
 
 // ── The optional thinking field ────────────────────────────────────────────
