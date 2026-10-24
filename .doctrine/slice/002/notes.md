@@ -6,22 +6,25 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-24 · design/drafting · 64080bc
+fresh-as-of: 2026-10-24 · plan (design locked, run rev 28) · e3ffcf7 + this commit
 
 ### Produced
-- slice opened, re-scoped, researched (rounds 1–2), design run to drafting — commits a8dc74a..64080bc; no code yet
+- slice opened, re-scoped, researched (rounds 1–2), design drafted, reviewed, locked — commits a8dc74a..; no code yet
 - minted: DEC-007..011 (shaping); IDE-001 — policy extends (likely obsolete); IDE-002 — broader pi extensions (out of scope)
-- design review 1 (informal Codex) integrated — § Design review 1
+- design review 1 (informal Codex) — § Design review 1; design review 2 — RV-006 (Codex, ledgered); DEC-007..010 amended after RV-006
+- design.md sec-1..4; 37 design-target selectors
 
 ### Learned
 - research via quotient `pi_agent` (profile `research`): cheap (~$0.03/thread), cited, needs ✓ spot-checks; raw = run `transcript.md` copied to `research/raw/`
+- design-review ledgers: severe findings need a `--route` before the lock gate clears; a verified finding must be reopened by the raiser to add one — route at first disposition
 
 ### Open
-- DEC-007 — machine/project split; root = longest roots entry
-- DEC-008 — approval is the selection; no fallback once approved
-- DEC-009 — approvals.json; `allow <path> <cap>=<sha>`; `revoke`; lock
-- DEC-010 — project form substitutes slot executable; real path outside roots/exposure/session home
+- DEC-007 — machine/project split; lookup base = governing approval root, else longest roots entry
+- DEC-008 — approval is the selection; no fallback once governed
+- DEC-009 — approvals.json; `allow <path> <cap>=<realpath>@<sha256>`; `revoke <approval-root>`; lock
+- DEC-010 — project form substitutes slot executable; outside-writable rule is a current-policy backstop; host-wide immutability = operator obligation
 - DEC-011 — stay on /2 with explicit compatibility rule
+- RV-006 F-1, F-3 — probe-routed; criteria on the ledger (`doctrine review show RV-006 -f 1,3`); /plan must place them as VT criteria; verified after phases
 - IMP-003 — Nix helper should emit single-file forms (after SL-002)
 
 ## Design triage (2026-10-24, exploring)
@@ -102,3 +105,23 @@ dispositions.
 Defect class: the design proved approval *checking* but not operator
 ownership of *selection, fallback and revocation*; 2/3/7 were siblings.
 Follow-up: re-run Codex on the drafted design.md (operator request).
+
+## Further review passes (2026-10-24, after RV-006)
+
+RV-006 (Codex gpt-6.1-sol, second design review) concluded; F-1..F-6
+verified — `doctrine review show RV-006`. Amended DEC-007..010.
+
+A further design pass would probe, in order of value:
+
+- The governing-approval rule under concurrent `allow`/`revoke` and admission
+  (store read once per call vs. lock-holding writers) — believed sound by
+  rename atomicity; not yet attacked.
+- The relocation residual: whether a cheap refusal (requested `cwd` lexically
+  inside an approved root but resolving outside it → `form-invalid`) is worth
+  adding. Operator chose to document, not block; revisit only if relocation
+  is seen in practice.
+- Contract prose for `quotient-approvals-1.md`, once drafted in execution —
+  better reviewed as code/docs (audit) than as design.
+
+Otherwise no further design pass is needed: remaining risk is implementation
+fidelity, which plan VT criteria and `/audit` cover.

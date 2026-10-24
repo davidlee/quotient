@@ -1,7 +1,7 @@
 id = 2
 slug = "policy-named-layers"
 title = "Project forms by root, operator-approved"
-status = "design"
+status = "plan"
 created = "2026-10-23"
 updated = "2026-10-24"
 tags = []
@@ -12,15 +12,15 @@ after = []                      # slice→work soft sequence: { to, rank }
 
 [[selector]]
 selector = "src/config.ts"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "src/config.test.ts"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "src/cli.ts"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "src/server/**"
@@ -36,7 +36,7 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "docs/design.md"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "help/**"
@@ -48,19 +48,135 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "README.md"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "package.json"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "package-lock.json"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "src/drift.test.ts"
-intent = "scope-relevant"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/profiles.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/forms.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/approvals.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/policy.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/server.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/childview.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/spawn.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/approve.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/help/help.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/test-rig.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/profiles.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/childview.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/server.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/spawn.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/cli.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/help/help.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/forms.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/approvals.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/approve.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/quotient-policy-2.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/form-1.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/pi-agent-result-2.md"
+intent = "design-target"
+
+[[selector]]
+selector = "help/profiles.md"
+intent = "design-target"
+
+[[selector]]
+selector = "help/setup.md"
+intent = "design-target"
+
+[[selector]]
+selector = "help/agent.md"
+intent = "design-target"
+
+[[selector]]
+selector = "examples/profiles/*.md"
+intent = "design-target"
+
+[[selector]]
+selector = "scripts/pack-check"
+intent = "design-target"
+
+[[selector]]
+selector = "scripts/hostile-audit"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/quotient-approvals-1.md"
+intent = "design-target"
 
 [[relation]]
 label = "fulfils"

@@ -1,0 +1,316 @@
+id    = 6
+slug  = "design-review-of-sl-002"
+title = "design review of SL-002"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "design"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "codex"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = false
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Codex second adversarial design pass complete: examined SL-002 design sec-1..sec-4, accepted amended DEC-007..DEC-011 via doctrine show, scope, the notes.md first-review disposition table, research with its verification legend, all three named authoritative contracts, and relevant config/policy/profile/childview/server/spawn/paths/evidence/session/CLI/help/drift/test-rig source plus release/probe scripts. Raised F-1..F-5 with evidence, concrete scenarios, repair direction and missing verification; leave disposition to the responder. First-review recheck: session home is now excluded; direct link deletion cannot fall back; digest confirmation only partially closes report-to-record identity changes (F-3); lock plus atomic publication addresses ordinary concurrent-writer lost updates and malformed-store behavior; accepted policy/2 choice and unknown-reason handling are faithfully carried forward; launch failure is properly narrowed to no fallback; immutable confinement inputs are now stated. New canonical-root selection hole is F-1; current-snapshot immutability premise is F-2. The four requested gap-fills are acceptable as recorded in the Brief; wrapper-unavailable precedence is preserved. Verification: direct source inspection and one in-memory evaluation of actual drift/validator bodies; no builds, integration suite, paid delegates or SL-002 runtime implementation executed. Only RV-006 authored metadata, Brief and ledger findings were changed by this pass; no design, decision or code edits."
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Codex follow-up pass on responder dispositions complete. Re-read RV-006 in full, accepted amended DEC-007..DEC-010 via doctrine show, re-materialised design sec-1..sec-4 and reconciled SL-002 scope, and relevant current containment/root-resolution code. Verified F-1's operator-chosen containment boundary with the explicitly accepted relocation residual; verified F-2 as tolerated operator-owned host-wide immutability after checking the policy-file publishing precedent at quotient-policy-2.md:228-234, not as a technically removed race; verified F-3's full path+digest comparison and new regression criterion, F-4's two script migrations/verification commitments, and F-5's separate approvals contract plus schema validation/negative control. Raised only new F-6: retaining approvals outside the current roots set exposes a revoke target-selection gap, supported by exact design lines and an in-memory evaluation of the drafted rules using the existing within comparator. No build, runtime integration tests, paid model calls or implementation changes. F-1..F-5 are terminal; F-6 is open for responder disposition. Changed only RV-006 authored ledger through review acts, with workflow cache priming."
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "F-6-only follow-up pass complete as codex. Verified the exact-stored-root revoke disposition against amended DEC-009, design sec-3 target resolution/Revoke and sec-4 regression obligations, and reconciled SL-002. Removed-policy-root and deleted-directory approvals are addressable independently of current roots/filesystem resolution; exact-key deletion preserves parent approvals and unknown targets refuse. No new findings from this revision. Earlier F-1..F-5 outcomes and accepted limitations were not reopened. No implementation/runtime checks performed; only RV-006 ledger changed."
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-002"
+
+[[finding]]
+id = "F-1"
+status = "answered"
+severity = "blocker"
+title = "Retargeting a writable roots symlink can discard approval selection and restore the machine default"
+detail = """
+Expected: a confined delegate cannot change an approved selection back to a broader default; the first-review deletion finding must remain closed across root aliases. Observed: design.md:75-81 canonicalises roots on each call; :187-190 keys approvals solely by that canonical path and makes orphaned entries inert; :107 sends an absent-link/absent-entry pair to the machine form. The risk claim at :456 says changing a symlink target requires fresh approval, but the table does not enforce that.
+
+Concrete inferred scenario: policy roots are [/work, /work/current], where /work/current -> /work/A; the operator approved (/work/A, write) for a narrower project form. A conformant write delegate rooted at /work can replace /work/current with a symlink to /work/B (B has no .quotient/forms/write). A later call at the unchanged spelling /work/current resolves to /work/B, the deepest canonical roots entry is /work/B, the /work/A approval is inert, and the absent/none row executes the broader machine default without allow or revoke. All attacker writes are inside a granted root; this does not require violating G5 or editing policy/approvals. An alternate pre-existing approved B would also transfer selection to a different project identity.
+
+This is a defect exposed by the drafted application of DEC-007/008, not an objection to longest-match or canonical matching in isolation. Preserve operator-owned selection across delegate-mutable changes to a configured root's resolution (for example, bind configured entry plus its approved canonical resolution and refuse changed resolution until an explicit operator act), or reject such mutable root aliases with an enforceable constraint. Add the retarget scenario, including both roots-order permutations, to the nested/symlink root tests; the existing test commitments at :428-437 only repoint the form link or check nesting. Verified by reading the draft and current resolveRoot/canonicalPath (src/server/profiles.ts:340-375; src/server/paths.ts:23-37); future behavior is inferred, not an executed SL-002 implementation."""
+disposition = "design-wrong"
+response = """
+Re-disposed with route probe; substance unchanged from the verified answer. Design repair (operator choice): the governing approval is the deepest approval for the capability whose recorded canonical root contains the call's canonical root; it is the lookup base and wins over any roots-entry match. DEC-007/008 amended; design sec-2 Step 5, Residual: relocation, Invariants.
+Probe. Must hold against: a write delegate that can create, delete or retarget symlinks and directories anywhere inside its writable root (including a symlink that is, or lies on the path of, a roots entry), in both orders of the roots list; after its writes, a later call whose canonical root lies inside an approved root runs that approval's identity or refuses, and never runs the machine default form. Need not hold against: relocation, where the orchestrator names a cwd through a delegate-writable symlink and the call runs in a different directory outside every approval (documented residual); an unconfined orchestrator running quotient allow or revoke.
+Criterion must assert: with roots /work and /work/current (both orders), an approval at the canonical /work/A, and each retarget variant (current pointed into /work/A/sub; current pointed away from /work/A), a call whose canonical root is inside /work/A refuses or runs A's approved identity, observed in the spawn audit record (form_source project, form_root /work/A). Host phase constraint: the phase that implements step 5 selection in server.ts with forms.ts and approvals.ts, after the approvals reader exists; uses test-rig helpers to plant forms outside roots.
+"""
+route = "probe"
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = "Verified (resolveRoot canonicalises roots per call, profiles.ts:371-375; paths.ts:102-117). Class: selection keyed by a delegate-mutable resolution. Operator chose approval-by-containment: the governing approval is the deepest approval (per capability) whose recorded canonical root contains the call's canonical root; it is the lookup base and wins over any roots-entry match; only ungoverned calls use the longest roots entry. Calls landing inside an approved root can no longer be re-based onto the machine default. Not adopted: binding the policy's entry spelling. Documented residual: a cwd/roots alias through a delegate-writable symlink can relocate a call to another directory, which gets its own selection; calls inside the approved root are not downgraded. DEC-007/008 amended; design sec-2 (Step 5, Residual: relocation, invariants), sec-3 (record root, report 'governed'), sec-4 tests (retarget in both roots orders, nested approvals, approval outside roots) updated."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED at design level, accepting the operator's revised boundary rather than claiming the original alias-relocation scenario is eliminated. DEC-007/008 and design.md:79-83, :197-200 now select the deepest recorded approval containing the call's canonical root independently of the current roots-entry lookup base; :441-443 specify retarget/nesting/removed-root tests. Thus changing entry resolution cannot re-base a call that STILL physically runs inside approved A onto defaults. Relocating cwd to a different physical directory remains possible and is explicitly chosen/disclosed at :138 and :475; this is an accepted limitation, not proof against relocation. A newly exposed CLI lifecycle defect from retaining approvals after roots removal is raised separately as F-6, rather than rejecting the chosen containment model. No implementation/runtime proof asserted."
+
+[[finding.turn]]
+act = "reopen"
+role = "raiser"
+note = "reopened for responder routing (lock gate); substance unchanged"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+route = "probe"
+response = """
+Re-disposed with route probe; substance unchanged from the verified answer. Design repair (operator choice): the governing approval is the deepest approval for the capability whose recorded canonical root contains the call's canonical root; it is the lookup base and wins over any roots-entry match. DEC-007/008 amended; design sec-2 Step 5, Residual: relocation, Invariants.
+Probe. Must hold against: a write delegate that can create, delete or retarget symlinks and directories anywhere inside its writable root (including a symlink that is, or lies on the path of, a roots entry), in both orders of the roots list; after its writes, a later call whose canonical root lies inside an approved root runs that approval's identity or refuses, and never runs the machine default form. Need not hold against: relocation, where the orchestrator names a cwd through a delegate-writable symlink and the call runs in a different directory outside every approval (documented residual); an unconfined orchestrator running quotient allow or revoke.
+Criterion must assert: with roots /work and /work/current (both orders), an approval at the canonical /work/A, and each retarget variant (current pointed into /work/A/sub; current pointed away from /work/A), a call whose canonical root is inside /work/A refuses or runs A's approved identity, observed in the spawn audit record (form_source project, form_root /work/A). Host phase constraint: the phase that implements step 5 selection in server.ts with forms.ts and approvals.ts, after the approvals reader exists; uses test-rig helpers to plant forms outside roots.
+"""
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "blocker"
+title = "The current policy's writable set does not make an admitted executable immutable to other live delegates"
+detail = """
+Expected: hashing an approved executable and later execing its pathname must not permit a confined delegate to replace the bytes between the two. Observed: design.md:81, :118-121 and :281 derive the forbidden set only from the currently read policy and this process's session home, then claim that exclusion closes the swap race. That proves no immutability against still-running calls with older grants, or another supported server configured with a different QUOTIENT_POLICY/session home. G5 constrains each child to its own admitted writable set; it does not equate all live writable sets with this call's snapshot.
+
+Concrete inferred scenario using one policy: start a long-running conformant delegate with exposure /opt/project-forms. The operator atomically removes that exposure and approves /opt/project-forms/write (a non-store form expressly supported by DEC-008). The old delegate retains its old writable exposure. On a new call the target is outside every CURRENT root/exposure/session-home and its bytes hash to the approved digest, so step 5 accepts it. Before spawn, the old delegate overwrites that target; src/server/spawn.ts:179-180, :299-306 execs the pathname and runs unapproved bytes. src/server/gate.ts:113-121 rechecks enabled, not removal of old grants, so this scenario does not require a nonconformant form. An equivalent concurrent-server scenario uses B's granted root/exposure containing A's otherwise-excluded target; both deployments can use conformant forms and supported QUOTIENT_POLICY overrides (src/config.ts:28, :49-56).
+
+The accepted DEC-010 rationale needs an explicit, enforceable global immutability premise, rather than treating current-policy path exclusion as sufficient. Require targets that remain immutable to every relevant live delegate (and specify how publication/approval enforces that across policy transitions and server configurations), or execute an identity-preserving verified artifact rather than a subsequently writable pathname. A second hash alone only moves the race. Add a deterministic step-5-to-spawn barrier test with a live older-grant/concurrent-server writer; :435 currently tests only project-symlink repointing. Verified source facts and a concrete inferred design exploit; no runtime SL-002 implementation was executed."""
+disposition = "tolerated"
+response = """
+Re-disposed with route review; substance unchanged from the verified answer. The question is whether to accept the commitment that host-wide immutability of an approved form is an operator obligation, with the outside-writable-paths rule a backstop against the current policy's delegates only. Settled in this review by operator judgement, on the precedent that the policy file is protected the same way (quotient-policy-2.md:228-231). DEC-010 rationale and consequences, design sec-2 rule 3 and sec-4 risk say so; the new contracts must state the obligation.
+"""
+route = "review"
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = "Observation verified: the outside-writable-paths rule reads only the current policy (and this server's session home), so the design's 'closes the swap race' overclaimed. Prescription (enforce host-wide immutability) contested: exec-by-descriptor was rejected in DEC-010; a uid-level writability check breaks single-user Nix stores and does not stop a same-uid delegate whose old grant covers the target; the contract already treats the policy file the same way (protected against the current policy only, out-of-band placement is the operator's obligation, quotient-policy-2.md:228-231). Integrated the narrowing: DEC-010 rationale/consequences and design sec-2 rule 3 now say the check is a backstop against this policy's delegates; host-wide immutability of an approved form is an operator obligation stated in the contract (Nix store paths meet it); sec-4 risk added. Operator chose this disposition."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED as an explicitly tolerated risk, not as an enforced immutability fix. Directly re-read quotient-policy-2.md:228-234: placing the policy read-only and outside writable roots/exposure is an operator publishing obligation, while the server protects the current declared view. That precedent supports applying an operator placement/immutability obligation to executable authority too. My earlier insistence that quotient must enforce host-wide immutability was stronger than this accepted trust model; the observation remains true but that prescription is not necessary under the operator's chosen boundary. DEC-010 and design.md:123-126, :350, :476 now disclose old-policy/other-server writers and require approved forms to remain immutable to ALL host delegates. No claim that the pathname check verifies that obligation, no assertion that the race is technically removed, and no reopening of rejected descriptor execution. Conditional on the stated publishing obligation; no runtime validation performed."
+
+[[finding.turn]]
+act = "reopen"
+role = "raiser"
+note = "reopened for responder routing (lock gate); substance unchanged"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+route = "review"
+response = """
+Re-disposed with route review; substance unchanged from the verified answer. The question is whether to accept the commitment that host-wide immutability of an approved form is an operator obligation, with the outside-writable-paths rule a backstop against the current policy's delegates only. Settled in this review by operator judgement, on the precedent that the policy file is protected the same way (quotient-policy-2.md:228-231). DEC-010 rationale and consequences, design sec-2 rule 3 and sec-4 risk say so; the new contracts must state the obligation.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED, route review: re-read the routed response, DEC-010, design.md:126, :350, :476 and quotient-policy-2.md:228-234. The operator-owned host-wide immutability commitment and its older-policy/other-server residual remain explicit and consistent with the policy-file publishing precedent. Accept the tolerated risk and required contract wording; this is design judgement, not verification of an enforced host-wide immutability mechanism."
+
+[[finding]]
+id = "F-3"
+status = "answered"
+severity = "major"
+title = "Digest-only allow confirmation can approve a different real path than the operator reviewed"
+detail = """
+Expected: record must bind the entire reviewed identity, defined at design.md:123 as (real path, sha256), and close first-review finding 3 in notes.md:94. Observed: design.md:275-301's command carries only the digest; its fresh probe records whichever real path now supplies those bytes. DEC-009's amendment therefore closes changed-byte repoints but not changed-path/same-byte repoints.
+
+Concrete inferred scenario: the report shows /opt/forms/A/launch with digest H. Before the displayed command runs, a write delegate repoints <root>/.quotient/forms/write to /opt/forms/B/launch. A and B are outside the writable set, executable, and have byte-identical launcher scripts, so both satisfy H. The script can select its delegate-immutable confinement inputs relative to dirname($0), making A and B materially different forms without any writable external input or hash collision. allow <root> write=H records B without the operator reviewing B. Even without differing runtime behavior, B is a different identity by the accepted contract. The approvals lock does not bind the old report; it only serializes the new probe and publication.
+
+Carry the expected real path along with the digest (or a confirmation token covering canonical root, capability, resolved path and digest), and compare all identity components under the lock. Add a report-to-record same-bytes/different-path repoint test and require no write on mismatch; the existing :442 digest mismatch test will pass the faulty design. The accepted DEC-009 needs the corresponding narrow correction. Verified by direct comparison of the accepted decision, first-review table and draft; the exploit is inferred, not a runtime result."""
+disposition = "fix-now"
+response = """
+Re-disposed with route probe; substance unchanged from the verified answer. Design repair: quotient allow PATH CAP=REALPATH@SHA256 records only if, under the store lock, the fresh probe's real path and sha256 both equal those given; otherwise nothing is written and it exits 1. DEC-009 amended; design sec-3 Record.
+Probe. Must hold against: a write delegate that repoints the project link between the operator's report and the record command, to a different real path with byte-identical content, or to different bytes at the same path; and a batch where one pair matches and another does not. Need not hold against: an unconfined orchestrator that runs both the report and the record itself; a target the operator left delegate-writable (F-2 obligation).
+Criterion must assert: after a report shows real path A with digest H, repointing the link to B with identical bytes makes allow ROOT write=A@H exit 1 with both identities named and leave approvals.json byte-identical; the matching case records exactly A with H. Host phase constraint: the phase that implements src/approve.ts allow, after updateApprovals and probeProjectForm exist.
+"""
+route = "probe"
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified: the drafted record argument carried only the digest. Fixed: 'quotient allow <path> <cap>=<realpath>@<sha256>...' (split at the last '@'); under the store lock the fresh probe's real path and sha256 must both equal the given ones or nothing is written. Report prints the ready-to-paste argument. DEC-009 amended; design sec-3 Record/Report and sequence diagram updated; sec-4 adds the same-bytes/different-path test."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED at design level. Amended DEC-009 and design.md:284-310 carry both expected real path and sha256; parsing splits at the final @, and updateApprovals.change freshly probes and compares BOTH under the exclusive store lock before any batch write. The ready-to-paste command and sequence diagram (:304-305, :327-335) agree; :456 explicitly requires the same-bytes/different-path case to write nothing and exit 1. This closes the reported identity-component omission without assuming a hash collision or frozen confinement inputs. These are revised design commitments, not implemented/tested behavior."
+
+[[finding.turn]]
+act = "reopen"
+role = "raiser"
+note = "reopened for responder routing (lock gate); substance unchanged"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "probe"
+response = """
+Re-disposed with route probe; substance unchanged from the verified answer. Design repair: quotient allow PATH CAP=REALPATH@SHA256 records only if, under the store lock, the fresh probe's real path and sha256 both equal those given; otherwise nothing is written and it exits 1. DEC-009 amended; design sec-3 Record.
+Probe. Must hold against: a write delegate that repoints the project link between the operator's report and the record command, to a different real path with byte-identical content, or to different bytes at the same path; and a batch where one pair matches and another does not. Need not hold against: an unconfined orchestrator that runs both the report and the record itself; a target the operator left delegate-writable (F-2 obligation).
+Criterion must assert: after a report shows real path A with digest H, repointing the link to B with identical bytes makes allow ROOT write=A@H exit 1 with both identities named and leave approvals.json byte-identical; the matching case records exactly A with H. Host phase constraint: the phase that implements src/approve.ts allow, after updateApprovals and probeProjectForm exist.
+"""
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "major"
+title = "The impact list omits release and confinement probes that still create forbidden launch-directory profiles"
+detail = """
+Expected: the legacy-layer migration must update every supported verification deployment, and the required just gate must still be capable of reaching its spawn assertions. Observed: design.md:394-413 lists no scripts, while :448 requires just gate green. scripts/pack-check:155 creates $launch/.quotient/profiles and :227-241 writes its only profile there; its XDG config is deliberately empty. scripts/hostile-audit:157-158 likewise creates the launch-dir profile, then starts the real server in that launch dir with a distinct XDG_CONFIG_HOME (:249-256). Both necessarily hit the new legacy-layer startup refusal specified at design.md:252-258 instead of launching the fixture form. The former is executed by justfile's gate -> pack-check recipe; the latter is the form-1 contract's published confinement probe (docs/contract/form-1.md:83-100), although gate only syntax-checks that script.
+
+Add both scripts to the code-impact commitments and migrate their fixture profiles to <fixture-XDG_CONFIG_HOME>/quotient/profiles, keeping the isolated launch directory free of legacy layers. Verify the packaged end-to-end smoke still executes its form, and verify the hostile-audit fixture gets beyond startup to its intended confinement check (a stub/preflight fixture suffices to check setup without a paid model call). Current-source placement and recipe invocation are verified by reading; the post-change refusal is inferred from the drafted legacy rule, not observed after implementation. src/server/test-rig.ts already seeds XDG at :215, so fixing only its comments or helpers does not migrate these independent fixtures."""
+disposition = "fix-now"
+response = """
+Re-disposed with route refresh; substance unchanged from the verified answer. The repo side is right: scripts/pack-check:155,227-241 and scripts/hostile-audit:157-158 plant launch-dir profiles, and justfile gate runs pack-check. The record that lagged is design.md sec-4 code impact and verification; edited (both scripts in the impact table, fixture profiles moved to the fixture XDG layer, pack-check and hostile-audit setup checks in verification). Swept the records that cite the impact surface: slice-002.md scope, expected surface and verification intent, and the design-target selectors (scripts/pack-check, scripts/hostile-audit added).
+"""
+route = "refresh"
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified: scripts/pack-check:155,227-241 and scripts/hostile-audit:157-158 plant <launch>/.quotient/profiles; justfile gate runs pack-check. Integrating: both scripts join sec-4 code impact; fixtures move profiles to <fixture XDG_CONFIG_HOME>/quotient/profiles; verification adds pack-check reaching its form, and a hostile-audit setup check past start-up without a model call."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED at design level. Both scripts are now in the impact commitments at design.md:422 and SL-002's expected surface; their fixtures must place profiles in their isolated XDG_CONFIG_HOME/quotient/profiles and leave launch dirs free of legacy layers. :463-464 explicitly require packaged pack-check to execute the stub form and hostile-audit setup to pass startup with a stub and without a paid model call. This addresses the two independent fixture paths cited in the finding, not merely test-rig comments. Scripts have not yet been migrated/executed in this design review."
+
+[[finding.turn]]
+act = "reopen"
+role = "raiser"
+note = "reopened for responder routing (lock gate); substance unchanged"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "refresh"
+response = """
+Re-disposed with route refresh; substance unchanged from the verified answer. The repo side is right: scripts/pack-check:155,227-241 and scripts/hostile-audit:157-158 plant launch-dir profiles, and justfile gate runs pack-check. The record that lagged is design.md sec-4 code impact and verification; edited (both scripts in the impact table, fixture profiles moved to the fixture XDG layer, pack-check and hostile-audit setup checks in verification). Swept the records that cite the impact surface: slice-002.md scope, expected surface and verification intent, and the design-target selectors (scripts/pack-check, scripts/hostile-audit added).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED, route refresh: the response correctly identifies current fixture placement as the source fact and the design impact inventory as the lagging record. Rechecked design.md:422, :463-464, reconciled slice-002.md scope/expected surface/verification, and doctrine slice selector list 2: both scripts appear in the impact surface and design-target selectors, with XDG fixture migration and execution/setup verification committed. The refresh and cited-record sweep hold at design level; no assertion that the scripts have already been migrated or executed."
+
+[[finding]]
+id = "F-5"
+status = "verified"
+severity = "minor"
+title = "The new approvals JSON example conflicts with the claim that the policy drift guard needs no change"
+detail = """
+Expected: documenting quotient-approvals/1 inside the policy contract must preserve useful schema validation and a green drift check. Observed: design.md:172-185 defines an approvals JSON example and :342 puts the approvals format in docs/contract/quotient-policy-2.md, but :415 says src/drift.test.ts needs no new rule and :446 characterizes the JSON check as parsing. The actual inadmissibleBlocks at src/drift.test.ts:245-255 sends EVERY json fence in that contract through readPolicy; policyViolations(:259-264) and the active test(:326-329) require each to be an admitted quotient-policy/2 document. Valid JSON of another schema fails.
+
+Focused no-file-write probe: evaluated the actual inadmissibleBlocks and validatePolicy function bodies in memory against the draft's approvals example. Result: 'proposed approvals example in policy contract json block 1: policy-invalid: schema "quotient-approvals/1" is not one this build reads: expected "quotient-policy/2"'. This verifies the existing guard's behavior; the draft has not yet inserted that example into the contract.
+
+Specify schema-aware handling of mixed policy/approvals examples (validate each with its own parser, retaining negative controls), or explicitly place the approvals example in a separate contract and keep the policy contract policy-only. Correct the no-change claim and include the appropriate drift verification in the impact table. This is distinct from the correctly verified refusal-union scanner, which will discover ProjectFormRefusal without a new rule."""
+disposition = "fix-now"
+response = "Verified: src/drift.test.ts:245-255 sends every json fence in the policy contract to readPolicy. Integrating: approvals format moves to its own contract docs/contract/quotient-approvals-1.md (the policy contract stays policy-only and links to it); drift test gains a check that the approvals contract's json blocks parse with readApprovals, plus a negative control; the no-change claim in sec-4 is corrected."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified: src/drift.test.ts:245-255 sends every json fence in the policy contract to readPolicy. Integrating: approvals format moves to its own contract docs/contract/quotient-approvals-1.md (the policy contract stays policy-only and links to it); drift test gains a check that the approvals contract's json blocks parse with readApprovals, plus a negative control; the no-change claim in sec-4 is corrected."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED at design level. design.md:346, :353 and :421 explicitly place the approvals format in a new docs/contract/quotient-approvals-1.md and keep the policy contract's JSON policy-only. :426 corrects the no-drift-change claim and requires checking every approvals JSON block using the approvals reader with a malformed-block negative control. Therefore the existing policy guard can retain admission validation rather than silently degrading to JSON parsing. The new contract/check are specified work, not existing implemented artifacts or a passing runtime/test result."
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "major"
+title = "Retained governing approvals become unreachable by revoke after their policy root is removed"
+detail = """
+Expected: the operator can revoke a retained governing approval by its recorded root, including when that root is no longer an exact policy.roots entry; revocation must identify the intended stored selection. Observed: the F-1 revision explicitly keeps such approvals active (design.md:197-200, :443, :474), but sec-3 requires BOTH allow and revoke to resolve the input to the CURRENT longest policy roots entry and calls that the record root (:290). Revoke only removes that record root's entries and returns success for an absent one (:312). This leaves approvals that admission still applies but no revoke command can target. DEC-008's 'revocation is an operator verb' and DEC-009's revoke surface consequently lack an operation for a newly supported state.
+
+Concrete inferred scenario: initially policy.roots = [/work, /work/A], with write approval keyed /work/A. Remove /work/A from roots, leaving /work. Calls at /work/A remain admitted and governed by its retained approval, as the new design requires. Now 'quotient revoke /work/A write' resolves record root /work, removes no /work/A entry, exits 0 if /work has no approval, and leaves the intended approval governing. Every path inside A likewise maps to /work, so changing the argument cannot reach the stored key. If a /work approval ALSO exists, the same command instead removes that distinct parent's approval and changes selection for other calls under /work. Similar unreachable entries arise when a recorded directory disappears, since resolveRoot requires an existing directory. The report's suggested revoke (:308) cannot remedy these states.
+
+Verification: read the cited design and amended DEC-007..009; evaluated their specified containment/longest-root/removal rules in memory using the actual within() comparator (no file writes). For the first scenario, command = revoke /work/A write; governingBefore = /work/A; recordRoot = /work; removed = 0; governingAfter = /work/A. This is an inference from the drafted algorithm, not an executed SL-002 CLI implementation.
+
+Repair direction: give revoke an explicit way to select the STORED canonical approval key independently of current allowlist membership and mutable filesystem resolution; distinguish that target from allow's current record root and from a governing ancestor. Specify behavior for deleted/moved roots and nested approvals so a requested child revoke cannot silently revoke its parent. Reconcile DEC-009/new approvals contract and add remove-root-then-revoke, deleted-root cleanup, and parent-approval-preservation tests. This finding is introduced/exposed by the retained-containment selection revision; it does not contest the operator's chosen containment model or the accepted relocation/immutability limits."""
+disposition = "fix-now"
+response = """
+Re-disposed with route review; substance unchanged from the verified answer. The question is whether the revoke verb's commitment is right given retained approvals; settled in prose in this review: quotient revoke APPROVAL-ROOT [CAP...] matches a stored root exactly (absolute, lexically normalised), reads neither policy nor filesystem, never removes another root's entries, and exits 1 listing stored roots for an unknown root or capability. DEC-009 amended; design sec-3 Revoke and sec-4 tests (removed root, deleted directory, parent preserved, unknown root); slice scope reconciled.
+"""
+route = "review"
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified against design sec-3 (allow and revoke both resolved through the current longest roots entry) and sec-2 (approvals keep governing after their root leaves roots). Fixed: 'quotient revoke <approval-root> [<cap>...]' matches a stored root exactly (absolute, lexically normalised) and reads neither policy nor filesystem; it never removes another root's entries, so a child revoke cannot remove a governing parent; unknown root/capability exits 1 listing stored roots (was a silent no-op); the allow report prints the governing approval root for revoke. DEC-009 amended; design sec-3 Revoke and sec-4 tests (removed root, deleted directory, parent preserved, unknown root) updated; slice scope reconciled."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED at design level, limited to the F-6 revision. Re-read the responder's fix-now disposition, amended accepted DEC-009 via doctrine show, reconciled SL-002 scope, and design.md:284-312, :353, :458. Revoke now targets the exact stored approval-root after absolute lexical normalization, without policy-based root matching, realpath, stat, or directory existence requirements; only allow retains current-policy record-root resolution. Therefore the /work/A entry remains addressable after roots shrinks to [/work] or A disappears, and revoking A cannot remove a distinct /work approval. Unknown root/capability now exits 1 rather than silently succeeding; the report supplies the governing approval root. The explicit verification commitments cover removed roots, deleted directories, parent preservation and unknown targets. 'Reads neither policy nor filesystem' is understood in its stated target-resolution context: the command still reads and locks the approvals store through updateApprovals. No new defect introduced by this revision found. This verifies the revised specification and test obligations, not an implemented CLI or runtime tests."
+
+[[finding.turn]]
+act = "reopen"
+role = "raiser"
+note = "reopened for responder routing (lock gate); substance unchanged"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = """
+Re-disposed with route review; substance unchanged from the verified answer. The question is whether the revoke verb's commitment is right given retained approvals; settled in prose in this review: quotient revoke APPROVAL-ROOT [CAP...] matches a stored root exactly (absolute, lexically normalised), reads neither policy nor filesystem, never removes another root's entries, and exits 1 listing stored roots for an unknown root or capability. DEC-009 amended; design sec-3 Revoke and sec-4 tests (removed root, deleted directory, parent preserved, unknown root); slice scope reconciled.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED, route review: re-read the routed response, accepted DEC-009, design.md:290, :312, :458 and reconciled slice scope. Revoke's commitment is exact stored-root selection using absolute lexical normalization, independent of current policy roots and filesystem target resolution; parent entries remain untouched and unknown targets fail. This addresses retained/deleted-root revocability at the design level. Approval-store I/O still occurs; the no-filesystem statement concerns target resolution. Runtime implementation remains unverified."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.
