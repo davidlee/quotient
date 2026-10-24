@@ -5,17 +5,18 @@ level and tools. The caller picks one by name with `profile`.
 
 ## Where profiles are found
 
-Two layers, read once when the server starts:
+One directory, read once when the server starts:
+`$XDG_CONFIG_HOME/quotient/profiles/<name>.md` (`~/.config/quotient/profiles/`
+when `XDG_CONFIG_HOME` is unset).
 
-1. `<launch dir>/.quotient/profiles/<name>.md`
-2. `$XDG_CONFIG_HOME/quotient/profiles/<name>.md` (`~/.config/quotient/profiles/`
-   when `XDG_CONFIG_HOME` is unset)
-
-Per name, the launch-dir document wins. There is no built-in profile: the
-package's `examples/profiles/` are copies to start from. A missing layer is
-empty. An unreadable layer, or an invalid document in either layer, whether it
-wins or not, stops the server from starting cleanly: every call then refuses
-`profile-invalid`, naming the path. Edits take effect when the server restarts.
+An earlier version also read `<launch dir>/.quotient/profiles/`. That layer is
+gone: a server that finds one fails start-up, telling a directory to move its
+documents into the XDG directory and an entry that is not a directory to remove
+or replace it. There is no built-in profile: the package's
+`examples/profiles/` are copies to start from. An absent directory is empty. An
+unreadable directory, or an invalid document in it, stops the server from
+starting cleanly: every call then refuses `profile-invalid`, naming the path.
+Edits take effect when the server restarts.
 
 ## Document grammar
 
@@ -47,7 +48,8 @@ header is prose for a human and is not parsed.
 
 A profile that names an `mcp__*` tool needs a form that passes `-e
 builtin:mcp` (`quotient help policy`, Fields); otherwise calls refuse
-`profile-invalid`.
+`profile-invalid`. A project form inherits the machine form's extensions, so it
+cannot grant one a profile needs (`quotient help policy`, Project forms).
 
 ## The capability pin
 
@@ -55,6 +57,6 @@ The policy's `profiles` maps each allowed name to `read` or `write`. A call
 refuses `profile-not-allowed` for a name the map does not list, and
 `profile-capability-mismatch` when the document's `filesystem` differs from
 the pin. A document therefore cannot raise its own capability, and no write
-delegate can rewrite either profile layer: both are protected stores
+delegate can rewrite the profile directory: it is a protected store
 (`quotient help policy`, Protected stores). The pin is checked on every call,
 because the policy is re-read on every call.

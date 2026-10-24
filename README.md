@@ -45,6 +45,7 @@ place, all under `~/.config/quotient/` by default:
 ```
 ~/.config/quotient/
 ├── policy.json          the policy: roots, limits, profiles, forms (read on every call)
+├── approvals.json       forms approved by hand with `quotient allow` (read on every call)
 └── profiles/            one file per profile: model, thinking, tools (read at start-up)
     ├── read.md
     ├── research.md
@@ -59,9 +60,12 @@ place, all under `~/.config/quotient/` by default:
 ```
 
 `QUOTIENT_POLICY`, `QUOTIENT_RUN_DIR` and `QUOTIENT_SESSION_HOME` move these;
-`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are honoured. A project can carry its
-own profiles in `.quotient/profiles/`, which win per name over the user's. The
-policy is never read from a project.
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME` are honoured. Profiles and help come
+from `~/.config/quotient/` alone, read once at start-up; the policy and the
+approvals store are read on every call. Nothing is read from a project: a
+server that finds an earlier version's `<launch dir>/.quotient/profiles/` or
+`/help/` fails start-up, telling a directory to move its documents into the XDG
+directory and an entry that is not a directory to remove or replace it.
 
 Installation ships example profiles but does not copy them into user
 configuration. Start from the examples in the package:
@@ -187,7 +191,8 @@ tool_timeout_sec = 660     # policy maxima.wall_clock_s + 60
 
 Keep `tool_timeout_sec`: Codex's default of 60 seconds is shorter than most
 delegate runs. `codex mcp add quotient -- quotient` writes the entry without
-it. `cwd` is the launch dir, where `.quotient/profiles/` is looked for.
+it. `cwd` is the launch dir: it only defaults a call's `cwd`, and the policy
+must still allow it.
 
 `quotient help clients` prints both snippets with this install's absolute path
 and a timeout computed from your policy.
@@ -196,6 +201,27 @@ Restart the client and call `pi_agent` with a `prompt` and a `profile`. The
 server reads profiles and help once, at start-up, so restart it after changing
 them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
 (`quotient help setup`) is the same walk-through, in the order to do it.
+
+## Project forms
+
+A project may substitute the executable that confines its own root: a link at
+`<root>/.quotient/forms/read` or `<root>/.quotient/forms/write`. Approval is by
+hand, and nothing runs until it is recorded:
+
+```sh
+quotient allow                                       # what each link resolves to
+quotient allow <root> write=<realpath>@<sha256>      # record that identity
+```
+
+The approval pins the executable's real path and the sha256 of its bytes, so a
+rebuilt or moved form must be approved again. With nothing approved, a root
+whose link is absent runs the machine form and a usable link refuses
+`form-unapproved`; only an unusable link refuses `form-invalid`, and so does an
+absent link while an approval governs the root. `quotient revoke <root>` removes
+the approval, and the machine form returns only once no link remains: while the
+link is still there the root refuses `form-unapproved`, so remove the link too.
+[`docs/contract/quotient-approvals-1.md`](docs/contract/quotient-approvals-1.md)
+is the store; `quotient help policy` (Project forms) is the selection rule.
 
 ## Documentation
 
@@ -211,6 +237,9 @@ them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
   as historical documentation.
 - [`docs/contract/form-1.md`](docs/contract/form-1.md): what a form must
   guarantee, and which guarantees quotient verifies.
+- [`docs/contract/quotient-approvals-1.md`](docs/contract/quotient-approvals-1.md):
+  the approvals store, how an approval governs a root, and the `allow` and
+  `revoke` verbs.
 - [`docs/design.md`](docs/design.md): why it is built this way.
 
 `quotient reduce` is the reducer on its own: it turns a `pi --mode json` event

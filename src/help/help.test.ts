@@ -7,7 +7,7 @@
 // built-in layer is the package's own `help/` and `docs/contract/`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { packageRoot } from '../root.ts';
@@ -199,6 +199,79 @@ test('clients: with no readable policy tool_timeout_sec is a placeholder that sa
   const text = clientsSnippets({ ...CONTEXT, policy: { ok: false, detail: '/p/policy.json could not be read (ENOENT)' } });
   assert.match(text, /^tool_timeout_sec = \d+ +# placeholder: no readable policy/m);
   assert.match(text, /ENOENT/);
+});
+
+// ── The shipped text: no launch-dir layer ──────────────────────────────────
+
+/** The shipped prose this slice must keep true: the help files, the README, the
+ *  examples, the rationale and the active contracts. The historical /1
+ *  contracts describe the layers of their time and are left alone. */
+const SHIPPED_PROSE = [
+  'help',
+  'README.md',
+  'examples',
+  'docs/design.md',
+  'docs/contract/quotient-policy-2.md',
+  'docs/contract/form-1.md',
+  'docs/contract/pi-agent-result-2.md',
+  'docs/contract/quotient-approvals-1.md',
+];
+
+/** Every file under PATH, which is a file or a directory. */
+function proseFiles(path: string): string[] {
+  return statSync(path).isDirectory() ? readdirSync(path).flatMap((name) => proseFiles(join(path, name))) : [path];
+}
+
+/** A mention of a launch-dir layer. In shipped text `.quotient` is either a
+ *  project's own forms (`.quotient/forms/…`, which the policy contract teaches)
+ *  or one of the two layers quotient read from the launch directory until 0.3.0:
+ *  `profiles` and `help`. Any other spelling — `<launch dir>/.quotient/`, a bare
+ *  `./.quotient` — can only be describing a layer. */
+const LAYER_MENTION = /(^|[^\w])\.quotient(?![\\/]forms\b)/;
+
+/** What only the legacy start-up failure may say in a paragraph naming a layer. */
+const LEGACY_MARKERS = ['no longer reads', 'fails start-up', 'remove or replace'];
+
+/**
+ * Every paragraph of TEXT that describes a launch-dir profile or help layer. The
+ * one exception is the start-up failure that tells the operator to move those
+ * documents: it must name them to be actionable.
+ */
+export function launchDirLayerViolations(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .filter((paragraph) => LAYER_MENTION.test(paragraph) && !LEGACY_MARKERS.some((marker) => paragraph.includes(marker)))
+    .map((paragraph) => `describes a launch-dir layer: ${paragraph.trim().split('\n')[0]}`);
+}
+
+test('the shipped text describes no launch-dir profile or help layer', () => {
+  const files = SHIPPED_PROSE.flatMap((path) => proseFiles(join(packageRoot, path)));
+  assert.ok(files.includes(join(packageRoot, 'README.md')), 'the scan reaches the README');
+  const violations = files.flatMap((file) =>
+    launchDirLayerViolations(readFileSync(file, 'utf8')).map((line) => `${file.slice(packageRoot.length)}: ${line}`),
+  );
+  assert.deepEqual(violations, []);
+});
+
+test('the launch-dir guard catches a layer description and admits the start-up failure', () => {
+  const old = 'A project can carry its own profiles in `.quotient/profiles/`, which win over the user\'s.';
+  assert.equal(launchDirLayerViolations(old).length, 1, 'a relative layer mention is a violation');
+  assert.equal(launchDirLayerViolations('The server finds its layers in `<launch dir>/.quotient/help/`.').length, 1);
+  const failure =
+    'quotient no longer reads help from the launch directory; move these documents to ~/.config/quotient/help and restart';
+  assert.deepEqual(launchDirLayerViolations(failure), [], 'the start-up failure may name the layers');
+  assert.deepEqual(launchDirLayerViolations('A project form lives at `<root>/.quotient/forms/write`.'), []);
+});
+
+test('help: the rendered clients snippet and the setup section teach XDG only, and project forms', () => {
+  const clients = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, wallClockS: 300 } });
+  assert.deepEqual(launchDirLayerViolations(clients), [], 'the snippet names no launch-dir layer');
+  assert.match(clients, /only defaults/, 'the `cwd` note says the launch dir only defaults a call\'s cwd');
+  const setup = builtin('help/setup.md');
+  assert.ok(setup.includes('quotient allow'), 'the setup says how a project form is approved');
+  assert.ok(setup.includes('.quotient/forms/'), 'the setup names the project form path');
+  const profiles = builtin('help/profiles.md');
+  assert.ok(profiles.includes('quotient/profiles/'), 'the profiles section names the XDG layer');
 });
 
 test('policyView: a readable policy gives its pins and wall clock; otherwise why not', () => {

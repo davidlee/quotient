@@ -223,7 +223,8 @@ cwd = ${JSON.stringify(context.launchDir)}
 ${timeout}
 \`\`\`
 
-\`cwd\` is the launch dir: where \`./.quotient\` is found.
+\`cwd\` is the launch dir: it only defaults a call's \`cwd\`, which the policy
+must still allow. Profiles and help are read from \`$XDG_CONFIG_HOME\` alone.
 `;
 }
 

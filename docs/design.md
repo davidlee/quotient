@@ -62,8 +62,10 @@ string prefix, so allowing `/home/u/work` does not allow `/home/u/work-other`.
 ## Profiles are live authority, frozen at start-up
 
 A profile names a delegate: its model, its thinking level, its tools, and the
-filesystem capability it needs. Profiles are found in layers, the project's
-own over the user's, so a repository can carry the delegates suited to it.
+filesystem capability it needs. Profiles come from one place,
+`<xdgConfig>/quotient/profiles/`, and so does help. An earlier version also read
+a project layer from the launch directory, which put authority inside the tree
+a delegate works in; a server that finds one now fails start-up instead.
 
 That makes a profile document authority, and two rules keep it safe:
 
@@ -72,12 +74,26 @@ That makes a profile document authority, and two rules keep it safe:
   choosing its own successor's powers. A restart is the operator's act.
 - **Capability from the document, pinned by the policy.** The document says
   whether its delegate reads or writes; the policy says, per profile name,
-  which it may. A mismatch refuses. A project's local profile can change the
-  model or narrow the tools, but it can never turn a read delegate into a write
-  delegate.
+  which it may. A mismatch refuses, so no profile document can raise its own
+  capability, and a profile can only narrow what the policy grants.
 
-The layers are protected stores: a write delegate's view may not include them,
+The directory is a protected store: a write delegate's view may not include it,
 so it cannot plant a profile for the next start-up either.
+
+## A project form is approved, not adopted
+
+A project may substitute the executable that confines its own root: a link at
+`<root>/.quotient/forms/{read,write}`. Nothing about that is automatic. The
+policy still decides where a call may run, and the operator records the
+executable's real path and digest by hand, so a delegate that can write the
+project can repoint the link and change nothing that runs. Until it is recorded
+the root refuses, and only `quotient revoke` returns it to the machine form.
+
+What the digest covers is the executable's bytes: what the form reads or execs
+when it runs must be embedded in it or kept where no delegate can write, and an
+approved form must be immutable to every delegate on the host. The rule, the
+selection table and the operator's obligations are in
+`quotient-approvals-1.md` and `quotient-policy-2.md` (Project forms).
 
 ## One termination ladder
 

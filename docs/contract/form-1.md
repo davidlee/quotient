@@ -35,9 +35,15 @@ by signalling the group: SIGTERM, a grace of 2 seconds, then SIGKILL.
 | G3 | The session directory is writable at its own absolute path. |
 | G4 | The child has a private, writable temp, not shared with the host. |
 | G5 | The child can write nothing except the root (under `write`), the session directory, its private temp and the policy's `exposure` paths. Anything else it can see is read-only. |
-| G6 | The run evidence directory and the session home (except this call's session directory) are neither readable nor writable. The policy file and the profile and help layers are not writable. |
+| G6 | The run evidence directory and the session home (except this call's session directory) are neither readable nor writable. The policy file, the profile and help directory and the approvals store are not writable. |
 | G7 | The confined process dies with its parent. |
 | G8 | A missing, relative or non-directory session directory exits 64 before running anything. |
+| G9 | A form that cannot establish its confinement exits non-zero before it runs pi: nothing runs unconfined. |
+| G10 | Everything confinement depends on — a seatbelt profile, a bind list, a config file — is inside the executable's bytes or at a path no delegate can write. |
+
+G9 and G10 are what a form-1 form already does by way of G5, stated so the
+dependency is explicit: a form that took a confinement input from a path a
+delegate can write would be confined only by the delegate's leave.
 
 ```
               readable?              writable?
@@ -46,7 +52,7 @@ session dir   yes                    yes
 private tmp   yes                    yes
 exposure      yes                    yes
 evidence and other sessions   no     no         <- G6
-policy, profile and help layers  yes  no         <- G6
+policy, profile and help layers, approvals store  yes  no         <- G6
 everything else  form's choice       no         <- G5
 ```
 
@@ -79,6 +85,8 @@ show, with one exception: quotient's write-denial probe samples one case of G6.
 | G6, every other case | no |
 | G7 | no |
 | G8 | no |
+| G9 | no |
+| G10 | no |
 
 ### The write-denial probe
 

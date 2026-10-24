@@ -102,16 +102,26 @@ quotient allow <path> <capability>=<realpath>@<sha256>...   record
 `<path>` defaults to the current directory and is resolved the way a call is:
 against the machine policy, canonicalised, and matched to the longest `roots`
 entry that contains it. A path inside no entry, or a policy that cannot be read,
-exits 1 naming why; a malformed invocation exits 2.
+exits 1 naming why. A malformed invocation exits 2 with `allow`'s own usage
+line: an empty `<path>`, an identity that is not
+`<capability>=<realpath>@<sha256>`, or one capability given twice.
 
-**Report.** For each capability of the machine forms, what is at
+**Report.** For each capability of the machine forms: what is at
 `<roots entry>/.quotient/forms/<capability>`, what it resolves to, its digest,
 which approval governs calls there now (which may sit at a shallower root than
-the roots entry), and the exact `quotient allow` command that would record what
-is shown. A link that is not usable shows the refusal's detail and contributes
-nothing to the suggested command. A governing approval whose link is missing or
-changed says so and suggests `quotient revoke`. The report never writes, and
-exits 0 whenever it printed.
+the roots entry), the machine slot a project form would replace (`slot`:
+confined with its extensions, unconfined with its `pi`, or none and why), and
+the exact `quotient allow` command that would record what is shown. An absent
+link shows the machine form that stands instead. A link that is not usable shows
+the refusal's detail and contributes nothing to the suggested command. A
+governing approval whose link is missing or changed says so and suggests
+`quotient revoke`, and a deeper approval that would keep governing is printed as
+an `advice` line with the revoke it needs — no record command is offered for
+that capability, because recording would change nothing. When admission would
+refuse a call at `<path>`, the block ends with `admission calls at <path> are
+refused: <reason>`, so the report does not look settled while calls are refused;
+the tail then says why nothing is offered (`nothing to approve: …`). The report
+never writes, and exits 0 whenever it printed.
 
 **Record.** Each `<capability>=<realpath>@<sha256>` is split at its last `@` (a
 digest contains none) and checked again, inside the store's lock, against the
@@ -122,7 +132,12 @@ project's link at the roots entry and against the machine form:
   the policy can write;
 - the capability's machine form must be confined, since a form that is declared
   unconfined has no executable to substitute;
-- the resolved real path **and** the digest must both equal the ones given.
+- the resolved real path **and** the digest must both equal the ones given;
+- no deeper approval may govern — checked first, though listed last: an approval
+  at a deeper root than the roots entry would keep deciding calls here, so the
+  pair is refused with `read: the approval for /work/one governs calls at /work,
+  so recording at /work would change nothing; run "quotient revoke /work/one"
+  first`.
 
 All of them or nothing: one failing pair in a batch writes nothing, and the
 command exits 1 naming both identities — the one reviewed and the one that is
@@ -144,7 +159,11 @@ different key — at worst a parent's approval. It removes that root's entries f
 the named capabilities, or all of them when none are named, and never touches
 another root's: revoking a child leaves a governing parent alone. A root or
 capability with no recorded entry exits 1 and lists the stored roots, so a
-mistyped root is never a silent success.
+mistyped root is never a silent success; with no store at all the message says
+`stored roots: none` and nothing is created, because `revoke` reads before it
+takes the lock. A malformed invocation exits 2 with `revoke`'s own usage line: no
+`<approval-root>`, a capability other than `read` or `write`, or the same
+capability twice.
 
 Afterwards calls there are governed by whatever contains them: a shallower
 approval if one does, else the machine form if no link remains, else

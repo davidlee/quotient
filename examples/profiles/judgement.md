@@ -20,5 +20,4 @@ criteria and output requirements belong in the call's prompt.
 
 The read form supplies filesystem confinement, including for `bash`. No MCP
 tools are named. The policy must pin `judgement` to `read`.
-Restart the server/client after profile changes. A project-local profile with
-the same name takes precedence over this one.
+Restart the server/client after profile changes.

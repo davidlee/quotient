@@ -19,5 +19,4 @@ documentation, not a system prompt.
 
 The tools match `write`. The write form supplies filesystem confinement. No MCP
 tools are named. The policy must pin `implement` to `write`.
-Restart the server/client after profile changes. A project-local profile with
-the same name takes precedence over this one.
+Restart the server/client after profile changes.

@@ -14,7 +14,9 @@ means.
   and `transcript` to see how the run ended.
 - A `refused` state means nothing ran; `refusal.reason` says why, and
   `refusal.detail` names what failed, for the operator. Retrying a refusal
-  unchanged gets the same refusal.
+  unchanged gets the same refusal. `form-unapproved` and `form-invalid` need
+  the operator: a project's form is approved by hand with `quotient allow`, so
+  no retry clears them.
 - Pass the returned `session` back to continue the same conversation.
 - Ask for batched reads and a capped answer: a delegate that reads one file per
   turn exhausts its request ceiling before it answers.

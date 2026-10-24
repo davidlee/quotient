@@ -27,5 +27,4 @@ The tools match `judgement`. The read form supplies filesystem confinement;
 the presence of `bash` does not grant write capability. No MCP tools are named.
 
 The operator policy must pin `review` to `read`. Profiles are loaded at server
-startup; restart the Quotient server/client after changing them. A project's
-`.quotient/profiles/review.md` takes precedence over this user-level profile.
+startup; restart the Quotient server/client after changing them.

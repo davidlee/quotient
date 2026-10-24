@@ -1,8 +1,11 @@
 # `quotient-policy/2`
 
 The operator policy: the one document that decides whether, where and how a
-`pi_agent` call may run. Normative: a breaking change mints `quotient-policy/2`,
-and this contract stays alongside.
+`pi_agent` call may run. Normative: a breaking change mints the next version
+(`quotient-policy/3`), and the older contract stays alongside it.
+
+A change is breaking when it changes what an existing policy document grants or
+selects without an operator act.
 
 ## Where things are
 
@@ -16,6 +19,7 @@ launched from.
 | `QUOTIENT_RUN_DIR` | absolute path of the run evidence directory | `<xdgState>/quotient/runs` |
 | `QUOTIENT_SESSION_HOME` | absolute path of the session home | `<xdgState>/quotient/sessions` |
 | `QUOTIENT_LAUNCHER` | absolute path a wrapper was run as; `quotient help clients` prints it as the command | the path the bin script was run as |
+| *(none)* | the approvals store, `<xdgConfig>/quotient/approvals.json` (`quotient-approvals-1.md`) | it has no variable: the path is fixed |
 
 - `<xdgConfig>` is the value of `XDG_CONFIG_HOME` when it is absolute, else
   `$HOME/.config`. `<xdgState>` is the value of `XDG_STATE_HOME` when it is
@@ -34,8 +38,12 @@ launched from.
   server's minus every `QUOTIENT_*` variable and minus any value naming the run's
   evidence.
 
-Profiles and help are found in layers, highest first: `<launch dir>/.quotient/`
-over `<xdgConfig>/quotient/`. Both are read once, at start-up.
+Profiles and help come from `<xdgConfig>/quotient/` alone — `profiles/<name>.md`
+and `help/<section>.md` — and both are read once, at start-up. An earlier
+version also read `<launch dir>/.quotient/profiles/` and
+`<launch dir>/.quotient/help/`; a server that finds either fails start-up: a
+directory's documents are to be moved into the XDG directory, and an entry that
+is not a directory is to be removed or replaced.
 
 ## Fields
 
@@ -55,9 +63,9 @@ or a form object, refuses `policy-invalid`: nothing is silently dropped.
 | `maxima.cost_usd` | positive number | yes | provider cost per run, in US dollars | `policy-invalid` |
 | `maxima.wall_clock_s` | positive number | yes | wall-clock seconds per run: the hard backstop | `policy-invalid` |
 | `profiles` | object: profile name → `"read"` or `"write"` | yes | the profiles a call may request, each pinned to a filesystem capability | `policy-invalid` |
-| `forms` | object | yes | the form that runs each capability | `policy-invalid` |
-| `forms.read` | a form (below), never unconfined | no | the form for a `read` profile | `policy-invalid`; absent refuses `wrapper-unavailable` at step 5 |
-| `forms.write` | a form (below) | no | the form for a `write` profile | `policy-invalid`; absent refuses `wrapper-unavailable` at step 5 |
+| `forms` | object | yes | the default form for each capability; a project may substitute its own (Project forms) | `policy-invalid` |
+| `forms.read` | a form (below), never unconfined | no | the default form for a `read` profile | `policy-invalid`; absent refuses `wrapper-unavailable` at step 5 |
+| `forms.write` | a form (below) | no | the default form for a `write` profile | `policy-invalid`; absent refuses `wrapper-unavailable` at step 5 |
 | `exposure` | array of absolute path strings | yes (may be empty) | the writable host paths the form shares with the child beyond the root, the session directory and its private temp | `policy-invalid` |
 | `transcript_budget_bytes` | non-negative integer | no | byte ceiling for the returned transcript; `0` sets none | `policy-invalid` |
 
@@ -158,10 +166,14 @@ is a tool result naming its reason (`pi-agent-result-2.md`, Refusals).
    local profile can change model, thinking, tools and prose, never
    capability.
 4. **Root:** the call's `cwd`, canonicalised, inside an entry of `roots`
-   (`root-missing`, `root-not-a-directory`, `root-not-allowlisted`).
+   (`root-missing`, `root-not-a-directory`, `root-not-allowlisted`). The longest
+   matching entry is the call's roots entry, which is the project's lookup base
+   when no approval governs it (Project forms).
 5. **Form:** the profile's capability selects `forms.read` or `forms.write`
    (`wrapper-unavailable`). A profile naming an `mcp__*` tool needs a form that
-   passes `builtin:mcp` (`profile-invalid`).
+   passes `builtin:mcp` (`profile-invalid`). Then the approvals store and the
+   project's link decide which executable runs: `form-invalid` or
+   `form-unapproved` (Project forms).
 6. **Ceilings and tools:** a call's `ceilings` may only lower `maxima`
    (`ceiling-above-maximum`); its `tools` may only narrow the profile's
    (`tools-not-allowed`).
@@ -183,18 +195,92 @@ stores:
 | the attempts ledger | neither read nor write it |
 | the session home, except this call's session directory | neither read nor write it |
 | the policy file | read it, never write it |
-| the profile layers, launch-dir and XDG | read them, never write them |
-| the help layers, launch-dir and XDG | read them, never write them |
+| the profile directory, `<xdgConfig>/quotient/profiles` | read it, never write it |
+| the help directory, `<xdgConfig>/quotient/help` | read it, never write it |
+| the approvals store | read it, never write it |
 
 A store is protected whether or not it exists, so a delegate cannot create a
-layer and plant a profile for the next restart. A writable path that is,
-contains or lies inside a store it may not write refuses. One consequence: a
-write call cannot be rooted at the server's launch directory or any parent of
-it, because that root contains the launch-dir layers.
+profile, a help section or a store and plant a form for the next start-up. A
+writable path that is, contains or lies inside a store it may not write refuses.
+Nothing else in the launch directory is a store: a project's own
+`.quotient/forms` is ordinary project content, and a write call may be rooted at
+the launch directory.
 
 Step 8 is sound only if the form adds nothing writable beyond what it is told;
 that is the form's promise (`form-1.md`). The check takes `exposure` as the
 description of what the form shares, and treats every entry as writable.
+
+## Project forms
+
+A project may substitute the executable for its own root. For a capability, the
+project's form is `<base>/.quotient/forms/<capability>`: a symlink, or a path,
+to the executable quotient should run in place of the machine's form.
+
+**The lookup base.** The deepest recorded approval root containing the call's
+canonical root (`quotient-approvals-1.md`, What an approval governs); with no
+such approval, the longest `roots` entry containing the call's root. A project
+nested inside a larger root, or a worktree of it, therefore needs its own
+`roots` entry and its own approval: the base is never guessed, and the directory
+the server was launched in has no part in it.
+
+**What runs.** The governing approval and the link at the base decide:
+
+| the governing approval | the link | what runs |
+|---|---|---|
+| none | absent | the machine form, `forms.<capability>` |
+| none | usable | refused `form-unapproved`: nobody approved it, and the detail carries the exact `quotient allow` that would |
+| none | unusable | refused `form-invalid` |
+| matching identity | absent | refused `form-invalid`: a governed root has no fallback to the machine form |
+| matching identity | usable, same identity | the link's real path |
+| any other identity | usable | refused `form-unapproved`, naming both identities and the exact `quotient allow` that would record the new one |
+
+An approval governs the capability's calls at every root inside its `root`, so
+an approval recorded above a deeper one never decides the deeper root's calls,
+and a deeper approval shadows a shallower one. That shadowing is refused rather
+than ignored: `quotient allow` will not record an approval at a roots entry
+while a deeper approval governs calls there, since the deeper one would still
+decide, and it says to run `quotient revoke <deeper root>` first. The report
+offers that revoke instead of a record command.
+
+**Usable** means the link resolves to a regular file, that file is executable,
+and it lies outside every path a delegate admitted under the policy can write:
+every `roots` entry, every `exposure` path and the session home. **Identity** is
+the real path and the sha256 of the file's bytes; a rebuilt form, or the same
+bytes at another path, is another identity.
+
+**Inheritance.** A project form replaces the executable, not the admission: it
+inherits the machine form's `extensions`, so a profile that names an `mcp__*`
+tool still passes, and it cannot add one. A capability whose machine form is
+`unconfined` has no executable to substitute, so a link there refuses
+`form-invalid`: an unconfined slot is never a project form.
+
+**Deletion is not revocation.** A governed root whose link is gone refuses; only
+`quotient revoke <approval-root>` removes the approval. What runs afterwards is
+the table's: a shallower approval if one remains, the machine form only once no
+link remains, else `form-unapproved` — revoking does not return the root to the
+machine form while a usable link is still there.
+
+**Relocation.** A `cwd` spelled through a symlink a delegate can rewrite decides
+where the call really runs, and it is that directory whose base and approval
+govern. Name `roots` entries and `cwd`s by real path. Nothing here weakens
+confinement for a call that runs inside an approved root: a moved call is
+governed where it lands.
+
+**What the digest covers.** The executable's bytes, and nothing else. What the
+form reads or executes when it runs — a seatbelt profile, a bind list, a config
+file — is the operator's responsibility: it must be embedded in the executable
+or kept where no delegate can write it. An approved form must be immutable to
+every delegate on the host, not only to the delegates of this policy; a store
+path is the easy way to get that.
+
+**Approving is the operator's act.** `quotient allow` prints what each link
+resolves to and the command that would record it; `quotient allow <root>
+<capability>=<realpath>@<sha256>` records it only if the link still resolves to
+that path with that digest. There is no prompt: the digest is the confirmation,
+and an unconfined orchestrator able to run `quotient allow` is trusted as the
+operator. Every call reads the store, so an approval applies to the next call
+and nothing waits for a restart. `quotient-approvals-1.md` is the store, its
+format and the two verbs.
 
 ## The unconfined form
 
@@ -233,7 +319,9 @@ What the operator must do:
   it over the policy path. A tick that reads a half-written file stops the runs
   in flight, which is the intended direction for a control channel.
 - Restart the server after changing profiles or help: both are read only at
-  start-up.
+  start-up. A project form is different: the approvals store is read on every
+  call, so recording or revoking an approval applies to the next call.
 
 Every audit record carries the sha256 of the policy bytes it was admitted
-under, and the `spawn` record names the profile document that won.
+under, and the `spawn` record names the profile document that won, the form it
+ran, and for a project form its root and its digest.

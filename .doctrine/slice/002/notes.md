@@ -195,3 +195,14 @@ runs from this checkout. Workers have no git; the orchestrator commits and runs
     `revoke`; `revoke` has its own usage line;
   - `revoke` with no store fails (exit 1) without creating the config dir or a
     lock.
+
+### PHASE-06 — done
+
+- Contracts, help, README and examples describe shipped behaviour; the
+  `help.test.ts` guard now also catches relative `./.quotient` layer mentions.
+- A docs accuracy review (claims checked against code) corrected: `revoke`
+  returns the machine form only once no link remains (else `form-unapproved`);
+  a missing link with nothing approved runs the machine form; the deeper-
+  approval refusal, report verdict lines, revoke/usage exit codes and the
+  non-directory legacy advice are documented.
+- 0.3.0; release note is the bump commit body (no changelog; precedent 61fd1a9).
