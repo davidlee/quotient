@@ -223,6 +223,62 @@ link is still there the root refuses `form-unapproved`, so remove the link too.
 [`docs/contract/quotient-approvals-1.md`](docs/contract/quotient-approvals-1.md)
 is the store; `quotient help policy` (Project forms) is the selection rule.
 
+## Design and guarantees
+
+quotient treats the delegate as untrusted: it may try to widen its own powers,
+choose what confines it, or edit the record of what it did. Everything that
+decides a call is therefore kept where no delegate can write it.
+
+```
+operator writes                          delegate may write
+───────────────                          ──────────────────
+policy.json      ┐                       its root (write profiles only)
+approvals.json   │ read-only to the      its session directory
+profiles/, help/ │ delegate              a private temp
+                 ┘                       the policy's exposure paths
+run evidence, other sessions: unreachable
+```
+
+- **Nothing a delegate writes can raise its powers.** Profiles are read once,
+  at start-up, and a profile's capability must equal the one the policy pins.
+  A project may substitute its own form, but only an executable the operator
+  approved by real path and sha256: repointing or deleting the link makes calls
+  refuse, never run something else.
+- **Approval is the selection.** A root an approval governs runs exactly that
+  identity or refuses; there is no fallback to the machine form. The form is
+  chosen once per call, at admission, and that is what runs and what the audit
+  names.
+- **Fail closed, first failure wins.** A call passes a fixed sequence of checks
+  (policy, switch, profile, root, form, ceilings and tools, session, the
+  child's writable view) and the first failure is the refusal. A policy, store
+  or location quotient cannot read or resolve refuses; it is never read as
+  permission. Unknown fields refuse rather than being ignored.
+- **One process, one root, one shutdown path.** Each call starts and ends its
+  own pi process in its own process group, and every way a run stops goes
+  through the same termination ladder (SIGTERM, then SIGKILL) and audit record.
+
+What quotient does not guarantee is stated too:
+
+- **The form does the confining.** quotient checks that the child's writable
+  view misses the protected stores, but that check is only as sound as the
+  form's promise to add nothing writable. The write-denial probe,
+  `scripts/hostile-audit`, samples one case of that promise.
+- **The digest covers the executable's bytes only.** What a form reads or runs
+  must be embedded in it or kept where no delegate can write, and an approved
+  form must be immutable to every delegate on the host.
+- **Relocation.** A `cwd` spelled through a symlink a delegate can rewrite is
+  governed where it lands. Name roots and `cwd`s by real path.
+- **Ceilings are retrospective.** Usage is known after each request, so a run
+  can overshoot by the request that crossed a ceiling; the wall clock is the
+  hard backstop.
+- **The unconfined form gives all of this up.**
+
+[`docs/design.md`](docs/design.md) gives the reasoning;
+[`quotient-policy-2.md`](docs/contract/quotient-policy-2.md) (admission order,
+protected stores, project forms),
+[`form-1.md`](docs/contract/form-1.md) and
+[`quotient-approvals-1.md`](docs/contract/quotient-approvals-1.md) define it.
+
 ## Documentation
 
 - `quotient help`: built-in help, including the agent-facing guide, which is
