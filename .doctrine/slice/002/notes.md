@@ -6,26 +6,24 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-24 · plan (design locked, run rev 28) · e3ffcf7 + this commit
+fresh-as-of: 2026-10-24 · audit · db1fff6 + this commit
 
 ### Produced
-- slice opened, re-scoped, researched (rounds 1–2), design drafted, reviewed, locked — commits a8dc74a..; no code yet
-- minted: DEC-007..011 (shaping); IDE-001 — policy extends (likely obsolete); IDE-002 — broader pi extensions (out of scope)
-- design review 1 (informal Codex) — § Design review 1; design review 2 — RV-006 (Codex, ledgered); DEC-007..010 amended after RV-006
-- design.md sec-1..4; 37 design-target selectors
+- PHASE-01..06 done; release 0.3.0 — commits 9aabdf9..e660bd6 (fork branch `sl-002`, fast-forwarded to main), db1fff6; `just gate` green at e660bd6 (425/0, pack-check 4/4)
+- per-phase deltas and review refinements — § Execution log below
+- minted: RSK-001 — unapproved form link hashed in full before the approval check
+- operator chore, not backlog: rebuild and restart the quotient MCP server so the ISS-001 fix is live
+- `.worktrees/sl-002` fork and branch `sl-002` still present (merged)
 
 ### Learned
-- research via quotient `pi_agent` (profile `research`): cheap (~$0.03/thread), cited, needs ✓ spot-checks; raw = run `transcript.md` copied to `research/raw/`
-- design-review ledgers: severe findings need a `--route` before the lock gate clears; a verified finding must be reopened by the raiser to add one — route at first disposition
+- mem.pattern.quotient.pi-agent-orchestration — 30-request calls, rotating sessions near 120k, commit before the gate, review workers
 
 ### Open
-- DEC-007 — machine/project split; lookup base = governing approval root, else longest roots entry
-- DEC-008 — approval is the selection; no fallback once governed
-- DEC-009 — approvals.json; `allow <path> <cap>=<realpath>@<sha256>`; `revoke <approval-root>`; lock
-- DEC-010 — project form substitutes slot executable; outside-writable rule is a current-policy backstop; host-wide immutability = operator obligation
-- DEC-011 — stay on /2 with explicit compatibility rule
-- RV-006 F-1, F-3 — probe-routed; criteria on the ledger (`doctrine review show RV-006 -f 1,3`); /plan must place them as VT criteria; verified after phases
-- IMP-003 — Nix helper should emit single-file forms (after SL-002)
+- DEC-012 — the approvals store refuses non-canonical paths; reconcile with design sec-2
+- DEC-013 — `allow` refuses when a deeper approval governs; reconcile with design sec-3
+- RSK-001 — deferred robustness gap (a size cap is policy the design doesn't state)
+- RV-006 — still `active` although the design run recorded it as disposed; close or explain at audit
+- IMP-004, IMP-005 — follow-up refactors from the arch pass (unchanged)
 
 ## Design triage (2026-10-24, exploring)
 

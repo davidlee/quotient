@@ -182,6 +182,18 @@ intent = "design-target"
 label = "fulfils"
 target = "ISS-001"
 
+[[relation]]
+label = "related"
+target = "DEC-012"
+
+[[relation]]
+label = "related"
+target = "DEC-013"
+
+[[relation]]
+label = "related"
+target = "RSK-001"
+
 # STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
 # `[relationships]` axis. Slices carry no typed STRUCTURAL
 # relation axes — the `[relationships]` table above holds only the dep/seq payload

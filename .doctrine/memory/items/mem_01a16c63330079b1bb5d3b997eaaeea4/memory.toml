@@ -1,0 +1,42 @@
+memory_uid = "mem_01a16c63330079b1bb5d3b997eaaeea4"
+memory_key = "mem.pattern.quotient.pi-agent-orchestration"
+schema_version = 1
+memory_type = "pattern"
+status = "active"
+title = "Orchestrating slice phases through quotient pi_agent workers"
+summary = "30-request cap per call; rotate sessions near 120k context via a handover block in the phase sheet; workers have no git; pack-check builds committed HEAD"
+created = "2026-10-24"
+updated = "2026-10-24"
+
+[scope]
+paths = []
+globs = []
+commands = []
+tags = ["quotient", "orchestration"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "397330f5427b5e6979e0c41d9ddf2d6cdbcccc06"
+ref_name = "refs/heads/main"
+checkout_state_id = "6cae5b0617419d65602d24b43e8e47c385c3119e54bdcd02e2e131d82e633aac"
+base_commit = "db1fff6b7aef659f5369ccd387e436c7c6843035"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
