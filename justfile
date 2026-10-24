@@ -1,5 +1,10 @@
 gate: test typecheck build hostile-audit pack-check
 
+# Not yet in `gate` (IMP-002): typescript-eslint strict, zero warnings, and shellcheck.
+lint:
+    npx eslint . --max-warnings 0
+    shellcheck scripts/*
+
 typecheck:
     npx tsc --noEmit
 

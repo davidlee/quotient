@@ -3,16 +3,31 @@
   "version": "0.2.0",
   "license": "MIT",
   "type": "module",
-  "bin": { "quotient": "dist/cli.js" },
-  "files": ["dist", "help", "docs", "examples"],
+  "bin": {
+    "quotient": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "help",
+    "docs",
+    "examples"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "tsc -p tsconfig.build.json",
-    "test": "node --test 'src/**/*.test.ts'"
+    "test": "node --test 'src/**/*.test.ts'",
+    "lint": "eslint . --max-warnings 0"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "@types/node": "^22",
-    "typescript": "^5.7"
+    "eslint": "10.13.0",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-unicorn": "78.0.0",
+    "eslint-plugin-unused-imports": "4.4.1",
+    "typescript": "^5.7",
+    "typescript-eslint": "8.71.2"
   }
 }
