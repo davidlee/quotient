@@ -78,3 +78,11 @@ root, so every call must pass `cwd`.
 - Removes doctrine's workaround (empty launch dir, `cwd` on every call).
 - Breaking server behaviour → version bump and migration note.
 - Deferred: IDE-001 (policy `extends`) for per-project policy duplication.
+
+## Re-decision (2026-10-24, SL-002 research)
+
+The one-policy-per-project triage above is superseded by DEC-007 (machine
+policy owns grant and limits; projects supply forms in `<root>/.quotient/`,
+keyed by root) and DEC-008 (project forms run only when operator-approved by
+resolved identity; `.quotient/` is not a protected store). IDE-001 is likely
+obsolete under DEC-007.

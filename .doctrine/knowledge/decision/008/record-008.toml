@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 8
+slug = "project-forms-run-only-when-operator-approved-by-identity"
+title = "Project forms run only when operator-approved by identity"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-007 lets a project supply forms. A form is the confinement; anyone who can write the repo (delegates; the unconfined orchestrator; commits) could otherwise shape the next delegate's jail. nix-direnv rebuilds closures on flake edits without asking."
+choice = "Honour a project's forms only when the operator has approved them. Approval records each form's resolved real path and sha256; it lives under the machine config. Admission resolves the form once; checks it against the approval; and the call runs that exact executable. An unapproved or changed form refuses the call (form-unapproved) naming old and new identity; a review hint; and the approve command. Calls already running are unaffected. .quotient/ is not a protected store."
+alternatives = ["approve the source (.quotient/ declaration) and trust the flake transitively as direnv does", "protect flake.nix/flake.lock/.quotient from delegate writes", "form-side masking of .quotient inside writable roots"]
+rationale = "Gating the built output is exact and backend-agnostic (nix+bwrap; seatbelt; other); quotient needs no Nix knowledge. Source approval would let a delegate edit flake inputs and run in the jail it wrote after the next rebuild. Protecting build inputs is unenumerable and blocks legitimate dependency edits. Matches harness behaviour: a rebuild never alters work in flight."
+consequences = ["re-approval whenever a form's identity changes", "forms should carry a narrow stable toolchain to limit re-approval", "ISS-001 refusal disappears because .quotient is no longer fenced", "new refusal reason form-unapproved", "new operator verb to approve a root's forms", "for non-store paths the hash pins only the executable itself"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-002"

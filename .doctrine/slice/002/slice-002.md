@@ -1,4 +1,4 @@
-# Policy names the profile and help layers
+# Project forms by root, operator-approved
 
 ## Context
 
@@ -13,81 +13,107 @@ protectedStores (childview.ts)     every layer, existing or not, never-writable
 step 8                             write root <launch> contains <launch>/.quotient/* → refused
 ```
 
-The protection is sound (a delegate must not plant a profile for the next
-restart). The defect is that authority (profiles pin model, tools, thinking;
-help is the text agents follow) is looked up in the project tree, which the
-policy itself never is (`src/config.ts` header: "the policy is never looked
-up in the project tree").
+Triage first chose one policy per project via `QUOTIENT_POLICY`. Research
+(`research/research.md` X1–X3) and discussion on 2026-10-24 replaced that with
+two accepted decisions:
 
-Triage (ISS-001, 2026-10-24) settled the direction:
+- **DEC-007** — the policy splits by job. The machine policy
+  (`~/.config/quotient`) holds the grant (`roots`, profile capability pins,
+  `exposure`, `enabled`/`mode`), the limits (`maxima`,
+  `transcript_budget_bytes`) and default forms. Profiles and help are
+  machine-only. A project supplies only forms, in `<root>/.quotient/`, where
+  `<root>` is the `roots` entry containing the call's `cwd` (longest match).
+- **DEC-008** — project forms run only when the operator has approved them by
+  identity (resolved real path + sha256). Admission resolves the form once and
+  the call runs that exact executable; a changed or unapproved form refuses
+  the next call `form-unapproved`. Calls in flight are unaffected.
+  `.quotient/` is not a protected store.
 
-- The policy names the profile and help layers. The launch-dir layer goes.
-- One policy per project, as an **opt-in override** of the global policy. A
-  project needs its own policy only when its profiles, forms, roots or maxima
-  differ. Forms stay keyed by capability (settles IMP-003's selection gap).
+```
+call(cwd) ─▶ machine policy: grant + limits     (~/.config/quotient/policy.json)
+          ─▶ root = longest roots entry ⊇ cwd
+          ─▶ <root>/.quotient/ forms?  ── no ──▶ machine default forms
+                     │ yes
+                     ▼
+             resolve realpath + sha256 ─▶ approved? ── no ──▶ refuse form-unapproved
+                     │ yes
+                     ▼
+             run that executable
+```
 
 ## Scope & Objectives
 
-- Remove the launch-dir `.quotient/{profiles,help}` layers from location
-  resolution and from the protected stores.
-- Let the policy name its profile and help layers (working shape: optional
-  `profile_dirs` / `help_dirs`, absolute paths, highest first; absent → the
-  XDG layer, so the default install is unchanged). Field names, schema
-  version (optional field on `/2` vs `quotient-policy/3`) and whether layers
-  are re-read per call or at startup are design decisions.
-- Keep every named layer a protected store (never-writable), as today.
-- Update contracts, help (`setup`, `profiles`, `clients`), README, examples
-  and the client snippet, whose `cwd` currently means "where `./.quotient`
-  is found".
-- Migration note for operators with a project-local `.quotient/` layer;
-  version bump (breaking server behaviour).
+- Remove the launch-dir `.quotient/{profiles,help}` layers: profiles and help
+  come from the XDG layer only. Fail start-up, with migration guidance, when a
+  launch-dir `.quotient/profiles` or `.quotient/help` exists (research X3).
+- Drop the profile/help-layer entries for the launch dir from the protected
+  stores; `<root>/.quotient/` is not protected. ISS-001's refusal disappears.
+- Resolve per-call forms: the matched root's `.quotient/` forms, else the
+  machine default forms. A project may not name the unconfined form.
+- Approval: a machine-side approval record; admission checks the resolved
+  form identity against it; refusal `form-unapproved` names old and new
+  identity, a review hint and the approve command.
+- An operator verb to approve a root's forms (e.g. `quotient allow <root>`).
+- Contracts: a new policy schema version if the document shape or semantics
+  break (design decides; DEC-004 pattern); a `.quotient/` format contract;
+  result/refusal additions. Help, README, examples, client snippet.
+- Version bump; migration note for satan (move `.quotient/profiles` to XDG).
 
-Expected surface: `src/config.ts`, `src/server/{childview,profiles,server}.ts`,
-`src/help/help.ts`, `src/cli.ts`, policy parsing, their tests and
-`src/server/test-rig.ts`, `docs/contract/`, `docs/design.md`, `help/`,
-`examples/`, `README.md`, `package.json`.
+Expected surface: `src/config.ts`, `src/server/{policy,childview,profiles,server}.ts`,
+new form-resolution/approval module(s) under `src/server/`, `src/cli.ts`,
+`src/help/help.ts`, tests and `src/server/test-rig.ts`, `src/drift.test.ts`,
+`docs/contract/`, `docs/design.md`, `help/`, `examples/`, `README.md`,
+`package.json`, `package-lock.json`.
 
 ## Non-Goals
 
-- Keying forms or profiles by root (one server for many differently-tooled
-  projects). Rejected at triage in favour of one policy per project.
-- Policy inheritance / `extends` — IDE-001.
-- The Nix form builder — IMP-003 (sequenced after this slice).
-- Masking protected paths inside a writable root (ISS-001 option 2).
-- Migrating satan's `.quotient/profiles` — operator task outside this repo;
-  this slice ships the migration note.
+- Policy inheritance / `extends` (IDE-001). Per-project policy files are no
+  longer the model.
+- Building forms. Quotient stays independent of Nix; the Nix form helper is
+  IMP-003.
+- Form-side masking of `.quotient/` inside writable roots (ISS-001 option 2).
+- Project-supplied profiles, help, roots or limits.
+- Protecting `flake.nix`, `flake.lock` or other build inputs (DEC-008).
 
 ## Risks, assumptions, open questions
 
-- **Breaking:** a project-local `.quotient/profiles` silently stops being
-  read. Assumption: only satan uses it (checked `~/dev/*/.quotient`,
-  2026-10-24). Design should decide whether the server warns when it finds an
-  ignored `<launch>/.quotient/` (a hint, not authority).
-- **Policy vs startup lifetime:** the policy is re-read per call; profiles and
-  help are read at startup. A policy-named layer couples the two — design must
-  say which wins when the policy's layers change without a restart.
-- **Protection by path:** a named layer inside an allowed root still fences
-  that root for writes. Design: refuse such a policy (`policy-invalid`) or
-  keep the step-8 refusal and document it.
+- **Breaking:** launch-dir profiles stop being read; mitigated by the start-up
+  failure. Only satan known affected (checked `~/dev/*/.quotient`, 2026-10-24).
+- **Re-approval friction:** every form identity change stops calls until
+  approved. Mitigation is operational (narrow, stable form toolchains).
+- **Approval store:** location, format, and whether it is a protected store
+  (it must be: a delegate must not approve its own form). Design decides.
+- **`.quotient/` format:** how a project names its forms (relative symlinks to
+  a build output, a small JSON naming paths, …). Design decides.
+- **Hash scope:** for non-store paths the sha256 pins only the executable;
+  anything it calls is the operator's responsibility (DEC-008).
+- **Nested roots:** longest-match rule; design confirms behaviour when a call's
+  `cwd` is inside a nested repo without its own `roots` entry.
+- **Agent approval:** the unconfined orchestrator can run the approve verb;
+  quotient cannot prevent it. Document that approving is the operator's act.
 
 ## Verification / closure intent
 
-- A write call rooted at the launch directory is admitted when no named layer
-  lies inside it (test: the ISS-001 scenario, red first).
-- Named layers stay protected: a write root containing one is refused.
-- Absent fields resolve to the XDG layer; behaviour of a default install is
-  unchanged (tests over `resolveLocations` and profile loading).
-- Contracts, help and the client snippet no longer mention a launch-dir layer.
+- The ISS-001 scenario: a write call rooted at the launch directory is
+  admitted (red first).
+- Absent `.quotient/` → machine default forms; behaviour of a default install
+  unchanged apart from removed launch-dir layers.
+- Approved project form runs; a changed form refuses `form-unapproved` with
+  identities; a call in flight is not affected by a later change.
+- A project naming the unconfined form is refused.
+- Launch-dir `.quotient/profiles` present → start-up failure with guidance.
+- Contracts, help and snippets no longer describe a launch-dir layer.
 - `just gate` green; lint zero warnings.
 
 ## Summary
 
-Move profile and help layer lookup out of the project tree and under policy
-authority, so repo-root writes work and per-project configuration means a
-per-project policy.
+Keep grant and limits on the machine; let each project supply its own
+confinement in `<root>/.quotient/`, trusted only once the operator approves
+the exact built forms.
 
 ## Follow-Ups
 
-- IMP-003 — Nix form builder (after this slice).
-- IDE-001 — policy `extends` (deferred).
-- satan: move `.quotient/profiles` to the global layer or a satan policy.
+- IMP-003 — Nix form helper: the customary way a flake produces
+  `.quotient/` forms.
+- satan: move `.quotient/profiles` to the XDG layer.
+- IDE-001 — likely obsolete under DEC-007; re-triage.
