@@ -13,27 +13,36 @@
 // No side effects at import: `src/cli.ts` dispatches here with its own sinks.
 import { normalize, resolve } from 'node:path';
 import { resolveLocations, type Env, type Resolved } from './config.ts';
-import { isDigest, updateApprovals, type Approval } from './server/approvals.ts';
+import { governingApproval, isDigest, readApprovals, updateApprovals, type Approval } from './server/approvals.ts';
 import {
+  chooseForm,
   lookupProjectForm,
   probeProjectForm,
   projectLink,
   type ProjectForm,
   type ProjectFormLookup,
 } from './server/forms.ts';
+import { within } from './server/paths.ts';
 import { readPolicy, selectSlot, writablePaths, type Policy, type SlotSelection } from './server/policy.ts';
 import { isFilesystem, resolveRoot, type Filesystem } from './server/profiles.ts';
 
 /** Where a verb writes: `src/cli.ts` passes its stdout and stderr. */
 export type Write = (text: string) => void;
 
-export const USAGE = `usage: quotient allow [<path>]   report what the project's form links resolve to
+/** Each verb's usage: a malformed `revoke` never reads like a malformed `allow`. */
+const USAGE = {
+  allow: `usage: quotient allow [<path>]   report what the project's form links resolve to
        quotient allow <path> <capability>=<realpath>@<sha256>...   record those identities
-       quotient revoke <approval-root> [<capability>...]   remove recorded approvals
 
 <path> defaults to the current directory and must be inside an allowlisted root.
 <capability> is read or write. Approving is the operator's act: the digest is the
-confirmation, and nothing prompts.`;
+confirmation, and nothing prompts.`,
+  revoke: `usage: quotient revoke <approval-root> [<capability>...]   remove recorded approvals
+
+<approval-root> is a recorded root, made absolute and normalised lexically, never
+resolved. <capability> is read or write; with none named, every capability recorded
+for that root is removed.`,
+};
 
 // ── The report (EX-2), a pure render ──────────────────────────────────────
 
@@ -51,6 +60,10 @@ export type CapabilityView = {
   observed: Observation;
   candidate?: ProjectForm;
 };
+
+/** The report's two fixed facts: the root the operator asked about (admission
+ *  decides for calls there) and the roots entry a record would key. */
+export type ReportTarget = { root: string; rootsEntry: string };
 
 const COLUMN = 10;
 
@@ -113,6 +126,38 @@ function governingLines(view: CapabilityView): string[] {
   return [head, note(mismatch), cont('advice', `quotient revoke ${governing.root} returns these calls to the machine form`)];
 }
 
+/**
+ * The approval that would keep governing after a record at ROOTSENTRY: admission
+ * takes the deepest approval root (sec-2), so one recorded above a deeper
+ * approval changes nothing and the report must not suggest it.
+ */
+function deeperApproval(rootsEntry: string, governing: Approval | undefined): Approval | undefined {
+  if (governing === undefined || governing.root === rootsEntry) {return undefined;}
+  return within(rootsEntry, governing.root) ? governing : undefined;
+}
+
+/** What to do about a deeper approval: revoke it, then record at the roots entry. */
+function deeperAdvice(target: ReportTarget, view: CapabilityView): string[] {
+  const deeper = deeperApproval(target.rootsEntry, view.observed.governing);
+  if (deeper === undefined) {return [];}
+  return [
+    cont(
+      'advice',
+      `the approval for ${deeper.root} governs calls at ${target.root}; recording at ${target.rootsEntry} would not change them — run "quotient revoke ${deeper.root}" first`,
+    ),
+  ];
+}
+
+/**
+ * What admission would do with this capability, through the same decision
+ * (`chooseForm`), shown only when it refuses: the report must not look settled
+ * while calls at ROOT are refused (EX-2).
+ */
+function admissionLine(target: ReportTarget, view: CapabilityView): string[] {
+  const verdict = chooseForm(view.slot, view.observed.governing, view.observed.base, view.observed.probe);
+  return verdict.ok ? [] : [cont('admission', `calls at ${target.root} are refused: ${verdict.reason}`)];
+}
+
 /** The machine slot as the report shows it: what a project form may replace. */
 function slotLine(slot: SlotSelection): string {
   if (!slot.ok) {return cont('slot', `none (${slot.detail})`);}
@@ -122,37 +167,58 @@ function slotLine(slot: SlotSelection): string {
 }
 
 /** One capability's block: its link, identity, approval state and slot. */
-function block(view: CapabilityView): string[] {
+function block(target: ReportTarget, view: CapabilityView): string[] {
   const candidate = view.candidate ?? view.observed.probe;
   return [
     row(view.capability, linkLine(candidate, view.slot)),
     ...identityLines(candidate),
     ...governingLines(view),
+    ...deeperAdvice(target, view),
     slotLine(view.slot),
+    ...admissionLine(target, view),
   ];
 }
 
 /** The report's tail: the exact commands that would record what is shown. An
- *  unusable link — or a slot with no executable to replace — contributes nothing. */
-function commandLines(rootsEntry: string, views: readonly CapabilityView[]): string {
+ *  unusable link, a slot with no executable to replace, or a deeper approval that
+ *  would keep governing contributes nothing. */
+function commandLines(target: ReportTarget, views: readonly CapabilityView[]): string {
   const commands = views.flatMap((view) => {
     const candidate = view.candidate ?? view.observed.probe;
     if (candidate.kind !== 'usable') {return [];}
     if (!view.slot.ok || view.slot.form.kind !== 'confined') {return [];}
-    return [`  quotient allow ${rootsEntry} ${view.capability}=${asArg(candidate.path, candidate.sha256)}`];
+    if (deeperApproval(target.rootsEntry, view.observed.governing) !== undefined) {return [];}
+    return [`  quotient allow ${target.rootsEntry} ${view.capability}=${asArg(candidate.path, candidate.sha256)}`];
   });
-  if (commands.length === 0) {return `nothing to approve: no capability has a usable form at ${rootsEntry}\n`;}
-  return `to approve what is shown:\n${commands.join('\n')}\n`;
+  if (commands.length > 0) {return `to approve what is shown:\n${commands.join('\n')}\n`;}
+  return `nothing to approve: ${nothingToApprove(target, views)}\n`;
+}
+
+/** Why no command is printed, in the operator's next-command terms. */
+function nothingToApprove(target: ReportTarget, views: readonly CapabilityView[]): string {
+  const deeper = views.flatMap((view) => {
+    const approval = deeperApproval(target.rootsEntry, view.observed.governing);
+    return approval === undefined ? [] : [approval];
+  });
+  if (deeper.length > 0) {
+    return `the approval for ${deeper[0].root} governs calls at ${target.root}; run "quotient revoke ${deeper[0].root}" to record at ${target.rootsEntry}`;
+  }
+  const refused = views.flatMap((view) => {
+    const verdict = chooseForm(view.slot, view.observed.governing, view.observed.base, view.observed.probe);
+    return verdict.ok ? [] : [verdict.reason];
+  });
+  if (refused.length > 0) {return `admission refuses these calls (${[...new Set(refused)].join(', ')})`;}
+  return `no capability has a usable form at ${target.rootsEntry}`;
 }
 
 /**
  * The report, rendered from observations alone (EX-2): no filesystem, no argv.
  * One block per capability, then the commands that would record them.
  */
-export function renderReport(rootsEntry: string, views: readonly CapabilityView[]): string {
-  const blocks = views.map((view) => block(view).join('\n'));
-  const head = row('root', `${rootsEntry}   (roots entry)`);
-  return `${[head, ...blocks].join('\n\n')}\n\n${commandLines(rootsEntry, views)}`;
+export function renderReport(target: ReportTarget, views: readonly CapabilityView[]): string {
+  const blocks = views.map((view) => block(target, view).join('\n'));
+  const head = row('root', `${target.rootsEntry}   (roots entry)`);
+  return `${[head, ...blocks].join('\n\n')}\n\n${commandLines(target, views)}`;
 }
 
 // ── What both verbs resolve ────────────────────────────────────────────────
@@ -250,6 +316,7 @@ function views(context: Context): Views {
 /** The argv of `allow`: the path it applies to, and the identities to record. */
 function ask(argv: string[], cwd: string): { ok: true; path: string; pairs: string[] } | { ok: false; detail: string } {
   const [first = '.', ...pairs] = argv;
+  if (first.trim() === '') {return { ok: false, detail: '<path> must not be empty' };}
   if (pairs.length === 0 && first.includes('=')) {
     return { ok: false, detail: 'the record form also needs the path it applies to: quotient allow <path> <capability>=<realpath>@<sha256>' };
   }
@@ -269,7 +336,7 @@ export function allow(argv: string[], env: Env, cwd: string, out: Write, err: Wr
 function report(context: Context, out: Write, err: Write): number {
   const seen = views(context);
   if (!seen.ok) {return failure('allow', err, seen.detail);}
-  out(renderReport(context.rootsEntry, seen.views));
+  out(renderReport({ root: context.root, rootsEntry: context.rootsEntry }, seen.views));
   return 0;
 }
 
@@ -295,6 +362,9 @@ function identities(argv: string[]): { ok: true; identities: Identity[] } | { ok
   for (const text of argv) {
     const one = identity(text);
     if (typeof one === 'string') {return { ok: false, detail: one };}
+    if (parsed.some((mine) => mine.capability === one.capability)) {
+      return { ok: false, detail: `${one.capability} is given twice: one identity per capability` };
+    }
     parsed.push(one);
   }
   return { ok: true, identities: parsed };
@@ -335,6 +405,10 @@ function recording(context: Context, identities: readonly Identity[]): (current:
   return (current) => {
     const recordable: Approval[] = [];
     for (const identity of identities) {
+      const deeper = deeperApproval(context.rootsEntry, governingApproval(current, context.root, identity.capability));
+      if (deeper !== undefined) {
+        return `${identity.capability}: the approval for ${deeper.root} governs calls at ${context.root}, so recording at ${context.rootsEntry} would change nothing; run "quotient revoke ${deeper.root}" first`;
+      }
       const checked = verify(context, identity);
       if (typeof checked === 'string') {return checked;}
       recordable.push(checked);
@@ -372,6 +446,9 @@ function askRevocation(argv: string[], cwd: string): { ok: true; revocation: Rev
   const capabilities: Filesystem[] = [];
   for (const capability of rest) {
     if (!isFilesystem(capability)) {return { ok: false, detail: `${capability} is not a capability this build serves: read or write` };}
+    if (capabilities.includes(capability)) {
+      return { ok: false, detail: `${capability} is given twice: one capability per argument` };
+    }
     capabilities.push(capability);
   }
   return { ok: true, revocation: { root: normalize(resolve(cwd, root)), capabilities } };
@@ -390,7 +467,7 @@ function revokeFrom(
   if (stored.length === 0) {return `no approval is recorded for ${asked.root}; stored roots: ${storedRoots(current)}`;}
   const unknown = asked.capabilities.find((capability) => !stored.some((entry) => entry.capability === capability));
   if (unknown !== undefined) {
-    return `no approval is recorded for ${unknown} at ${asked.root}; stored there: ${stored.map((entry) => entry.capability).join(', ')}`;
+    return `no approval is recorded for ${unknown} at ${asked.root}; stored roots: ${storedRoots(current)}`;
   }
   const revoked = asked.capabilities.length === 0 ? stored.map((entry) => entry.capability) : [...asked.capabilities];
   return {
@@ -405,9 +482,15 @@ export function revoke(argv: string[], env: Env, cwd: string, out: Write, err: W
   if (!asked.ok) {return usage('revoke', err, asked.detail);}
   const store = resolveLocations(env).approvalsPath;
   if (!store.ok) {return failure('revoke', err, `the approvals store location is unusable (${store.detail})`);}
+  // Refuse before the lock: a root with nothing recorded is not a reason to
+  // create a store, so a mistyped root never leaves an empty approvals.json.
+  const current = readApprovals(store.path);
+  if (!current.ok) {return failure('revoke', err, current.detail);}
+  const refusal = revokeFrom(current.approvals, asked.revocation);
+  if (typeof refusal === 'string') {return failure('revoke', err, refusal);}
   const revoked: Filesystem[] = [];
-  const update = updateApprovals(store.path, (current) => {
-    const outcome = revokeFrom(current, asked.revocation);
+  const update = updateApprovals(store.path, (now) => {
+    const outcome = revokeFrom(now, asked.revocation);
     if (typeof outcome === 'string') {return outcome;}
     revoked.push(...outcome.revoked);
     return outcome.approvals;
@@ -426,7 +509,7 @@ function failure(verb: string, err: Write, detail: string): number {
 }
 
 /** The invocation was malformed: the message and the usage (exit 2). */
-function usage(verb: string, err: Write, detail: string): number {
-  err(`quotient ${verb}: ${detail}\n${USAGE}\n`);
+function usage(verb: 'allow' | 'revoke', err: Write, detail: string): number {
+  err(`quotient ${verb}: ${detail}\n${USAGE[verb]}\n`);
   return 2;
 }

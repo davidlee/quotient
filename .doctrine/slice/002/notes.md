@@ -179,3 +179,19 @@ runs from this checkout. Workers have no git; the orchestrator commits and runs
 - The unusable-`approvalsPath` branch is defensive only: XDG-only profiles
   refuse at step 3 first.
 - Deferred: RSK-001 (full synchronous hash of an unapproved link target).
+
+### PHASE-05 — done
+
+- `src/approve.ts`: `quotient allow [<path>]` report (pure render; per
+  capability it shows the verdict admission would reach, via the same
+  `chooseForm`), `allow <path> <cap>=<realpath>@<sha256>…` (re-probes under the
+  lock, all-or-nothing, keyed by roots entry), `quotient revoke`.
+- Review refinements beyond the design's letter — PHASE-06 must document them:
+  - a governing approval deeper than the roots entry shadows any roots-entry
+    approval; the report says so and prints the `quotient revoke <deeper root>`
+    instead of an inert `allow`, and recording is refused (checked under the
+    lock);
+  - usage errors (exit 2): empty `<path>`, duplicate capability in `allow` or
+    `revoke`; `revoke` has its own usage line;
+  - `revoke` with no store fails (exit 1) without creating the config dir or a
+    lock.

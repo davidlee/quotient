@@ -84,11 +84,15 @@ function verb(kind: 'allow' | 'revoke', argv: string[], rig: Rig, cwd = rig.root
   return sink.run(status);
 }
 
+/** The report the CLI would print for hand-built views, keyed at ROOT's roots entry. */
+const rendered = (views: CapabilityView[], root = '/work/satan', rootsEntry = root): string =>
+  renderReport({ root, rootsEntry }, views);
+
 // ── T1: the report is a pure render (EX-2, VT-3) ───────────────────────────
 
 test('the report shows a capability identity, its approval state and the exact record command', () => {
   const form = usable('/nix/store/abc-quotient-write', '9f2c'.padEnd(64, '0'));
-  const report = renderReport('/work/satan', [view({ observed: observed({ base: '/work/satan', probe: form }) })]);
+  const report = rendered([view({ observed: observed({ base: '/work/satan', probe: form }) })]);
 
   assert.ok(report.includes('root      /work/satan   (roots entry)'), report);
   assert.ok(report.includes('write     link      /work/satan/.quotient/forms/write'), report);
@@ -103,7 +107,7 @@ test('the report shows a capability identity, its approval state and the exact r
 });
 
 test('the report names the machine form where a capability has no link, and its extensions where it has one', () => {
-  const report = renderReport('/work/satan', [
+  const report = rendered([
     view({ capability: 'read', slot: confined('/nix/store/machine/bin/quotient-read', ['builtin:mcp']), observed: observed({ base: '/work/satan', probe: { kind: 'absent' } }) }),
   ]);
 
@@ -115,12 +119,21 @@ test('the report names the machine form where a capability has no link, and its 
 });
 
 test('the report shows an unusable link by its detail and leaves it out of the command', () => {
-  const report = renderReport('/work/satan', [
+  const report = rendered([
     view({ observed: observed({ base: '/work/satan', probe: { kind: 'invalid', link: '/work/satan/.quotient/forms/write', detail: 'it is not executable' } }) }),
   ]);
 
   assert.ok(report.includes('write     link      unusable: it is not executable'), report);
   assert.ok(report.includes('nothing to approve'), report);
+});
+
+test('the report names the refusal admission would reach, from the same decision', () => {
+  const unconfined: SlotSelection = { ok: true, form: { kind: 'unconfined', pi: '/nix/store/pi/bin/pi' } };
+  const report = rendered([view({ slot: unconfined, observed: observed({ base: '/work/satan' }) })]);
+
+  assert.ok(report.includes('admission calls at /work/satan are refused: form-invalid'), report);
+  assert.ok(report.includes('nothing to approve: admission refuses these calls (form-invalid)'), report);
+  assert.ok(!report.includes('quotient allow /work/satan write='), 'a refused capability is never suggested');
 });
 
 // ── T2: the report's two halves apart (RV-008 F-1, VT-3) ───────────────────
@@ -132,9 +145,9 @@ test('a shallower approval governs the report; its own link and the candidate va
   const view2 = (governingProbe: ProjectForm, candidateProbe: ProjectForm): CapabilityView =>
     view({ observed: observed({ governing: shallower, base: '/work', probe: governingProbe }), candidate: candidateProbe });
 
-  const governed = renderReport('/work/satan', [view2(matching, candidate)]);
-  const missing = renderReport('/work/satan', [view2({ kind: 'absent' }, candidate)]);
-  const repointed = renderReport('/work/satan', [view2(matching, usable('/nix/store/other/bin/quotient-write', 'd'.repeat(64), candidate.link))]);
+  const governed = rendered([view2(matching, candidate)]);
+  const missing = rendered([view2({ kind: 'absent' }, candidate)]);
+  const repointed = rendered([view2(matching, usable('/nix/store/other/bin/quotient-write', 'd'.repeat(64), candidate.link))]);
 
   // The governing half: a matching approval says nothing more; a missing link
   // says so and advises revoke, with the candidate's lines unchanged.
@@ -229,6 +242,15 @@ test('allow reports what governs a root from a shallower approval, but records a
   assert.ok(!run.out.includes('advice'), 'the governing link still matches its approval');
   assert.ok(run.out.includes(`          resolves  ${mine.path}`), run.out);
   assert.ok(run.out.includes(`  quotient allow ${deeper} write=${mine.path}@${mine.sha256}`), run.out);
+
+  // The report told the operator to record at the roots entry, so it must work
+  // and store the approval under DEEPER, beside the parent's (which stays).
+  const record = verb('allow', [deeper, `write=${mine.path}@${mine.sha256}`], rig);
+  assert.equal(record.status, 0, record.err);
+  assert.deepEqual(
+    stored(rig).map((entry) => [entry.root, entry.path]),
+    [[rig.root, parent.path], [deeper, mine.path]],
+  );
 });
 
 test('allow reports a governing approval whose own link has gone, and advises revoke', (t) => {
@@ -260,6 +282,46 @@ test('allow refuses a store it cannot read, naming it (A4)', (t) => {
   assert.equal(run.status, 1);
   assert.ok(run.err.includes(store), run.err);
   assert.ok(run.err.includes('not valid JSON'), run.err);
+});
+
+test('the report says admission refuses these calls, instead of implying they are fine', (t) => {
+  const rig = newRig(t);
+  const form = rigForm(rig, 'approved');
+  plantProjectForm(rig, form);
+  patchPolicy(rig, 'forms', { read: rig.readLauncher, write: { unconfined: '/nix/store/pi/bin/pi' } });
+
+  const run = verb('allow', [], rig);
+
+  assert.equal(run.status, 0, run.err);
+  assert.ok(run.out.includes(`admission calls at ${rig.root} are refused: form-invalid`), run.out);
+  assert.ok(run.out.includes('nothing to approve: admission refuses these calls (form-invalid)'), run.out);
+  assert.ok(!run.out.includes('quotient allow'), 'a refused capability contributes no command');
+});
+
+test('a deeper approval keeps governing: the report advises revoke and never prints an inert command', (t) => {
+  const rig = newRig(t);
+  const deeper = join(rig.root, 'deeper');
+  mkdirSync(deeper);
+  const form = rigForm(rig, 'approved');
+  writeApprovals(rig, [{ root: deeper, form }]);
+  plantProjectForm(rig, form, { base: deeper });
+  const before = readFileSync(rigApprovalsPath(rig), 'utf8');
+
+  const report = verb('allow', [deeper], rig);
+  assert.equal(report.status, 0, report.err);
+  assert.ok(report.out.includes(`root      ${rig.root}   (roots entry)`), report.out);
+  assert.ok(report.out.includes(`the approval for ${deeper} governs calls at ${deeper}`), report.out);
+  assert.ok(report.out.includes(`quotient revoke ${deeper}`), report.out);
+  assert.ok(!report.out.includes(`quotient allow ${rig.root} write=`), 'the inert command is not printed');
+  assert.ok(!report.out.includes('admission calls at'), 'the deeper approval still admits these calls');
+
+  // Recording at the roots entry would change nothing while the deeper approval
+  // governs, so it is refused rather than reported as a silent success.
+  const record = verb('allow', [deeper, `write=${form.path}@${form.sha256}`], rig);
+  assert.equal(record.status, 1, record.err);
+  assert.ok(record.err.includes(`the approval for ${deeper} governs calls at ${deeper}`), record.err);
+  assert.ok(record.err.includes(`quotient revoke ${deeper}`), record.err);
+  assert.equal(readFileSync(rigApprovalsPath(rig), 'utf8'), before, 'nothing is written');
 });
 
 // ── T4: `allow` records only what was reviewed (EX-3, EX-4, VT-1, VT-2) ─────
@@ -359,6 +421,8 @@ test('a malformed identity argument exits 2', (t) => {
   const rig = newRig(t);
   const digest = 'a'.repeat(64);
   for (const argv of [
+    [''],
+    ['', `write=/nix/store/x@${digest}`],
     [`write=/nix/store/x@${digest}`],
     [rig.root, 'write'],
     [rig.root, `middle=/nix/store/x@${digest}`],
@@ -369,6 +433,20 @@ test('a malformed identity argument exits 2', (t) => {
     assert.match(run.err, /^usage: quotient allow/m, run.err);
     assert.equal(run.out, '');
   }
+});
+
+test('a capability given twice in one record is a usage error naming it', (t) => {
+  const rig = newRig(t);
+  const form = rigForm(rig, 'approved');
+  plantProjectForm(rig, form);
+  const pair = `write=${form.path}@${form.sha256}`;
+
+  const run = verb('allow', [rig.root, pair, pair], rig);
+
+  assert.equal(run.status, 2, run.err);
+  assert.ok(run.err.includes('write is given twice'), run.err);
+  assert.match(run.err, /^usage: quotient allow/m);
+  assert.equal(existsSync(rigApprovalsPath(rig)), false);
 });
 
 // ── T5: `quotient revoke` (EX-5, VT-4) ─────────────────────────────────────
@@ -432,12 +510,25 @@ test('revoke addresses the stored root: relative arguments work, and a deleted r
   assert.deepEqual(stored(rig), []);
 });
 
+test('revoke with no store refuses without creating one', (t) => {
+  const rig = newRig(t);
+
+  const run = verb('revoke', [rig.root], rig);
+
+  assert.equal(run.status, 1, run.err);
+  assert.ok(run.err.includes(`no approval is recorded for ${rig.root}`), run.err);
+  assert.ok(run.err.includes('stored roots: none'), run.err);
+  assert.equal(existsSync(rigApprovalsPath(rig)), false, 'no store is created');
+  assert.equal(existsSync(`${rigApprovalsPath(rig)}.lock`), false, 'no lock is taken');
+});
+
 test('revoke refuses a malformed invocation and a store it cannot read', (t) => {
   const rig = newRig(t);
-  for (const argv of [[], [rig.root, 'middle']]) {
+  for (const argv of [[], [rig.root, 'middle'], [rig.root, 'write', 'write']]) {
     const run = verb('revoke', argv, rig);
     assert.equal(run.status, 2, `${argv.join(' ')}: ${run.err}`);
-    assert.match(run.err, /^usage: quotient allow/m);
+    assert.match(run.err, /^usage: quotient revoke/m);
+    if (argv.length === 3) {assert.ok(run.err.includes('write is given twice'), run.err);}
   }
 
   mkdirSync(join(rig.dir, 'config', 'quotient'), { recursive: true });

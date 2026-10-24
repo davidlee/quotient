@@ -188,6 +188,6 @@ test('allow and revoke pass their usage errors through as exit 2', () => {
     const { status, stdout, stderr } = quotient(argv, '', { env, cwd });
     assert.equal(status, 2, `${argv.join(' ')}: ${stderr}`);
     assert.equal(stdout, '');
-    assert.match(stderr, /^usage: quotient allow/m);
+    assert.match(stderr, new RegExp(`^usage: quotient ${argv[0]}`, 'm'));
   }
 });
