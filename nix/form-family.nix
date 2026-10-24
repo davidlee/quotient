@@ -74,20 +74,38 @@ let
   # from its environment. In a Nix string `\$` before `{` is a literal `${`.
   stateDir = "\"\${XDG_STATE_HOME:-$HOME/.local/state}/quotient\"";
 
+  # The mask line's two shapes share their existence test and their append, so
+  # the path and its mount are written once. The argument is already a shell
+  # word — `stateDir` is a double-quoted expression, a `protect` path is host
+  # text and is escaped here — so caller text never reaches the launcher
+  # unquoted.
+  maskTest = quoted: "[ -e ${quoted} ]";
+  maskAppend = quoted: "quotient_mask+=(--tmpfs ${quoted})";
+
+  # The state directory's line is plain: it is the builder's own default, not a
+  # caller's path. A protect path's line also tests that an existing path is a
+  # directory, so a file there fails the launch, naming the path, rather than
+  # becoming a mount.
+  stateMaskLine = "${maskTest stateDir} && ${maskAppend stateDir}";
+  protectMaskLine =
+    quoted:
+    "${maskTest quoted} && { [ -d ${quoted} ] || { printf 'quotient: protect path %s is not a directory\\n' ${quoted} >&2; exit 1; }; ${maskAppend quoted}; }";
+
   # One line per masked path, no loop: bwrap cannot create a mount point inside
   # the read-only root bind that follows, and a path missing on the host has
-  # nothing to reveal. The argument is already a shell word — `stateDir` is a
-  # double-quoted expression, a `protect` path is host text and is escaped by
-  # the caller — so caller text never reaches the launcher unquoted.
-  maskLine = quoted: ''[ -e ${quoted} ] && quotient_mask+=(--tmpfs ${quoted})'';
-  maskLines = paths: lib.concatMapStrings (path: maskLine path + "\n") paths;
-  maskPaths = [ stateDir ] ++ map lib.escapeShellArg protect;
+  # nothing to reveal.
+  maskLines = lib.concatMapStrings (line: line + "\n") (
+    [ stateMaskLine ] ++ map protectMaskLine (map lib.escapeShellArg protect)
+  );
 
   # A secret is the caller's shell expression, evaluated in the deferred tail:
   # it is assigned to a private variable, refused if empty, and delivered as
   # NUL-separated `--setenv` pairs on a bash-allocated descriptor, so no value
   # ever reaches bwrap's argv. Nothing is emitted for an empty secretEnv.
   secretNames = lib.attrNames secretEnv;
+  # A value that does not expand is a literal handed over as its own text, which
+  # is never what a caller means, so it is refused at the call.
+  literalSecrets = lib.filter (name: !(lib.hasInfix "$" secretEnv.${name})) secretNames;
   secretRuntime =
     lib.concatMapStrings
       (
@@ -124,7 +142,7 @@ let
         ++ [
           (c.add-runtime ''
             quotient_mask=()
-            ${maskLines maskPaths}
+            ${maskLines}
           '')
           (c.unsafe-add-raw-args "\"\${quotient_mask[@]}\"")
         ]
@@ -212,6 +230,8 @@ assert lib.assertMsg prefixOk
 # can be quoted away: reject a name that is not a POSIX identifier.
 assert lib.assertMsg (lib.all lib.isValidPosixName secretNames)
   "mkFormFamily: secretEnv names must be valid POSIX names, got ${lib.concatStringsSep ", " (lib.filter (name: !(lib.isValidPosixName name)) secretNames)}";
+assert lib.assertMsg (literalSecrets == [ ])
+  "mkFormFamily: secretEnv ${lib.concatStringsSep ", " literalSecrets} must be a shell expression containing $, not a literal";
 assert lib.assertMsg (badPiFiles == [ ])
   "mkFormFamily: piFiles keys must be non-empty relative paths without a \"..\" segment: ${lib.concatStringsSep ", " badPiFiles}";
 assert lib.assertMsg (badHostPaths == [ ])
@@ -231,6 +251,8 @@ assert lib.assertMsg (badHostPaths == [ ])
   # What the operator's policy must list as exposed: every rw bind source the
   # builder adds beyond the root and the session directory.
   exposure = exposure ++ lib.optional (persistHome != null) persistHome;
+  # The policy's protect paths: the check asserts each is masked.
+  inherit protect;
   secretEnvNames = secretNames;
   inherit network;
 }

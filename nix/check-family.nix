@@ -30,6 +30,7 @@ pkgs.runCommand name {
   PREFIX = prefix;
   EXPOSURE = lib.concatStringsSep "\n" family.exposure;
   SECRET_ENV_NAMES = lib.concatStringsSep "\n" family.secretEnvNames;
+  PROTECT = lib.concatStringsSep "\n" family.protect;
   NETWORK = if family.network then "1" else "0";
   EXPECT_REFUSAL = expectRefusal;
 } ''

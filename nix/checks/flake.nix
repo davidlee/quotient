@@ -271,12 +271,20 @@
               };
             }
           );
+          # A protect path the probe creates as a file: the launch must refuse it
+          # before the probe pi runs, naming the path.
+          protectFile = quotient.lib.mkFormFamily (
+            (probeArgs pkgs "write") // {
+              protect = (probeArgs pkgs "write").protect ++ [ "${probeRoot}/world/protect-file" ];
+            }
+          );
           sample = sampleFamilies pkgs;
         in
         {
           probe-read = (probeFamily "read").read;
           probe-write = (probeFamily "write").write;
           probe-secret-empty = emptySecret.write;
+          probe-protect-file = protectFile.write;
           # The samples' forms, so the launcher text the check reads can be
           # rendered: the default family has no secret fd, the full family has
           # every caller argument.
@@ -287,10 +295,32 @@
         }
       );
 
+      # The families the builder must refuse to evaluate. They are not packages:
+      # `nix flake check` evaluates every package and would meet the refusal
+      # first, and `legacyPackages` is the one output it does not read. Only
+      # forcing the attribute, as scripts/form-probe does, reaches the refusal.
+      legacyPackages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          # A literal secretEnv value: a configuration mistake the builder
+          # refuses at evaluation, naming the variable.
+          literal-secret = (quotient.lib.mkFormFamily (
+            (probeArgs pkgs "write") // {
+              secretEnv = { FORM_PROBE_SECRET = "probe-secret"; };
+            }
+          )).write;
+        }
+      );
+
       # The text check over both samples, plus one control per refusal: a check
       # derivation succeeds only if it refuses its doctored family by that
       # family's rule label, so a check that stops catching a fault turns the
-      # gate red here rather than silently passing.
+      # gate red here rather than silently passing. `check-fixtures` is the
+      # corpus behind those controls: every case's verdict, over a family the
+      # builder emitted.
       checks = forAllSystems (
         system:
         let
@@ -346,16 +376,9 @@
               fi
               install -m 755 "$source/bin/${launcherName}" "$launcher"
 
-              # Every occurrence of $2 in the file $1 becomes $3, literally. An
+              # The literal-substitution helper the fixture corpus shares: an
               # edit whose text is absent fails the build instead of passing.
-              replace() {
-                local file=$1 from=$2 to=$3 text
-                text=$(cat "$file")
-                case $text in
-                  *"$from"*) printf '%s\n' "''${text//"$from"/$to}" > "$file" ;;
-                  *) echo "the doctored text \"$from\" is not in $file" >&2; exit 1 ;;
-                esac
-              }
+              source ${./replace.sh}
 
               ${form "$form"}
               ${launcher "$launcher"}
@@ -479,11 +502,13 @@
             doctor {
               family = families.full;
               launcher = f: ''
-                replace "${f}" '[ -e ${samplePaths.protect} ] && quotient_mask+=(--tmpfs ${samplePaths.protect})' \
-                  'quotient_mask+=(--tmpfs ${samplePaths.protect})'
+                replace "${f}" '[ -e "''${XDG_STATE_HOME:-$HOME/.local/state}/quotient" ] && quotient_mask+=' \
+                  'quotient_mask+='
               '';
             }
           );
+
+          check-fixtures = import ./fixtures.nix { inherit pkgs families; };
         }
       );
     };

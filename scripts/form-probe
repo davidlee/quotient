@@ -63,6 +63,7 @@ world=$P/world
 state=$world/state/quotient
 session=$state/sessions/this
 protect_space="$world/protect dir"
+protect_file=$world/protect-file
 marker=/tmp/quotient-form-probe-marker
 canary=quotient-form-probe-canary
 prefix=quotient # the probe family takes mkFormFamily's default prefix
@@ -78,7 +79,7 @@ pi_rows=(
   G6-sessions-other G6-runs G6-protect G6-protect-space
   secret-env secret-cmdline canary-proc1 canary-pi
 )
-host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 persistHome G9 G7)
+host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 persistHome G9 protect-file secret-literal G7)
 
 failed=0
 reported=()
@@ -99,6 +100,7 @@ layout() {
   mkdir -p "$root/out" "$exposure" "$state/sessions/this" "$state/sessions/other" \
     "$state/runs/r" "$world/protect" "$world/ro" "$protect_space"
   printf 'quotient-form-probe\n' >"$root/hello.txt"
+  printf 'a file where a protected directory was meant\n' >"$protect_file"
   printf 'another session\n' >"$state/sessions/other/marker"
   printf 'another run\n' >"$state/runs/r/marker"
   printf 'protected\n' >"$world/protect/marker"
@@ -269,41 +271,56 @@ setenv_once() { # <name> <launcher>
   fi
 }
 
-# HOME is forwarded and is a precondition. Without it the launcher exits
-# non-zero under `set -u` before bwrap, so the probe pi never runs (G9).
-without_home() {
-  local status=0
-  rm -f -- "$root/probe-marker" "$session/probe-marker"
-  ( cd "$root" && env -u HOME -u LANG -u TERM XDG_STATE_HOME="$world/state" \
-    "$form_write" "$session" assert </dev/null >/dev/null 2>&1 ) || status=$?
-  if [ "$status" -ne 0 ] && [ ! -e "$root/probe-marker" ] && [ ! -e "$session/probe-marker" ]; then
-    pass F5-home "without HOME the form exits non-zero and the probe pi never runs"
+# A launch the builder must refuse before the probe pi runs: non-zero exit, no
+# marker in the root or the session directory, and — when a message is named —
+# that message in stderr, so the refusal is the guard's and not a later
+# failure's. Three subjects: a forwarded name that is missing, an empty secret,
+# and a protect path that is a file.
+refuses_launch() { # row description expected-message command...
+  local row=$1 desc=$2 want=$3 status=0 err=$P/refuse-stderr
+  shift 3
+  rm -f -- "$root/probe-marker" "$session/probe-marker" "$err"
+  ( cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$world/state" \
+    "$@" </dev/null >/dev/null 2>"$err" ) || status=$?
+  if [ "$status" -eq 0 ] || [ -e "$root/probe-marker" ] || [ -e "$session/probe-marker" ]; then
+    fail "$row" "$desc — exit $status"
+  elif [ -n "$want" ] && ! grep -qF -- "$want" "$err"; then
+    fail "$row" "$desc — exit $status, stderr: $(tr '\n' ' ' <"$err")"
   else
-    fail F5-home "without HOME — exit $status"
+    pass "$row" "$desc"
   fi
 }
 
-# G9: an empty secretEnv value fails closed, before the launcher reaches bwrap,
-# so the probe pi never writes its markers.
-empty_secret() {
-  local status=0
-  rm -f -- "$root/probe-marker" "$session/probe-marker"
-  ( cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$world/state" \
-    "$form_secret_empty" "$session" assert </dev/null >/dev/null 2>&1 ) || status=$?
-  if [ "$status" -ne 0 ] && [ ! -e "$root/probe-marker" ] && [ ! -e "$session/probe-marker" ]; then
-    pass G9 "an empty secretEnv value exits non-zero and the probe pi never runs"
+# A literal secretEnv value must fail at evaluation, naming the variable: only a
+# shell expression that expands reaches bwrap's environment. The family lives
+# outside the flake's packages so `nix flake check` never meets the refusal, and
+# only an eval forces it.
+literal_secret() {
+  local status=0 out
+  out=$(cd "$repo" && nix eval "./nix/checks#legacyPackages.$system.literal-secret" \
+    --override-input quotient "path:$repo" 2>&1) || status=$?
+  if [ "$status" -ne 0 ] &&
+    grep -qF -- "mkFormFamily: secretEnv FORM_PROBE_SECRET must be" <<<"$out"; then
+    pass secret-literal "a literal secretEnv value fails evaluation naming the variable"
   else
-    fail G9 "an empty secretEnv value — exit $status"
+    fail secret-literal "a literal secretEnv value — exit $status, output: $(tr '\n' ' ' <<<"$out")"
   fi
 }
 
 # ── The probe ──────────────────────────────────────────────────────────────
+# The system the test flake keys its outputs by, for the one row that forces an
+# evaluation instead of launching a form.
+system=$(nix eval --impure --raw --expr builtins.currentSystem) ||
+  fatal "nix eval of builtins.currentSystem failed"
+
 form_read=$(form_of probe-read read)
 form_write=$(form_of probe-write write)
 form_secret_empty=$(form_of probe-secret-empty write)
+form_protect_file=$(form_of probe-protect-file write)
 [ -x "$form_read" ] || fatal "the probe family built no read form at $form_read"
 [ -x "$form_write" ] || fatal "the probe family built no write form at $form_write"
 [ -x "$form_secret_empty" ] || fatal "no empty-secret form at $form_secret_empty"
+[ -x "$form_protect_file" ] || fatal "no protect-file form at $form_protect_file"
 
 # 77, not 1: a host that denies unprivileged user namespaces cannot probe, and
 # the jail's own bwrap is the thing to ask. /bin/sh is bound from the host root
@@ -329,8 +346,17 @@ if form_write_launcher=$(launcher_of "$form_write"); then
 else
   fail F5-setenv "the write form does not exec its launcher"
 fi
-without_home
-empty_secret
+refuses_launch F5-home "without HOME the form exits non-zero and the probe pi never runs" "" \
+  env -u HOME "$form_write" "$session" assert
+# An empty secretEnv value fails closed, before the launcher reaches bwrap.
+refuses_launch G9 "an empty secretEnv value exits non-zero and the probe pi never runs" "" \
+  "$form_secret_empty" "$session" assert
+# The exit alone would also be bwrap's refusal to tmpfs a file, so the message
+# is what proves the directory guard ran.
+refuses_launch protect-file "a protect path that is a file exits non-zero naming $protect_file" \
+  "quotient: protect path $protect_file is not a directory" \
+  "$form_protect_file" "$session" assert
+literal_secret
 
 # G4, host side: the jail's /tmp is its own, so the marker is not here.
 if [ -e "$marker" ]; then
