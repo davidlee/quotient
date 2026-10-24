@@ -1,0 +1,176 @@
+# Implementation plan for SL-002 — the authored, durable phase plan.
+#
+# Single source of each phase's objective, criteria, verification and links.
+# Runtime status lives under .doctrine/state/ — never record progress here.
+# Ids (PHASE-NN, EN-/EX-/VT-/VA-/VH-n) are immutable: edits append, never renumber.
+schema  = "doctrine.plan.overview"
+version = 1
+slice   = "SL-002"
+
+[specs]
+primary       = []
+collaborators = []
+
+[requirements]
+targets      = []
+dependencies = []
+
+[[phase]]
+id        = "PHASE-01"
+name      = "Remove the launch-dir layers"
+objective = "Profiles and help come from the XDG layer only; a legacy launch-dir layer fails start-up with migration guidance; a write call rooted at the launch directory is admitted (ISS-001). Release fixtures move to the XDG layer."
+entrance_criteria = [
+  { id = "EN-1", text = "Plan approved by the operator. Read design sec-1, sec-2 'Step 8' and 'Start-up: legacy layers', sec-4; DEC-011." },
+  { id = "EN-2", text = "Baseline recorded: `just gate` green and lint counts per file in .doctrine/slice/002/lint-baseline.tsv (commit b5c441e)." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: a server test where a write call's root is the launch directory, refused view-overlaps-protected before the change, is admitted after it." },
+  { id = "EX-2", text = "resolveLocations returns only XDG profile and help layers (none when XDG config is unusable). New pure legacyLayers(launchDir) names <launch>/.quotient/profiles and /help." },
+  { id = "EX-3", text = "loadStartup checks legacyLayers first: any entry that is not absent (paths.ts absent() rule) fails start-up through the existing C7 path — one stderr line; every call refuses profile-invalid with the design's migration detail naming the path and the XDG destination." },
+  { id = "EX-4", text = "`quotient help` runs the same check and only warns on stderr, then prints help. Help output that lists layers (renderContext, profile layer list) shows XDG only; remaining prose waits for PHASE-06." },
+  { id = "EX-5", text = "Step 8 no longer lists launch-dir profile/help layers (they no longer exist in Locations); the childview comment on layers is updated." },
+  { id = "EX-6", text = "test-rig newRig plants nothing under <launch>/.quotient. scripts/pack-check and scripts/hostile-audit write their profile to <fixture XDG_CONFIG_HOME>/quotient/profiles/ and plant nothing under <launch>/.quotient; their comments say so." },
+  { id = "EX-7", text = "`just gate` green (tests, typecheck, build, hostile-audit syntax, pack-check). Lint ratchet: no touched file exceeds its lint-baseline.tsv count; shellcheck clean." },
+]
+verification = [
+  { id = "VT-1", expects = "Server test: a write call rooted at the launch directory is admitted (no view-overlaps-protected).", test_file = "src/server/server.test.ts", keywords = ["rooted at the launch directory is admitted"], waived = false },
+  { id = "VT-2", expects = "Server tests: a legacy <launch>/.quotient/profiles, and separately /help, fails start-up; a call refuses profile-invalid with the migration detail.", test_file = "src/server/server.test.ts", keywords = ["quotient no longer reads profiles from the launch directory", ".quotient/help"], waived = false },
+  { id = "VT-3", expects = "Config tests: XDG-only layers; legacyLayers names both launch-dir paths.", test_file = "src/config.test.ts", keywords = ["legacyLayers"], waived = false },
+  { id = "VT-4", expects = "Help/CLI test: `quotient help` with a legacy layer warns on stderr and still prints help, exit 0.", test_file = "src/cli.test.ts", keywords = ["legacy", "no longer reads"], waived = false },
+  { id = "VA-1", expects = "pack-check reaches and executes its stub form with the profile in the fixture XDG layer (pack-check PASS 4/4 in the gate log); hostile-audit plants no launch-dir layer (read the diff; it needs a paid model to run end-to-end)." },
+  { id = "VA-2", expects = "Lint ratchet: `npx eslint <touched files> -f json` per-file errorCount <= lint-baseline.tsv; `shellcheck scripts/*` clean. Record counts in the phase sheet." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-02"
+name      = "Approvals store"
+objective = "src/server/approvals.ts owns the quotient-approvals/1 store: closed-world reader, governingApproval, and the single locked atomic writer. The store is at Locations.approvalsPath and is a never-writable protected store at step 8. The contract quotient-approvals-1.md exists with a drift check. Admission does not consult it yet."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-01 exits hold. Read design sec-2 'The approvals store' and 'Step 8', sec-3 contract paragraph for quotient-approvals-1.md; DEC-009." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Locations.approvalsPath: Resolved = <xdgConfig>/quotient/approvals.json; no environment variable; unusable when XDG_CONFIG_HOME and HOME give no absolute base." },
+  { id = "EX-2", text = "readApprovals: absent file = { ok: true, approvals: [] }; unreadable, non-JSON, wrong schema, unknown key (top-level or entry), duplicate (root, capability), non-absolute root or path, capability outside read/write, sha256 not 64 lowercase hex, or approved_at not a string -> { ok: false, detail } naming the path and the failure." },
+  { id = "EX-3", text = "governingApproval(approvals, root, capability): the entry for CAPABILITY with the deepest root containing ROOT (paths.ts within), else undefined. Pure." },
+  { id = "EX-4", text = "updateApprovals(path, change): O_EXCL lock <path>.lock (mode 0600, holds pid); EEXIST fails naming the holder and the manual-removal advice, no reclaim; reads under the lock; malformed/unreadable aborts without writing; change returning a string aborts with that detail; writes <path>.<pid>.tmp (0600), fsync, rename; lock unlinked in finally (also on throw)." },
+  { id = "EX-5", text = "childview: store kind approvals-store, tolerance never-writable, from ChildViewInput.approvalsPath, protected whether or not it exists; server passes Locations.approvalsPath (unusable location contributes no store, like policyPath)." },
+  { id = "EX-6", text = "docs/contract/quotient-approvals-1.md written in full per design sec-3 (location, format, containment, allow report/record and revoke semantics, locking, malformed behaviour, operator's act). Drift test parses every json block with readApprovals; a negative control proves a malformed block is reported." },
+  { id = "EX-7", text = "`just gate` green. Lint ratchet: new files (approvals.ts, approvals.test.ts) zero errors; touched files within baseline; shellcheck clean." },
+]
+verification = [
+  { id = "VT-1", expects = "Approvals reader: absent = empty; each malformation in EX-2 rejected; duplicate pair rejected; valid store round-trips.", test_file = "src/server/approvals.test.ts", keywords = ["readApprovals", "quotient-approvals/1", "duplicate"], waived = false },
+  { id = "VT-2", expects = "governingApproval: deepest containing root wins; capability filtered; sibling-prefix (/work/oneevil vs /work/one) does not match.", test_file = "src/server/approvals.test.ts", keywords = ["governingApproval", "deepest"], waived = false },
+  { id = "VT-3", expects = "Writer: held lock -> second writer fails naming the holder, store untouched; malformed store never overwritten; string from change aborts; lock released after success, abort and throw; no partial file observable (tmp + rename).", test_file = "src/server/approvals.test.ts", keywords = ["updateApprovals", ".lock", "rename"], waived = false },
+  { id = "VT-4", expects = "Child view: a writable member that is, contains, or lies inside the approvals path refuses with store kind approvals-store, existing or not.", test_file = "src/server/childview.test.ts", keywords = ["approvals-store", "approvalsPath"], waived = false },
+  { id = "VT-5", expects = "Drift: every json block of quotient-approvals-1.md is accepted by readApprovals; negative control reports a malformed block.", test_file = "src/drift.test.ts", keywords = ["quotient-approvals-1.md", "readApprovals"], waived = false },
+  { id = "VA-1", expects = "Lint ratchet as PHASE-01/VA-2; new files zero errors." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-03"
+name      = "Root entry and project-form judgement"
+objective = "resolveRoot reports the longest matching roots entry; src/server/forms.ts judges a project form (probeProjectForm) and decides step 5 (chooseForm) as tested units. The result contract lists the two new refusal reasons. Admission is not yet wired."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-02 exits hold (Approval type and governingApproval exist). Read design sec-2 'Step 4', 'Step 5', 'The selection module'; DEC-007, DEC-008, DEC-010." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "resolveRoot returns { ok: true, root, entry } with entry = the longest canonical roots entry containing root, independent of policy order. Accepted and refused calls, reasons and details are unchanged; server call site compiles with the new shape." },
+  { id = "EX-2", text = "probeProjectForm(base, capability, writable): lstat <base>/.quotient/forms/<cap>; absent (absent() rule) -> { kind: absent }; any other lookup failure (EACCES, ENOTDIR, dangling link) -> invalid; realpath; regular file; access X_OK; real path outside every canonical writable path (within); sha256 of the real file's bytes (evidence.ts sha256Hex) -> usable { link, path, sha256 }. Details name link and real path." },
+  { id = "EX-3", text = "chooseForm(slot, governing, probe) is pure and implements design sec-2's table: absent slot -> wrapper-unavailable unchanged; unconfined slot with a link or a governing approval -> form-invalid; governed + absent/invalid -> form-invalid; governed + identity differs (path or sha256) -> form-unapproved naming both identities; governed + match -> { kind: confined, path: realPath, extensions: slot.extensions } with source project; ungoverned + link -> form-invalid if unusable else form-unapproved with the exact `quotient allow <base> <cap>=<path>@<sha256>` command; ungoverned + absent -> slot with source policy." },
+  { id = "EX-4", text = "ProjectFormRefusal = 'form-invalid' | 'form-unapproved' is exported from forms.ts; docs/contract/pi-agent-result-2.md Refusals table gains both rows (raised at step 5) and the rule that consumers handle unknown reasons; the refusal drift guard passes." },
+  { id = "EX-5", text = "forms.ts imports only the Approval type from approvals.ts; selectForm in policy.ts stays the slot lookup with a comment pointing to forms.ts." },
+  { id = "EX-6", text = "`just gate` green. Lint ratchet: forms.ts, forms.test.ts zero errors; touched files within baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "Profiles: nested roots in both orders -> entry is the deepest; first-in-order no longer wins; accept/refuse unchanged.", test_file = "src/server/profiles.test.ts", keywords = ["entry", "nested roots"], waived = false },
+  { id = "VT-2", expects = "probeProjectForm: absent; dangling link; .quotient is a file; not executable; directory target; target inside a root / exposure / session home -> invalid; usable reports real path and sha256.", test_file = "src/server/forms.test.ts", keywords = ["probeProjectForm", "dangling", "sha256"], waived = false },
+  { id = "VT-3", expects = "chooseForm: every row of the design sec-2 table, including unconfined slot and absent slot ordering, and the allow command in the ungoverned form-unapproved detail.", test_file = "src/server/forms.test.ts", keywords = ["chooseForm", "form-invalid", "form-unapproved", "quotient allow"], waived = false },
+  { id = "VT-4", expects = "Drift: the refusal guard sees ProjectFormRefusal and the result contract names both reasons.", test_file = "src/drift.test.ts", keywords = ["Refusal"], waived = false },
+  { id = "VA-1", expects = "Lint ratchet as PHASE-01/VA-2; new files zero errors." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-04"
+name      = "Admission selects and spawns the approved form"
+objective = "callTool step 5 composes the machine slot, the approvals store, the governing approval, the lookup base, the probe and chooseForm; the spawn execs the resolved real path and the audit record names the form's source and identity."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-03 exits hold. Read design sec-2 in full (incl. 'Residual: relocation', 'Evidence', 'Invariants') and sec-4 verification table; RV-006 F-1 (doctrine review show RV-006 -f 1)." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Step 5 order: slot absent -> wrapper-unavailable before the store or link is read; approvals location unusable, store unreadable or malformed -> form-unapproved naming the store (also for calls with no link); governing = governingApproval(store, root, cap); base = governing?.root ?? entry; probe at base with writable = roots + exposure + session home; chooseForm." },
+  { id = "EX-2", text = "RunPlan gains formSource: FormSource; RunPlan.form is the selected Form (real path for a project form). spawn execs plan.form, never the link." },
+  { id = "EX-3", text = "spawn audit record: form = executed path; form_source policy|project always; form_root and form_sha256 for project forms only." },
+  { id = "EX-4", text = "test-rig gains helpers: plant a project form (link under <root>/.quotient/forms/<cap> to an executable outside every root), write an approvals store at the rig's XDG config, and read spawn records; rig XDG_CONFIG_HOME already points inside the rig." },
+  { id = "EX-5", text = "RV-006 F-1 (probe): with roots /work and /work/current in both orders, an approval at the canonical /work/A, and each retarget variant (current pointed into /work/A/sub; current pointed away from /work/A), a call whose canonical root is inside /work/A refuses or runs A's approved identity, observed in the spawn audit record (form_source project, form_root /work/A); it never runs the machine default." },
+  { id = "EX-6", text = "Every server row of the design sec-4 verification table holds (listed in VT-1..VT-4)." },
+  { id = "EX-7", text = "A server with no .quotient/forms and no approvals store behaves as before apart from PHASE-01 (existing server tests pass unchanged except the spawn record's new form_source field)." },
+  { id = "EX-8", text = "`just gate` green. Lint ratchet: touched files within baseline; new tests add no errors to server.test.ts beyond baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "RV-006 F-1: root-alias retarget, both roots orders, both retarget variants; spawn record shows form_source project and form_root /work/A, or the call refuses; never the machine form.", test_file = "src/server/server.test.ts", keywords = ["retarget", "form_root", "both orders"], waived = false },
+  { id = "VT-2", expects = "Server: no .quotient + no store -> machine form, form_source policy, no form_sha256; approved form runs (real path exec'd, not the link; form_sha256; slot extensions inherited so an mcp__* profile passes); link without entry -> form-unapproved with link, real path, sha256 and allow command; rebuilt bytes and repointed path -> form-unapproved naming both identities; deleted link -> form-invalid, not the machine form.", test_file = "src/server/server.test.ts", keywords = ["form_source", "form_sha256", "form-unapproved", "form-invalid"], waived = false },
+  { id = "VT-3", expects = "Server: nested approvals (deepest governs; shallower governs outside the deeper root); approval root no longer in roots still governs; link inside a root / exposure / session home, not executable, dangling, .quotient a file -> form-invalid; unconfined slot with link -> form-invalid; absent slot with link -> wrapper-unavailable; malformed or unreadable store -> form-unapproved for a call with no link.", test_file = "src/server/server.test.ts", keywords = ["nested approvals", "no longer in roots", "wrapper-unavailable", "malformed"], waived = false },
+  { id = "VT-4", expects = "Server: repointing the link after admission does not change the running call's executable (spawn execs the path captured at step 5).", test_file = "src/server/server.test.ts", keywords = ["after admission"], waived = false },
+  { id = "VT-5", expects = "Spawn: the spawn record pins form, form_source, form_root, form_sha256 for project and policy forms.", test_file = "src/server/spawn.test.ts", keywords = ["form_source", "form_root", "form_sha256"], waived = false },
+  { id = "VA-1", expects = "Lint ratchet as PHASE-01/VA-2." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-05"
+name      = "Operator verbs: allow and revoke"
+objective = "src/approve.ts implements `quotient allow [<path>]` (report), `quotient allow <path> <cap>=<realpath>@<sha256>...` (record on full identity match only) and `quotient revoke <approval-root> [<cap>...]`; cli.ts dispatches them."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-04 exits hold (updateApprovals, probeProjectForm, chooseForm, resolveRoot entry exist and are wired). Read design sec-3 'quotient allow and quotient revoke'; DEC-009; RV-006 F-3 (doctrine review show RV-006 -f 3)." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "allow resolves <path> (default cwd; relative against cwd) like admission: readPolicy at Locations.policyPath, canonicalise, record root = longest containing roots entry. Path in no entry, or unreadable/invalid policy, exits 1 naming why; usage errors exit 2." },
+  { id = "EX-2", text = "Report (never writes, exit 0): per capability the link, real path, sha256, governing approval (which may be shallower than the record root), slot shape; unusable form shows its form-invalid detail and is left out of the suggested command; governing approval with a missing/changed link says so and suggests revoke; ends with the exact record command." },
+  { id = "EX-3", text = "Record: each <cap>=<realpath>@<sha256> split at the last '@'; inside updateApprovals' change, a fresh probeProjectForm at the record root and the machine slot are checked; usable, slot confined, real path and sha256 both equal. Any mismatch in the batch writes nothing and exits 1 naming both identities. Success replaces the (root, cap) entry and prints the recorded identities." },
+  { id = "EX-4", text = "RV-006 F-3 (probe): after a report shows real path A with digest H, repointing the link to B with identical bytes makes `allow ROOT write=A@H` exit 1 with both identities named and leave approvals.json byte-identical; the matching case records exactly A with H." },
+  { id = "EX-5", text = "revoke: <approval-root> made absolute and lexically normalised, matched exactly against stored roots; reads neither policy nor filesystem; removes named capabilities (all when none); never touches another root; unknown root or capability exits 1 listing stored roots." },
+  { id = "EX-6", text = "cli.ts: allow and revoke cases and usage text; exit codes 0/1/2; cli.ts remains the only module with import-time side effects." },
+  { id = "EX-7", text = "`just gate` green. Lint ratchet: approve.ts, approve.test.ts zero errors; touched files within baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "RV-006 F-3: same bytes at a different real path between report and record -> exit 1, both identities named, approvals.json byte-identical; matching case records exactly A with H.", test_file = "src/approve.test.ts", keywords = ["byte-identical", "identical bytes", "allow"], waived = false },
+  { id = "VT-2", expects = "Record: changed bytes -> nothing written, exit 1; one bad pair in a batch writes nothing; unconfined or absent slot refused; success at the record root replaces the entry.", test_file = "src/approve.test.ts", keywords = ["batch", "unconfined", "record root"], waived = false },
+  { id = "VT-3", expects = "Report: per-capability identity, approval state and exact command; unusable form shows its detail; shallower governing approval shown.", test_file = "src/approve.test.ts", keywords = ["report", "governed", "shallower"], waived = false },
+  { id = "VT-4", expects = "Revoke: named and all capabilities of an exact stored root; still revocable after the root leaves roots and after its directory is deleted; child revoke leaves the parent; unknown root or capability exits 1 listing stored roots.", test_file = "src/approve.test.ts", keywords = ["revoke", "stored roots", "parent"], waived = false },
+  { id = "VT-5", expects = "CLI: allow and revoke dispatch; usage errors exit 2.", test_file = "src/cli.test.ts", keywords = ["allow", "revoke"], waived = false },
+  { id = "VA-1", expects = "Lint ratchet as PHASE-01/VA-2; new files zero errors." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-06"
+name      = "Contracts, help, docs and release"
+objective = "Every contract and help text describes the shipped behaviour; no text describes a launch-dir layer; the package is 0.3.0 with a release note."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-05 exits hold. Read design sec-3 'Contract changes', 'Help, examples and snippets', 'Migration and release'; DEC-011." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "quotient-policy-2.md edited in place per design sec-3 bullet list: header copy slip and compatibility rule; Where things are (XDG only, legacy start-up failure, approvals row); forms as defaults; steps 4 and 5; protected stores; new Project forms section (layout, governing approval, base, table, usability, inherited extensions, no unconfined, deletion is not revocation, relocation and real-path advice, hash scope, operator obligations); Publishing. No policy field changes; quotient-policy-1.md untouched." },
+  { id = "EX-2", text = "form-1.md: Guarantees gain 'cannot confine -> exit non-zero before pi' and 'confinement inputs embedded or delegate-immutable'; approvals store in G6's never-writable list; stays form-1." },
+  { id = "EX-3", text = "Each row of design sec-3 'Help, examples and snippets' done: src/help/help.ts, help/profiles.md, help/setup.md (project forms subsection), help/agent.md (form-unapproved needs the operator), README.md, examples/profiles/*.md, docs/design.md." },
+  { id = "EX-4", text = "grep finds no description of a launch-dir profile/help layer in src/, help/, docs/ (excluding quotient-policy-1.md and pi-agent-result-1.md), examples/, README.md, other than the legacy-failure text." },
+  { id = "EX-5", text = "package.json and package-lock.json at 0.3.0; the bump commit body is the release note (start-up failure, allow/revoke, form-invalid/form-unapproved, satan's move to XDG)." },
+  { id = "EX-6", text = "Shipped text carries no private Doctrine ids (SL-/DEC-/RV-/ISS-)." },
+  { id = "EX-7", text = "`just gate` green. Lint ratchet: touched files within baseline; shellcheck clean." },
+]
+verification = [
+  { id = "VT-1", expects = "Drift tests pass: refusal reasons, policy keys and env vars documented; every json block of the policy contract admits; approvals contract blocks parse.", test_file = "src/drift.test.ts", keywords = ["quotient-policy-2.md", "quotient-approvals-1.md"], waived = false },
+  { id = "VT-2", expects = "Help tests: rendered help and client snippet name XDG layers only and describe project forms.", test_file = "src/help/help.test.ts", keywords = ["XDG", "forms"], waived = false },
+  { id = "VA-1", expects = "Walk the sec-3 documentation checklist (EX-1..EX-3) row by row against the diff; record each row's outcome in the phase sheet." },
+  { id = "VA-2", expects = "EX-4 and EX-6 greps run and recorded; lint ratchet as PHASE-01/VA-2." },
+]
+specs        = []
+requirements = []
