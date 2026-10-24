@@ -18,3 +18,5 @@ Why refuse rather than normalise: the store is written only by
 `quotient allow`, which always writes canonical paths, so a non-canonical entry
 is a hand edit or corruption, and the store fails closed. The audit should
 reconcile the design (SL-002 design sec-2, "The approvals store") with this.
+
+Accepted 2026-10-24 by the operator at SL-002 reconcile (reply: "yeah agreed"), after the RV-009 audit found the shipped code and contracts consistent with it.

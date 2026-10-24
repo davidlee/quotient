@@ -1,7 +1,7 @@
 id = 2
 slug = "policy-named-layers"
 title = "Project forms by root, operator-approved"
-status = "audit"
+status = "reconcile"
 created = "2026-10-23"
 updated = "2026-10-24"
 tags = []
@@ -177,6 +177,11 @@ intent = "design-target"
 [[selector]]
 selector = "docs/contract/quotient-approvals-1.md"
 intent = "design-target"
+
+[[selector]]
+selector = "src/server/policy.test.ts"
+intent = "design-target"
+note = "writablePaths tests (PHASE-03 VT-6); added at reconcile, RV-009 F-4"
 
 [[relation]]
 label = "fulfils"

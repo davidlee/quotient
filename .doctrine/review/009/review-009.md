@@ -104,3 +104,21 @@ DEC-012`, `doctrine show DEC-013`, `doctrine review show RV-006 -f 1,3`.
 ### Governance/spec (REV)
 - None. The shipped contracts (`quotient-approvals-1.md`, `quotient-policy-2.md`)
   already state DEC-012 and DEC-013; no ADR or spec record is affected.
+
+## Reconciliation Outcome
+
+### Direct edits applied
+- design.md sec-2 "The approvals store": the closed-world bullet now names the canonical-absolute rule (refused, never normalised; duplicates on the canonical form), citing DEC-012 (F-1).
+- design.md sec-3 Report paragraph: the deeper-governing case prints `quotient revoke <deeper root>` advice instead of an `allow` command; Record lists the deeper-approval refusal as a check under the lock, citing DEC-013 (F-2).
+- Selector registry: `src/server/policy.test.ts` added as design-target; design.md sec-4 code-impact "tests" row names `policy` as its mirror (F-4). `slice conformance 2`: 43 conformant, 0 undelivered, 1 undeclared (F-5, tolerated).
+
+### Knowledge settled
+- DEC-012, DEC-013: proposed → accepted, on the operator's assent at reconcile ("yeah agreed"); the basis is noted in each record.
+
+### REVs completed
+- None needed: no ADR, spec or requirement was affected.
+
+### Withdrawn / tolerated
+- F-5: tolerated. The slice notes rode in PHASE-01's commit; rationale is in the disposition.
+
+Reconcile pass complete; handoff to /close.

@@ -16,3 +16,5 @@ that would clear the way. The check runs under the lock, against the store it
 read there. The report prints the same advice instead of an inert `allow`
 command. Documented in `quotient-approvals-1.md` ("Record", fourth check) and
 `quotient-policy-2.md`. The audit should reconcile design sec-3 with this.
+
+Accepted 2026-10-24 by the operator at SL-002 reconcile (reply: "yeah agreed"), after the RV-009 audit found the shipped code and contracts consistent with it.
