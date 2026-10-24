@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 22
+slug = "form-builder-verification-test-flake-script-probe-real-pi-audit-all-in-the-gate"
+title = "Form builder verification: test flake, script probe, real-pi audit, all in the gate"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "jail.nix is not a quotient input (DEC-016), so quotient's own checks need a separate flake. The text check cannot see runtime behaviour. v0.3.0 shipped broken on Nix (operator, 2026-10-24)."
+choice = "(1) nix/checks/flake.nix with its own lock (nixpkgs, jail-nix, quotient as path:../..): a default and a full sample family (persistHome, exposure, secretEnv, piFiles, network=false) built with a stub pi must pass checkFormFamily; doctored copies must fail nix/check.sh (negative controls). (2) scripts/form-probe: a probe family whose pi is a probe script, run directly on the host with a temp root, session dir and a canary env var; asserts G1, G2 per capability, G3, G4, run dir and session home absent (G6 sample), canary absent from /proc/1/environ, secretEnv value absent from /proc/1/cmdline, missing session dir exits 64 (G8). (3) hostile-audit against a real-pi family for both capabilities, once (VH). (4) shellcheck covers nix/check.sh and scripts/form-probe. (5) Docs: docs/nix-forms.md, README forms bullet + link, help/setup.md step 3, flake.nix comment, quotient-policy-2.md worktree wording. (6) just forms-check and just forms-probe join just gate."
+alternatives = ["sample family in the main flake checks (needs a jail-nix input)", "manual-only behavioural verification", "forms recipes outside the gate"]
+rationale = "A script probe covers runtime guarantees without a model; gating on Nix catches the class of break that reached v0.3.0."
+consequences = ["the gate needs Nix and bwrap with user namespaces (Linux)", "form-probe runs on the host, not in the Nix build sandbox"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

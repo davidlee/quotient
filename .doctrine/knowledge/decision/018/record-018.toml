@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 18
+slug = "form-families-default-to-a-private-home-pi-config-read-only-via-pifiles-persisthome-opt-in-and"
+title = "Form families default to a private home; pi config read-only via piFiles; persistHome opt-in and declared"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "satan's forms persist ~/.local/share/jail.nix/home/agent rw (declared in exposure). It holds .pi/agent AGENTS.md, extensions/, npm/, settings.json, auth.json, models.json (listed 2026-10-24), writable by every delegate and shared with interactive jailed-pi: a cross-run influence channel."
+choice = 'Default home is jail.nix base --tmpfs ~ (private, discarded per run). piFiles = { <path under ~/.pi/agent> = <file or dir>; } bound read-only after the home is set up. persistHome = "/abs/path" (opt-in): created at launch, bound rw onto ~, added to family.exposure; piFiles still bind over it read-only. One persisted home serves both capabilities of a family.'
+alternatives = ["persisted home by default (satan today)", "persisted home with a relative ~ path (cannot be put in exposure exactly)"]
+rationale = "A run should not shape the next by default; persistence stays available and is declared, never silent."
+consequences = ["docs state the persisted home is a cross-run channel and is shared by read and write delegates", "pi state written outside piFiles is lost per run under the default", "satan's migration may keep persistHome or move models.json into piFiles"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

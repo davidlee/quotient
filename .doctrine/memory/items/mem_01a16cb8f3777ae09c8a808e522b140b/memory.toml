@@ -1,0 +1,46 @@
+memory_uid = "mem_01a16cb8f3777ae09c8a808e522b140b"
+memory_key = "mem.fact.doctrine.design-apply-payload"
+schema_version = 1
+memory_type = "fact"
+status = "active"
+title = "doctrine design apply: payload shape gotchas"
+summary = "design apply takes --input (JSON, path or -); a needs edge to a node declared later in the same batch can refuse 'unknown node'"
+created = "2026-10-24"
+updated = "2026-10-24"
+
+[scope]
+paths = []
+globs = []
+commands = ["doctrine design apply"]
+tags = ["doctrine", "design"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "32fff5d020d58e845fa96664a1ae3d7223df97d2"
+ref_name = "refs/heads/main"
+checkout_state_id = "fc7abd3313b63f809262e3cd86b5e72d05d88412a68b68d67a66c2443896675e"
+base_commit = "d4e3fb136c21345f3e5c7e34c363ea4bde53fdfd"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
+[[source]]
+kind = "session"
+ref = "SL-003 design 2026-10-24"
+

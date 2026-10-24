@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 19
+slug = "form-families-take-env-and-secretenv-secrets-fail-closed-and-travel-over-fd-22-network-on-by-default"
+title = "Form families take env and secretEnv; secrets fail closed and travel over FD 22; network on by default"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "With an empty-environment bwrap the child sees only --setenv values; bwrap argv is visible in the jail (/proc/1/cmdline), so satan sends its gateway key over --args 22 (jailed-agents.nix:448-486). form-1 gives the form the server env minus QUOTIENT_*."
+choice = 'env = { VAR = literal; } via set-env (may appear on argv). secretEnv = { VAR = shell expression; }: each evaluated in the launcher, outside the jail, before bwrap, under set -euo pipefail; a failing or empty value refuses the launch; all delivered as --setenv pairs over reserved FD 22 (printf %s\0 process substitution), never on argv or disk. The builder has no provider or gateway notion. network ? true; false keeps the jail.nix net unshare. checkFormFamily refuses a secretEnv name appearing as --setenv on the launcher argv.'
+alternatives = ["secrets as plain set-env (on argv, visible in the jail)", "builder-owned gateway wiring (satan's gatewayClient)", "network off by default"]
+rationale = "Keeps credentials the caller's concern while making the safe delivery the easy one; failing closed matches form-1 G9."
+consequences = ["differs from satan: a missing key file refuses launch instead of relying on a preflight wrapper", "a gateway is env URL + secretEnv key + models.json in piFiles"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

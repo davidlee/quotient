@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 15
+slug = "form-builder-is-libmkformfamily-and-libcheckformfamily-taking-pkgs"
+title = "Form builder is lib.mkFormFamily and lib.checkFormFamily, taking pkgs"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "jail.nix exposes a system-agnostic lib that takes pkgs. satan calls its forms plus a shared-generator baseline a family."
+choice = """quotient.lib.mkFormFamily { pkgs, jail-nix, pi, prefix ? "quotient", ... } returns { read, write, baseline, exposure }: read and write are derivations whose bin/<prefix>-<capability> is the form; baseline is the same jail with no form options, for comparison only; exposure is the list of absolute paths the operator copies into the policy. quotient.lib.checkFormFamily { pkgs, family } returns a check derivation for the consumer's checks. Neither is per-system."""
+alternatives = ["per-system lib.${system}.mkFormFamily (forces quotient's nixpkgs or a follows)", "an overlay (hides the toolchain arguments)"]
+rationale = "Matches jail.nix; the consumer chooses pkgs and system; the family name keeps the satan migration a swap."
+consequences = ["a policy names <store path>/bin/quotient-<capability>; nix build -o <state>/forms/<cap> gives the examples' layout"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

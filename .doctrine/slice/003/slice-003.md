@@ -73,11 +73,20 @@ schema do not change, and a policy still names the forms' executable paths.
 
 ## Affected surface
 
-- `flake.nix`, `flake.lock`: the `jail.nix` input and the builder's output.
-- `nix/**` (new): the builder, the baseline and the check.
-- `README.md`, `help/setup.md` (or a new section), `examples/**`.
-- Possibly a drift test in `src/drift.test.ts` if shipped text names the
-  builder's interface.
+Revised by design (DEC-014–DEC-022):
+
+- `flake.nix`: `lib.mkFormFamily` / `lib.checkFormFamily` and the reworded
+  comment. No new input (DEC-016), so `flake.lock` is unchanged.
+- `nix/**` (new): the builder, `nix/check.sh`, and the test flake
+  `nix/checks/flake.nix` with its own lock (DEC-022).
+- `scripts/form-probe` (new): the behavioural probe (DEC-022).
+- `justfile`: `forms-check`, `forms-probe` and `nix-build` (the server
+  package, IMP-007) in `gate`; shellcheck covers the new scripts.
+- `docs/nix-forms.md` (new), `README.md`, `help/setup.md` step 3,
+  `docs/contract/quotient-policy-2.md` (worktree wording of the lookup base,
+  meaning unchanged).
+- Possibly `src/drift.test.ts` / `src/help/help.test.ts` if shipped text pins
+  change.
 
 ## Risks & assumptions
 

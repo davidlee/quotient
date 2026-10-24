@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 16
+slug = "callers-pass-jailnix-and-pi-to-the-form-builder-quotient-adds-no-flake-input"
+title = "Callers pass jail.nix and pi to the form builder; quotient adds no flake input"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "A quotient jail-nix input would add a lock node to every flake consumer and need inputs.quotient.inputs.jail-nix.follows to avoid duplicate versions; jail.nix has no pi."
+choice = "mkFormFamily takes jail-nix (the jail.nix flake or its lib) and pi (a derivation) as required arguments. quotient adds no flake input. The builder instantiates jail.nix itself via jail-nix.lib.extend with its own bubblewrapPackage, so callers cannot supply a jail instance."
+alternatives = ["jail.nix as a quotient flake input, overridable by follows"]
+rationale = "One jail.nix version by construction, no follows to remember; server-only consumers carry nothing. The shipped check catches jail.nix drift."
+consequences = ["quotient does not pin the jail.nix its check was written against; checkFormFamily is the guard", "quotient's own flake checks need a jail.nix source for the sample family (see inq-10)"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

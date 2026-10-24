@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 21
+slug = "checkformfamily-is-a-text-only-check-over-a-single-level-family-with-negative-controls"
+title = "checkFormFamily is a text-only check over a single-level family, with negative controls"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "satan's quotient-forms check (flake.nix:691-) is text-only and compares each form's binds with a shared-generator baseline, but descends a two-level exec chain. A jail.nix-direct family has one level: form script execs the jail.nix launcher."
+choice = """quotient.lib.checkFormFamily { pkgs, family } is a runCommand that reads scripts as text, launches nothing. family = { read, write, baseline, exposure, prefix, secretEnvNames, bwrap }. Per capability it asserts: (a) form script has exactly 3 exit 64 guards, session_dir=$1, shift, export QUOTIENT_ACTIVE_SESSION_DIR, exec <launcher> "$@", no --, no own bind flags; (b) launcher runs family.bwrap; (c) capability root flag present and the other absent, root bind, session bind and --chdir "$PWD" after every other bind; (d) --die-with-parent, --tmpfs /tmp, no other --chdir; (e) no QUOTIENT_SESSION_HOME/RUN_DIR/POLICY, no baseline bind targeting the root path; (f) form binds minus baseline binds = {root, session}, none dropped; (g) every baseline rw bind source in family.exposure; (h) no secretEnvNames as --setenv NAME, FD 22 delivery present when secretEnv is non-empty. Reports every failure; prints residues; strips quotes once and folds store hashes. Bash in nix/check.sh (shellcheck-able). Negative controls are doctored families in quotient's test flake that must fail."""
+alternatives = ["keep satan's two-level descent (no wrapper chain exists)", "a behavioural check in the build sandbox (bwrap needs user namespaces)"]
+rationale = "Consumers get the same proof satan has, rebased to the new shape; hash folding keeps it stable across bumps."
+consequences = ["out of scope: --args/add-runtime binds and runtime behaviour (hostile-audit, leak probe; VH)"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

@@ -38,14 +38,39 @@ intent = "scope-relevant"
 selector = "src/drift.test.ts"
 intent = "scope-relevant"
 
+[[selector]]
+selector = "scripts/form-probe"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "justfile"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "docs/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/help/help.test.ts"
+intent = "scope-relevant"
+
 [[relation]]
 label = "references"
 role = "originates_from"
 target = "IMP-003"
 
 [[relation]]
+label = "references"
+role = "originates_from"
+target = "IMP-007"
+
+[[relation]]
 label = "related"
 target = "SL-002"
+
+[[relation]]
+label = "related"
+target = "IMP-007"
 
 # STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
 # `[relationships]` axis. Slices carry no typed STRUCTURAL

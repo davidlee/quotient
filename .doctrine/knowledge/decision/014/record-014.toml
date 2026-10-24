@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 14
+slug = "quotient-flake-offers-an-optional-jailnix-form-builder-still-ships-no-forms"
+title = "quotient flake offers an optional jail.nix form builder; still ships no forms"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "satan DEC-116 (operator, 2026-10-22) kept quotient contract-only for v1 and rejected generic bwrap forms + lib.mkForms in quotient, because the only forms built on the operator's private agents flake; it named generic forms as a follow-up. jail.nix is public."
+choice = "The quotient flake gains optional Nix library functions: a form-family builder over jail.nix and a text-only check for it. quotient ships no default forms: packages stay the server only, the npm package and src/ are unchanged, and a policy still names form paths. The flake.nix comment and the README forms bullet are reworded to say so."
+alternatives = ["supersede DEC-116 (not a quotient entity; the contract-only stance stands)", "ship forms as packages outputs (quotient would choose a toolchain and provider)"]
+rationale = "The blocker DEC-116 cited, a private dependency, is gone when the builder uses jail.nix directly; operators still choose and name forms."
+consequences = ["flake.nix comment and README forms bullet reworded; shipped text cites no doctrine id", "the builder is Linux-only (bubblewrap)"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"

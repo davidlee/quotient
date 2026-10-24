@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 20
+slug = "form-families-always-run-bwrap-with-an-empty-environment"
+title = "Form families always run bwrap with an empty environment"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "--clearenv empties only the child's environment; bwrap keeps the environment it was exec'd with (the server's minus QUOTIENT_*, keys included) and runs as PID 1 in the jail's pid namespace, readable at /proc/1/environ (jailed-agents.nix:61-68; not reproduced here)."
+choice = """mkFormFamily instantiates jail-nix.lib.extend { pkgs; bubblewrapPackage = emptyEnvBwrap; } where emptyEnvBwrap execs env -i <bubblewrap> "$@". Not overridable. checkFormFamily asserts the launcher's bwrap is that wrapper. Verification adds a VH probe: a delegate in a built form reads /proc/1/environ and finds no server variables."""
+alternatives = ["rely on --clearenv plus the pid namespace (leaks bwrap's own environ)"]
+rationale = "Without it secretEnv and any key in the server env are readable by the delegate. Safe because the launcher has already expanded all values into argv or FD 22 and bwrap reads HOME only without --chdir, which the builder always passes."
+consequences = ["the leak closure is verified by a manual probe in inq-10"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-003"
