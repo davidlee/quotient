@@ -450,11 +450,13 @@ test('with no project link and no approvals store the machine form runs, and the
   assert.equal(Object.hasOwn(spawn, 'form_sha256'), false, 'a machine form has no approved identity');
 });
 
-/** A write profile that names an `mcp__*` tool: only the slot's extensions can
- *  deliver it, so the selected form must inherit the slot's list. */
+/** A write profile that names an `mcp__*` tool: step 5 refuses it unless the
+ *  slot declares `builtin:mcp`, and the argv must then carry it. The *inherited*
+ *  list itself is only observable on the selected form, so `forms.test.ts`
+ *  asserts it; at the wire the extension's effect is the `-e` pair. */
 const MCP_PROFILE = profileDocument({ filesystem: 'write', tools: 'read, bash, mcp__files__read' });
 
-test('an approved project form runs its real path with the slot extensions inherited', async (t) => {
+test('an approved project form runs its real path, and the slot extension reaches the launcher', async (t) => {
   const rig = newRig(t, { write: marks('machine') });
   patchPolicy(rig, 'forms', { read: rig.readLauncher, write: { path: rig.writeLauncher, extensions: ['builtin:mcp'] } });
   patchPolicy(rig, 'profiles', { read: 'read', write: 'write', 'write-mcp': 'write' });
@@ -470,7 +472,7 @@ test('an approved project form runs its real path with the slot extensions inher
   assert.equal(spawn.form, form.path, 'the spawn execs the real path');
   assert.notEqual(spawn.form, link, 'never the project link');
   const argv = readText(join(rig.markerDir, 'argv')).trim().split('\n');
-  assert.equal(argv[argv.indexOf('-e') + 1], 'builtin:mcp', 'the inherited extension reaches the launcher');
+  assert.equal(argv[argv.indexOf('-e') + 1], 'builtin:mcp', 'the extension pair reaches the launcher');
 });
 
 test('a usable project link with no approval refuses form-unapproved and names the approval command', async (t) => {
@@ -710,12 +712,13 @@ test('the spawn execs the resolved real path, and a later repoint changes neithe
   assert.equal(spawnOf(rig).form, form.path);
   assert.notEqual(spawnOf(rig).form, link, 'never the link');
   assert.equal(readText(join(rig.markerDir, 'argv0')).trim(), form.path, 'the launcher was exec\'d by its real path');
-  // Repointed after admission: what ran is fixed at step 5, so neither the
-  // record nor the launcher's own `$0` moves.
+  // Repointed after admission: the run that already happened is unaffected, and
+  // its launcher's own `$0` — read from the marker it wrote — still names the
+  // real path. (The record was written before the repoint and cannot move, so
+  // re-reading it would prove nothing.)
   const other = rigForm(rig, 'other', marks('other'));
   unlinkSync(link);
   symlinkSync(other.path, link);
-  assert.equal(spawnOf(rig).form, form.path);
   assert.equal(readText(join(rig.markerDir, 'argv0')).trim(), form.path);
 });
 

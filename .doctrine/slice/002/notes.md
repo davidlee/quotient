@@ -168,3 +168,14 @@ runs from this checkout. Workers have no git; the orchestrator commits and runs
   refusal names the link actually inspected (matters for PHASE-05's explicit
   base); `governed` takes only the confined form variant; base-selection and
   symlink-canonical tests strengthened and mutant-checked.
+
+### PHASE-04 — done
+
+- `callTool` step 5 composes slot → extensions → approvals store → governing
+  approval → lookup base → probe → `chooseForm`; spawn execs the probed real
+  path (the hashed object, resolved once); the spawn record names the form
+  source. Review verified no hash/exec TOCTOU and fail-closed on an unusable
+  location or malformed store.
+- The unusable-`approvalsPath` branch is defensive only: XDG-only profiles
+  refuse at step 3 first.
+- Deferred: RSK-001 (full synchronous hash of an unapproved link target).
