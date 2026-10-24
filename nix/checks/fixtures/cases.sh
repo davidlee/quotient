@@ -168,6 +168,12 @@ edit launcher-read '--tmpfs ~' '--tmpfs ~ --tmp-overlay /tmp'
 fixture overlay-src-ro-overlay-tmp default 'refuse:(d)'
 edit launcher-read '--tmpfs ~' '--tmpfs ~ --overlay-src /tmp --ro-overlay /tmp'
 
+# A source is one word: the word after `--overlay-src` is that source, even when
+# it spells an isolation flag the jail requires.
+fixture overlay-src-operand default 'refuse:(d)'
+edit launcher-read ' --unshare-pid' ''
+edit launcher-read '--tmpfs ~' '--tmpfs ~ --overlay-src --unshare-pid'
+
 # An option is a token bwrap reads as an option, not a word inside a --setenv
 # value: a caller's environment value cannot stand in for the flag it spells.
 fixture env-flag default 'refuse:(d)'
@@ -187,6 +193,34 @@ edit launcher-read '"$@"' '"$@" --unshare-pid'
 
 fixture share-net-raw full 'refuse:(d)'
 edit launcher-read '--unshare-net' '--share-net --unshare-net'
+
+# An operand is not an option: the word after `--hostname` is a hostname, even
+# when it spells the isolation flag the jail requires.
+fixture hostname-flag-operand default 'refuse:(d)'
+edit launcher-read ' --unshare-pid' ''
+edit launcher-read '--clearenv' '--clearenv --hostname --unshare-pid'
+
+# And a mount's operands are read the same way: a bind whose source is named
+# `--unshare-pid` is that source in all three launchers, so the bind sets still
+# agree and the missing option is the only fault.
+fixture bind-source-flag-operand full 'refuse:(d)'
+edit launcher-read ' --unshare-pid' ''
+edit launcher-read '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
+edit launcher-write '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
+edit baseline '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
+
+# Nor is an application argument one bwrap reads: pi's own `--setenv` is after
+# the `--`, so neither (e)'s namespace scan nor (h)'s name scan is its business.
+fixture argv-setenv-quotient default pass
+edit launcher-read '"$@"' '"$@" --setenv QUOTIENT_DEBUG 1'
+
+fixture argv-setenv-secret full pass
+edit launcher-read '"$@"' '"$@" --setenv CHECK_SECRET literal'
+
+# And neither is a bind: pi's own argument after the `--` that spells one adds
+# nothing to the set (f) compares.
+fixture argv-bind default pass
+edit launcher-read '"$@"' '"$@" --ro-bind /etc /etc'
 
 ## (e) the server's own namespace
 
@@ -299,6 +333,15 @@ edit launcher-read "$state_quoted" "$state_single"
 fixture root-var-quoted default 'refuse:(c)'
 edit launcher-read '--ro-bind "$quotient_root"' "--ro-bind '\$quotient_root'"
 
+# The guard is about the builder's own operands, not about the characters
+# anywhere in the file: a caller's env value may spell `$quotient_root`, and the
+# builder escapes it as the literal it is. The text is doctored rather than
+# built: writeShellApplication's shellcheck refuses to emit a launcher whose
+# single quotes hold a `$` (SC2016), so no sample family carries the text.
+caller_literal="--setenv CHECK_LITERAL_ROOT '\$quotient_root'"
+fixture caller-literal default pass
+edit launcher-read '--setenv HOME "$HOME"' "--setenv HOME \"\$HOME\" $caller_literal"
+
 # The mask is declared, then filled, then expanded: a declaration after the
 # appends clears what they built.
 fixture mask-order default 'refuse:(i)'
@@ -339,4 +382,10 @@ edit launcher-read "$protect_line" "[ -e $protect_quoted ] && { [ -d /tmp/quotie
 fixture mask-state-dir-check full 'refuse:(i)'
 edit launcher-read "$state_line" "$state_test && { [ -d $state_quoted ] || { $not_a_directory $state_quoted >&2; exit 1; }; quotient_mask+=(--tmpfs $state_quoted); }"
 
-# end of the case table
+# The policy names the protect paths, and a list is a set: a path named twice
+# is one mask line, so the family the builder emits is one the check passes.
+fixture duplicate-protect duplicate pass
+
+# The runner's completion marker: a table that returns or fails early never
+# reaches it, and the runner refuses a corpus that did not set it.
+table_complete

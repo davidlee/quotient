@@ -60,17 +60,19 @@ push_edit() { # op layer from to — onto the case last declared
 edit() { push_edit replace "$1" "$2" "$3"; }
 drop() { push_edit drop "$1" "" ""; }
 
-# The table's own last line. Sourcing a table stops where the load fails, which
-# would leave a truncated corpus reading as a smaller one; the marker is what
-# tells a complete table from a cut-short one.
-table_end='# end of the case table'
+# The table's own last statement: an executed marker, not a comment. Sourcing a
+# table stops where the load fails, and a table that returns early stops there
+# too — either way a comment stays behind whether it was reached or not, so the
+# flag this call sets is what tells a complete corpus from a cut-short one.
+case_table_end=0
+table_complete() { case_table_end=1; }
 
 if ! . "$table"; then
   echo "the case table '$table' did not load" >&2
   exit 1
 fi
-if [ "$(tail -n 1 "$table")" != "$table_end" ]; then
-  echo "the case table '$table' does not end with '$table_end'" >&2
+if [ "$case_table_end" -ne 1 ]; then
+  echo "the case table '$table' did not reach its end" >&2
   exit 1
 fi
 if [ "${#case_name[@]}" -eq 0 ]; then

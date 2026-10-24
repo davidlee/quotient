@@ -1,4 +1,4 @@
-# The fixture corpus's wrapper: both sample families' inputs become the
+# The fixture corpus's wrapper: every sample family's inputs become the
 # environment the runner reads, and the runner's verdict becomes the build's.
 # One derivation for the whole corpus, so the corpus is one check: it fails when
 # any case's verdict flips, and the log names that case.
@@ -31,10 +31,13 @@ let
       # The family's protect paths, so a case can assert a mask line is there.
       "${upper}_PROTECT" = lib.concatStringsSep "\n" family.protect;
     };
+
+  # One block per family the flake builds: a new sample family is wired by
+  # naming it beside the others, never here.
+  blocks = lib.foldl' (acc: name: acc // block name families.${name}) { } (lib.attrNames families);
 in
 pkgs.runCommand "check-fixtures" (
-  block "default" families.default
-  // block "full" families.full
+  blocks
   // {
     nativeBuildInputs = [
       pkgs.bash

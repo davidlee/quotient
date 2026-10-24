@@ -48,6 +48,10 @@ let
   # resolve a relative one against whatever cwd the launch had.
   piFileKeyOk =
     key: key != "" && !(lib.hasPrefix "/" key) && !(lib.elem ".." (lib.splitString "/" key));
+
+  # A protect list is a set: one path named twice is one mask line, so it is
+  # deduplicated once, before it is rendered and before it is returned.
+  protectPaths = lib.unique protect;
   hostPaths =
     lib.optional (persistHome != null) {
       arg = "persistHome";
@@ -60,7 +64,7 @@ let
     ++ map (path: {
       arg = "protect";
       inherit path;
-    }) protect;
+    }) protectPaths;
   describePath = entry: "${entry.arg} \"${entry.path}\"";
   badPiFiles = lib.filter (key: !(piFileKeyOk key)) (lib.attrNames piFiles);
   badHostPaths = lib.filter (entry: !(lib.hasPrefix "/" entry.path)) hostPaths;
@@ -95,7 +99,7 @@ let
   # the read-only root bind that follows, and a path missing on the host has
   # nothing to reveal.
   maskLines = lib.concatMapStrings (line: line + "\n") (
-    [ stateMaskLine ] ++ map protectMaskLine (map lib.escapeShellArg protect)
+    [ stateMaskLine ] ++ map protectMaskLine (map lib.escapeShellArg protectPaths)
   );
 
   # A secret is the caller's shell expression, evaluated in the deferred tail:
@@ -103,8 +107,10 @@ let
   # NUL-separated `--setenv` pairs on a bash-allocated descriptor, so no value
   # ever reaches bwrap's argv. Nothing is emitted for an empty secretEnv.
   secretNames = lib.attrNames secretEnv;
-  # A value that does not expand is a literal handed over as its own text, which
-  # is never what a caller means, so it is refused at the call.
+  # The gate is character presence, not expansion: a value without a `$` reaches
+  # bwrap as its own text, which is never what a caller means. What passes is the
+  # caller's shell expression — an escaped `\$` or a `$$` passes and delivers no
+  # secret, which is the caller's to get right.
   literalSecrets = lib.filter (name: !(lib.hasInfix "$" secretEnv.${name})) secretNames;
   secretRuntime =
     lib.concatMapStrings
@@ -251,8 +257,9 @@ assert lib.assertMsg (badHostPaths == [ ])
   # What the operator's policy must list as exposed: every rw bind source the
   # builder adds beyond the root and the session directory.
   exposure = exposure ++ lib.optional (persistHome != null) persistHome;
-  # The policy's protect paths: the check asserts each is masked.
-  inherit protect;
+  # The policy's protect paths, deduplicated as they are rendered: the check
+  # asserts each is masked.
+  protect = protectPaths;
   secretEnvNames = secretNames;
   inherit network;
 }

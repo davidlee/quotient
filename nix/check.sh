@@ -45,19 +45,34 @@ state_dir='${XDG_STATE_HOME:-$HOME/.local/state}/quotient'
 # raw text with this one, since the normalised read cannot tell a quoted
 # expression from the literal path that spells the same characters.
 state_line="[ -e \"$state_dir\" ] && quotient_mask+=(--tmpfs \"$state_dir\")"
-# Every flag that puts something in the jail, with the operands it takes (its
-# last one being the target), so a caller's flag is read wherever it appears and
-# a form that names one has taken a permission into its own hands. `--overlay`
-# takes its write source, its work directory and its destination; the two
-# single-mount variants take a destination alone. `--overlay-src` is no mount:
-# it names a source, and the destination is the `--overlay` that uses it.
+# Every flag that puts something in the jail — every mount operation — so a
+# caller's flag is read wherever it appears and a form that names one has taken
+# a permission into its own hands. `--overlay` takes its write source, its work
+# directory and its destination; the two single-mount variants take a
+# destination alone. `--overlay-src` is no mount: it names a source, and the
+# destination is the `--overlay` that uses it.
 mount_ops=(
+  --bind --ro-bind --bind-try --ro-bind-try --dev-bind --dev-bind-try
+  --tmpfs --proc --dev --mqueue --dir --remount-ro
+  --symlink --file --bind-data --ro-bind-data --bind-fd --ro-bind-fd
+  --chmod --overlay --tmp-overlay --ro-overlay
+)
+# Every option bwrap takes operands for, with how many, so one scan reads every
+# operand as an operand: a caller's word cannot pass for a flag, nor a flag's
+# operands for options. A mount operation's last operand is its target.
+# Checked against bwrap 0.12.0's `--help`, entry for entry: the options it lists
+# with no operands need no entry, since `arity_of` answers 0 for anything here.
+op_arity=(
   --bind:2 --ro-bind:2 --bind-try:2 --ro-bind-try:2 --dev-bind:2 --dev-bind-try:2
   --tmpfs:1 --proc:1 --dev:1 --mqueue:1 --dir:1 --remount-ro:1
   --symlink:2 --file:2 --bind-data:2 --ro-bind-data:2 --bind-fd:2 --ro-bind-fd:2
-  --chmod:2 --overlay:3 --tmp-overlay:1 --ro-overlay:1
+  --chmod:2 --overlay:3 --tmp-overlay:1 --ro-overlay:1 --overlay-src:1
+  --hostname:1 --uid:1 --gid:1 --chdir:1 --setenv:2 --unsetenv:1 --args:1
+  --userns:1 --userns2:1 --userns-block-fd:1 --pidns:1 --sync-fd:1 --block-fd:1
+  --info-fd:1 --json-status-fd:1 --seccomp:1 --add-seccomp-fd:1 --lock-file:1
+  --perms:1 --size:1 --exec-label:1 --file-label:1 --argv0:1
+  --cap-add:1 --cap-drop:1
 )
-mount_flags=("${mount_ops[@]%%:*}")
 
 # The secret descriptor's open, as the command it must be: a line that merely
 # mentions it opens nothing.
@@ -113,10 +128,6 @@ code() { grep -vE -- '^[[:space:]]*#' "$1" || true; }
 # How many times a literal occurs, 0 included.
 count() { grep -oF -- "$2" "$1" | grep -c . || true; }
 
-# The complete name operand of every --setenv on a line, one per line: a name
-# that merely begins with a secret's name is another name.
-setenv_names() { { grep -oE -- '--setenv [^ ]+' "$1" || true; } | awk '{ print $2 }'; }
-
 # A diagnostic on one line; an empty value reads as nothing.
 single_line() { printf '%s' "${1:-nothing}" | tr '\n' ';'; }
 
@@ -171,25 +182,55 @@ line_no_of() { # file pattern [F|E] [last]
   { grep -n"${3:-F}" -- "$2" "$1" || true; } | cut -d: -f1 | pick_line "${4-}"
 }
 
-# A bwrap line's own tokens: its words up to the `--` that precedes the program,
-# less the two operands of each --setenv, which are an environment name and
-# value, not options. Every rule about flags and about the tail's order reads
-# these, so neither a value nor an application argument that spells a flag is
-# read as that flag.
-argv_tokens() { # line
+# A bwrap line's option stream: one record per word up to the `--` that precedes
+# the program, `opt <word>` for a word in an option position and
+# `operand <word>` for a word an option takes, by the arity table above. One
+# scan feeds every rule about flags, operands and the tail's order, so neither a
+# value nor an application argument that spells a flag is read as that flag, and
+# what pi receives after the `--` is no word here at all.
+argv_scan() { # line
   local -a words=()
   read -ra words <<<"$(<"$1")"
-  local i=0
-  while [ "$i" -lt "${#words[@]}" ]; do
-    case ${words[i]} in
-      --) break ;;
-      --setenv) i=$((i + 3)) ;;
-      *)
-        printf '%s\n' "${words[i]}"
-        i=$((i + 1))
-        ;;
-    esac
+  local i=0 j n
+  while [ "$i" -lt "${#words[@]}" ] && [ "${words[i]}" != -- ]; do
+    printf 'opt %s\n' "${words[i]}"
+    n=$(arity_of "${words[i]}")
+    j=1
+    while [ "$j" -le "$n" ] && [ "$((i + j))" -lt "${#words[@]}" ]; do
+      printf 'operand %s\n' "${words[i + j]}"
+      j=$((j + 1))
+    done
+    i=$((i + 1 + n))
   done
+}
+
+# How many operands bwrap's option $1 takes: none when it takes none.
+arity_of() {
+  local entry
+  for entry in "${op_arity[@]}"; do
+    if [ "${entry%:*}" = "$1" ]; then
+      printf '%s\n' "${entry##*:}"
+      return 0
+    fi
+  done
+  printf '0\n'
+}
+
+# That stream, into the array the caller names $2: mapfile takes a name, so the
+# name needs no nameref of its own.
+argv_stream() { mapfile -t "$2" < <(argv_scan "$1"); }
+
+# That stream's words, options and operands alike.
+argv_words() { argv_scan "$1" | cut -d' ' -f2-; }
+
+# Only its words in an option position: what bwrap is asked to do, never a value
+# it is given.
+option_words() { argv_scan "$1" | awk '$1 == "opt" { sub(/^opt /, ""); print }'; }
+
+# The complete name operand of every --setenv bwrap reads, one per line: a name
+# that merely begins with a secret's name is another name.
+setenv_names() {
+  argv_scan "$1" | awk '$1 == "opt" && $2 == "--setenv" { if (getline > 0) { sub(/^operand /, ""); print } }'
 }
 
 # That the line carries $2 as an option bwrap reads. The tokens are read into a
@@ -197,26 +238,26 @@ argv_tokens() { # line
 # then read the writer's SIGPIPE as "no such option".
 has_option() {
   local opts
-  opts=$(argv_tokens "$1")
+  opts=$(option_words "$1")
   grep -qxF -- "$2" <<<"$opts"
 }
 
 # How many times the line carries $2 as an option bwrap reads.
-option_count() { argv_tokens "$1" | grep -cxF -- "$2" || true; }
+option_count() { option_words "$1" | grep -cxF -- "$2" || true; }
 
 # A required option, there or not there, read the same way: as an option bwrap
 # reads, rather than as the value of a --setenv that happens to spell it.
 must_option() { if ! has_option "$2" "$3"; then fail "$1" "missing option '$3'"; fi; }
 must_not_option() { if has_option "$2" "$3"; then fail "$1" "unexpected option '$3'"; fi; }
 
-# How many times the option $2 takes the complete operand $3, read as option
-# tokens: a descriptor whose name merely begins with it is another descriptor.
+# How many times the option $2 takes the complete operand $3, read from the
+# stream: a descriptor whose name merely begins with it is another descriptor.
 option_operand_count() { # line option operand
-  local -a words=()
-  mapfile -t words < <(argv_tokens "$1")
+  local -a stream=()
+  argv_stream "$1" stream
   local i n=0
-  for i in "${!words[@]}"; do
-    if [ "${words[i]}" = "$2" ] && [ "${words[i + 1]-}" = "$3" ]; then
+  for i in "${!stream[@]}"; do
+    if [ "${stream[i]}" = "opt $2" ] && [ "${stream[i + 1]-}" = "operand $3" ]; then
       n=$((n + 1))
     fi
   done
@@ -238,16 +279,20 @@ canonical_target() {
 }
 
 # Every mount on a bwrap line, one per line as `flag target`: the target of a
-# bwrap mount operation is its last operand, which every mount flag takes.
-mounts() {
-  local -a words=()
-  mapfile -t words < <(argv_tokens "$1")
-  local i j op
-  for i in "${!words[@]}"; do
+# mount operation is its last operand, which the stream carries at the flag's
+# arity.
+mounts() { # line-file
+  local -a stream=()
+  argv_stream "$1" stream
+  local i flag target n op
+  for i in "${!stream[@]}"; do
+    if [ "${stream[i]%% *}" != opt ]; then continue; fi
+    flag=${stream[i]#* }
     for op in "${mount_ops[@]}"; do
-      if [ "${words[i]}" = "${op%:*}" ]; then
-        j=$((i + ${op##*:}))
-        printf '%s %s\n' "${words[i]}" "$(canonical_target "${words[j]-}")"
+      if [ "$flag" = "$op" ]; then
+        n=$(arity_of "$flag")
+        target=${stream[i + n]-}
+        printf '%s %s\n' "$flag" "$(canonical_target "${target#* }")"
       fi
     done
   done
@@ -256,14 +301,26 @@ mounts() {
 # The mounts on a bwrap line whose target is $2.
 mounts_to() { mounts "$1" | awk -v target="$2" '$NF == target'; }
 
-# Every bind triple in a launcher, sorted and unique (lifted from satan): the
-# form's set minus the baseline's is the residue (f) reads. A device bind is a
-# read-write bind, so it is in the set: (f) and (g) are about the permissions a
-# caller ends up with, and the flag's name is no part of that.
-bind_words() {
-  {
-    grep -oE -- '--(ro-|dev-)?bind(-try)? [^ ]+ [^ ]+' "$1" || true
-  } |
+# Every bind triple on a bwrap line, sorted and unique (lifted from satan): the
+# form's set minus the baseline's is the residue (f) reads. Read from the option
+# stream, so a word after the `--` that spells a bind names no mount. A device
+# bind is a read-write bind, so it is in the set: (f) and (g) are about the
+# permissions a caller ends up with, and the flag's name is no part of that.
+bind_words() { # line-file
+  local -a stream=()
+  argv_stream "$1" stream
+  local i flag source target
+  for i in "${!stream[@]}"; do
+    case ${stream[i]} in
+      'opt --bind' | 'opt --ro-bind' | 'opt --bind-try' | 'opt --ro-bind-try' | \
+        'opt --dev-bind' | 'opt --dev-bind-try') ;;
+      *) continue ;;
+    esac
+    flag=${stream[i]#opt }
+    source=${stream[i + 1]-}
+    target=${stream[i + 2]-}
+    printf '%s %s %s\n' "$flag" "${source#operand }" "${target#operand }"
+  done |
     sed -E "$fold_store" |
     sort -u
 }
@@ -289,32 +346,32 @@ index_of() {
 # cannot slip behind it.
 check_tail() { # label root line-file
   local label=$1 root=$2
-  local -a tail_tokens=()
-  mapfile -t tail_tokens < <(argv_tokens "$3")
+  local -a stream=()
+  argv_stream "$3" stream
   local -a expected=(
-    "$root" "\$quotient_root" "\$quotient_root"
-    --bind "$session_var" "$session_var"
-    --chdir "\$quotient_root"
+    "opt $root" 'operand $quotient_root' 'operand $quotient_root'
+    'opt --bind' "operand $session_var" "operand $session_var"
+    'opt --chdir' 'operand $quotient_root'
   )
   local mask i flag
-  if ! mask=$(index_of tail_tokens "$mask_token"); then
+  if ! mask=$(index_of stream "opt $mask_token"); then
     fail "$label" "the tail does not open with $mask_token"
     return
   fi
   for i in "${!expected[@]}"; do
-    if [ "${tail_tokens[mask + 1 + i]:-}" != "${expected[i]}" ]; then
-      fail "$label" "tail token $((mask + 2 + i)) is '${tail_tokens[mask + 1 + i]:-}', expected '${expected[i]}'"
+    if [ "${stream[mask + 1 + i]-}" != "${expected[i]}" ]; then
+      fail "$label" "tail word $((mask + 2 + i)) is '${stream[mask + 1 + i]-}', expected '${expected[i]}'"
     fi
   done
-  for i in "${!tail_tokens[@]}"; do
+  for i in "${!stream[@]}"; do
     # The positions compared above are the tail's own, root and session bind
     # included; a mount flag from there on is a caller's, and whatever it mounts
     # it does so behind the session bind.
-    if [ "$i" -le "$((mask + ${#expected[@]}))" ]; then
+    if [ "$i" -le "$((mask + ${#expected[@]}))" ] || [ "${stream[i]%% *}" != opt ]; then
       continue
     fi
-    for flag in "${mount_flags[@]}"; do
-      if [ "${tail_tokens[i]}" = "$flag" ]; then
+    for flag in "${mount_ops[@]}"; do
+      if [ "${stream[i]}" = "opt $flag" ]; then
         fail "$label" "'$flag' at tail position $((i - mask)) is not the root or the session bind"
       fi
     done
@@ -335,7 +392,7 @@ check_capability() {
     read) root=--ro-bind ;;
     write) root=--bind ;;
   esac
-  for flag in "${mount_flags[@]}"; do
+  for flag in "${mount_ops[@]}"; do
     if [ "$flag" != "$root" ]; then other_flags+=("$flag"); fi
   done
 
@@ -364,7 +421,7 @@ check_capability() {
   must "$a" "$form_code" 'export QUOTIENT_ACTIVE_SESSION_DIR="$session_dir"'
   must_not "$a" "$form_code" ' -- '
   must_not "$a" "$form_code" '$2'
-  for flag in "${mount_flags[@]}"; do
+  for flag in "${mount_ops[@]}"; do
     must_not_word "$a" "$form_code" "$flag"
   done
 
@@ -383,6 +440,7 @@ check_capability() {
   # The launcher's text as every rule reads it, the bwrap line, and that line's
   # number, which (h)'s open and (i)'s append order are read against.
   local text=$work/$cap-launcher line=$work/$cap-line bwrap_at raw=$work/$cap-raw
+  local raw_line=$work/$cap-raw-line
   launcher_text "$launcher" >"$text"
   extract_line "$text" "$line"
   bwrap_at=$(bwrap_line_no "$text")
@@ -404,20 +462,23 @@ check_capability() {
   for flag in "${other_flags[@]}"; do
     must_not "$c" "$line" "$flag \$quotient_root"
   done
-  local roots masks append expr
+  local roots masks append
   roots=$(grep -F -- 'quotient_root=' "$text" || true)
   if [ "$roots" != "quotient_root=\$(pwd -P)" ]; then
     fail "$c" "quotient_root must be assigned once, as \$(pwd -P); found: $(single_line "$roots")"
   fi
-  # A single-quoted occurrence of one of the builder's own expressions is the
-  # literal that spells it, not the value it names: nothing expands, so the
-  # mount it asks for is a path of the jail's making. (c) reads the raw text for
-  # this, because the normalised read has already dropped the quotes.
-  for expr in "\$quotient_root" "$session_var" "$state_dir"; do
-    if grep -qF -e "'$expr" -e "$expr'" "$raw"; then
-      fail "$c" "'$expr' is single-quoted, so it names a literal and not the value the builder passes"
-    fi
-  done
+  # The builder's own operands are shell words it expands: the root bind's two,
+  # the session bind's two and the chdir's one. Single-quoted, one of them is
+  # the literal that spells it and the mount it asks for is a path of the jail's
+  # making, so they are read as the builder writes them, from the raw line: the
+  # normalised read has already dropped the quotes. Only these operands are read
+  # this way — a caller's env value or protect path may spell the same
+  # characters, and the builder escapes them as the literals they are — and the
+  # state line's own text is (i)'s.
+  extract_line "$raw" "$raw_line"
+  must "$c" "$raw_line" "$root \"\$quotient_root\" \"\$quotient_root\""
+  must "$c" "$raw_line" "--bind \"$session_var\" \"$session_var\""
+  must "$c" "$raw_line" "--chdir \"\$quotient_root\""
   masks=$(grep -cxF -- 'quotient_mask=()' "$text" || true)
   if [ "$masks" -ne 1 ]; then
     fail "$c" "quotient_mask=() is declared $masks times, want exactly once"
@@ -453,20 +514,27 @@ check_capability() {
   fi
 
   # (e) Nothing of the server's own namespace reaches the jail: no QUOTIENT_
-  # variable on bwrap's argv, and no session home, run directory or policy path.
-  if grep -qE -- '--setenv QUOTIENT_' "$line"; then
-    fail "$e" "bwrap's argv sets a QUOTIENT_ variable"
-  fi
+  # variable among the names bwrap's argv sets, and no session home, run
+  # directory or policy path among its words. Both read the option stream, so
+  # neither is pi's own argument after the `--`.
+  local set_name argv=$work/$cap-argv
+  argv_words "$line" >"$argv"
+  while IFS= read -r set_name; do
+    case $set_name in
+      QUOTIENT_*) fail "$e" "bwrap's argv sets the QUOTIENT_ variable '$set_name'" ;;
+    esac
+  done < <(setenv_names "$line")
   for guard in QUOTIENT_SESSION_HOME QUOTIENT_RUN_DIR QUOTIENT_POLICY; do
-    must_not "$e" "$line" "$guard"
+    must_not "$e" "$argv" "$guard"
   done
 
   # (f) The bind set is the baseline's plus exactly this capability's root bind
   # and the session bind: nothing dropped, nothing else added, so no caller
   # permission has moved between the form and its baseline.
-  bind_words "$text" >"$work/$cap-binds"
-  printf '%s\n' "$root \$quotient_root \$quotient_root" "--bind $session_var $session_var" >"$work/$cap-expected"
-  bind_words "$work/$cap-expected" >"$work/$cap-expected-set"
+  bind_words "$line" >"$work/$cap-binds"
+  # The expected set is written here, not read from a launcher: it needs no scan.
+  printf '%s\n' "$root \$quotient_root \$quotient_root" "--bind $session_var $session_var" |
+    sed -E "$fold_store" | sort -u >"$work/$cap-expected-set"
   comm -13 "$work/baseline-binds" "$work/$cap-binds" >"$work/$cap-added"
   comm -23 "$work/baseline-binds" "$work/$cap-binds" >"$work/$cap-dropped"
   if ! cmp -s "$work/$cap-expected-set" "$work/$cap-added" || [ -s "$work/$cap-dropped" ]; then
@@ -599,7 +667,7 @@ check_baseline() {
   launcher_text "$BASELINE" >"$text"
   extract_line "$text" "$line"
   refuse_continuation "(e) baseline" "$line"
-  bind_words "$text" >"$work/baseline-binds"
+  bind_words "$line" >"$work/baseline-binds"
 
   local root_binds
   root_binds=$(mounts_to "$line" "\$quotient_root")

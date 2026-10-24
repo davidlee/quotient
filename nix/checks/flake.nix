@@ -29,6 +29,11 @@
       probePi =
         pkgs: capability:
         pkgs.writeShellScriptBin "pi" ''
+          # The entry sentinel, printed before anything else: a row that says the
+          # probe pi never ran reads its absence from stdout, rather than
+          # inferring it from a marker a later write would have made.
+          printf 'probe-entry\n'
+
           set -uo pipefail
 
           probe_root=/tmp/quotient-form-probe
@@ -230,11 +235,15 @@
         extra = "/tmp/quotient-checks/extra";
       };
 
-      # The two sample families the check runs over: one with only the required
+      # The sample families the check runs over: one with only the required
       # arguments, so it takes the default network and the no-secret path; one
       # with every argument — a non-default toolchain, a secret on a descriptor,
       # a persisted home and protect, network = false. Both have a stub pi: the
-      # check reads launcher text and never launches one.
+      # check reads launcher text and never launches one. A family is only
+      # sampleable if the builder can emit it: text that writeShellApplication's
+      # shellcheck rejects (a caller literal spelling a builder variable) is no
+      # family, however well the check would read it — the corpus edits the
+      # default family's launcher to cover that text instead.
       sampleBase = pkgs: {
         inherit pkgs jail-nix;
         pi = pkgs.writeShellScriptBin "pi" "exit 0";
@@ -251,10 +260,21 @@
         persistHome = samplePaths.home;
         network = false;
       };
-      sampleFamilies = pkgs: {
-        default = quotient.lib.mkFormFamily (sampleBase pkgs);
-        full = quotient.lib.mkFormFamily (sampleBase pkgs // fullArgs pkgs);
-      };
+      sampleFamilies =
+        pkgs:
+        let
+          full = sampleBase pkgs // fullArgs pkgs;
+          family = quotient.lib.mkFormFamily;
+        in
+        {
+          default = family (sampleBase pkgs);
+          full = family full;
+          # A list is a set: one protect path named twice is one mask line, so
+          # the family is one the check passes.
+          duplicate = family (
+            full // { protect = [ samplePaths.protect samplePaths.protect ]; }
+          );
+        };
     in
     {
       packages = forAllSystems (

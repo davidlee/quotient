@@ -272,18 +272,20 @@ setenv_once() { # <name> <launcher>
 }
 
 # A launch the builder must refuse before the probe pi runs: non-zero exit, no
-# marker in the root or the session directory, and — when a message is named —
-# that message in stderr, so the refusal is the guard's and not a later
-# failure's. Three subjects: a forwarded name that is missing, an empty secret,
-# and a protect path that is a file.
+# entry sentinel on stdout — the probe pi prints one first thing, so any stdout at
+# all means it ran — no marker in the root or the session directory, and, when a
+# message is named, that message in stderr, so the refusal is the guard's and not
+# a later failure's. Three subjects: a forwarded name that is missing, an empty
+# secret, and a protect path that is a file.
 refuses_launch() { # row description expected-message command...
-  local row=$1 desc=$2 want=$3 status=0 err=$P/refuse-stderr
+  local row=$1 desc=$2 want=$3 status=0 err=$P/refuse-stderr out=$P/refuse-stdout entered=
   shift 3
-  rm -f -- "$root/probe-marker" "$session/probe-marker" "$err"
+  rm -f -- "$root/probe-marker" "$session/probe-marker" "$err" "$out"
   ( cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$world/state" \
-    "$@" </dev/null >/dev/null 2>"$err" ) || status=$?
-  if [ "$status" -eq 0 ] || [ -e "$root/probe-marker" ] || [ -e "$session/probe-marker" ]; then
-    fail "$row" "$desc — exit $status"
+    "$@" </dev/null >"$out" 2>"$err" ) || status=$?
+  entered=$(<"$out")
+  if [ "$status" -eq 0 ] || [ -n "$entered" ] || [ -e "$root/probe-marker" ] || [ -e "$session/probe-marker" ]; then
+    fail "$row" "$desc — exit $status, pi stdout: $(tr '\n' ' ' <<<"$entered")"
   elif [ -n "$want" ] && ! grep -qF -- "$want" "$err"; then
     fail "$row" "$desc — exit $status, stderr: $(tr '\n' ' ' <"$err")"
   else
@@ -291,10 +293,11 @@ refuses_launch() { # row description expected-message command...
   fi
 }
 
-# A literal secretEnv value must fail at evaluation, naming the variable: only a
-# shell expression that expands reaches bwrap's environment. The family lives
-# outside the flake's packages so `nix flake check` never meets the refusal, and
-# only an eval forces it.
+# A secretEnv value with no `$` must fail at evaluation, naming the variable:
+# the builder's gate is character presence, so what it admits is the caller's
+# shell expression and never the text that spells one. The family lives outside
+# the flake's packages so `nix flake check` never meets the refusal, and only an
+# eval forces it.
 literal_secret() {
   local status=0 out
   out=$(cd "$repo" && nix eval "./nix/checks#legacyPackages.$system.literal-secret" \
