@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 // The `quotient` bin: the one module with side effects at import. Bare, it
-// serves MCP on stdio; the verbs are `reduce`, `help` and `--version`.
+// serves MCP on stdio; the verbs are `reduce`, `help`, `allow`, `revoke` and
+// `--version`.
 //
 //   quotient                 serve (exit 0 after shutdown)
 //   quotient reduce …        the reducer (exit 0 completed, 1 failed or incomplete, 2 usage)
 //   quotient help [SECTION]  one section, or the list (exit 2 for an unknown section,
 //                            1 for an unreadable help layer)
+//   quotient allow [ARGS]    report a project's form identities, or record them
+//                            (exit 1 refused, 2 usage); never prompts (DEC-009)
+//   quotient revoke [ARGS]   remove recorded approvals (exit 1 if nothing is stored)
 //   quotient --version       the package version
 import { serve, legacyLayerFailure } from './server/server.ts';
 import { main as reduce } from './reduce/cli.ts';
+import { allow, revoke } from './approve.ts';
 import { packageVersion } from './root.ts';
 import { resolveLocations, type Env } from './config.ts';
 import { loadProfiles } from './server/profiles.ts';
@@ -17,7 +22,13 @@ import { HELP_SECTIONS, loadHelp, renderContext, sectionName, sectionText } from
 const USAGE = `usage: quotient                 serve MCP on stdio
        quotient reduce [ARGS]   reduce a pi --mode json event stream
        quotient help [SECTION]  print a help section, or list them
+       quotient allow [ARGS]    report a project's form identities, or record them
+       quotient revoke [ARGS]   remove recorded approvals
        quotient --version`;
+
+/** The two operator verbs' sinks: their text to the streams the bin owns. */
+const out = (text: string): void => {process.stdout.write(text);};
+const err = (text: string): void => {process.stderr.write(text);};
 
 /**
  * One help section, or the list. It reads the same layers a server launched
@@ -81,6 +92,10 @@ async function run(argv: string[]): Promise<number> {
       return reduce(rest);
     case 'help':
       return help(rest[0], process.env, process.cwd());
+    case 'allow':
+      return allow(rest, process.env, process.cwd(), out, err);
+    case 'revoke':
+      return revoke(rest, process.env, process.cwd(), out, err);
     case '--version':
       process.stdout.write(`${packageVersion()}\n`);
       return 0;

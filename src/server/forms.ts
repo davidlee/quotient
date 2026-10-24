@@ -34,8 +34,9 @@ export type ProjectForm =
   | { kind: 'invalid'; link: string; detail: string }
   | { kind: 'usable'; link: string; path: string; sha256: string };
 
-/** The form's one location, spelled once: `<base>/.quotient/forms/<capability>`. */
-const projectLink = (base: string, capability: Filesystem): string =>
+/** The form's one location, spelled once: `<base>/.quotient/forms/<capability>`.
+ *  Exported for `approve.ts`, whose report and record name the same path. */
+export const projectLink = (base: string, capability: Filesystem): string =>
   join(base, '.quotient', 'forms', capability);
 
 /** The capability a project link names: its last component. */

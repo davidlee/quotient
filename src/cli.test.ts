@@ -4,11 +4,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packageRoot, packageVersion } from './root.ts';
-import { validPolicy, workspace, xdgHelpLayer, xdgProfileLayer, type Env } from './server/test-rig.ts';
+import { readApprovals } from './server/approvals.ts';
+import {
+  newRig,
+  plantProjectForm,
+  rigApprovalsPath,
+  rigForm,
+  validPolicy,
+  workspace,
+  xdgHelpLayer,
+  xdgProfileLayer,
+  type Env,
+} from './server/test-rig.ts';
 
 const CLI = new URL('./cli.ts', import.meta.url).pathname;
 
@@ -140,5 +151,43 @@ test('help warns that a legacy launch-dir layer is refused, and still prints the
     assert.ok(stderr.includes(legacy), stderr);
     assert.match(stderr, new RegExp(`quotient no longer reads ${kind} from the launch directory`));
     assert.ok(stderr.includes(`quotient/${kind}/ and restart`), `the destination is named: ${stderr}`);
+  }
+});
+
+test('allow reports and records a project form, and revoke removes it', (t) => {
+  const rig = newRig(t);
+  const form = rigForm(rig, 'approved');
+  plantProjectForm(rig, form);
+  const run = (argv: string[]): { status: number | null; stdout: string; stderr: string } =>
+    quotient(argv, '', { env: rig.env, cwd: rig.root });
+
+  const report = run(['allow']);
+  assert.equal(report.status, 0, report.stderr);
+  assert.ok(report.stdout.includes(`resolves  ${form.path}`), report.stdout);
+  assert.ok(report.stdout.includes(`quotient allow ${rig.root} write=${form.path}@${form.sha256}`), report.stdout);
+  assert.equal(existsSync(rigApprovalsPath(rig)), false, 'a report never writes');
+
+  const record = run(['allow', rig.root, `write=${form.path}@${form.sha256}`]);
+  assert.equal(record.status, 0, record.stderr);
+  assert.equal(record.stdout, `recorded write=${form.path}@${form.sha256} for ${rig.root}\n`);
+  const stored = readApprovals(rigApprovalsPath(rig));
+  assert.equal(stored.ok, true, stored.ok ? '' : stored.detail);
+  assert.deepEqual(stored.approvals.map((entry) => entry.path), [form.path]);
+
+  const revoked = run(['revoke', rig.root]);
+  assert.equal(revoked.status, 0, revoked.stderr);
+  assert.equal(revoked.stdout, `revoked write for ${rig.root}\n`);
+  const after = readApprovals(rigApprovalsPath(rig));
+  assert.equal(after.ok, true, after.ok ? '' : after.detail);
+  assert.deepEqual(after.approvals, []);
+});
+
+test('allow and revoke pass their usage errors through as exit 2', () => {
+  const { env, cwd } = hermetic();
+  for (const argv of [['allow', `write=/nix/store/x@${'a'.repeat(64)}`], ['revoke']]) {
+    const { status, stdout, stderr } = quotient(argv, '', { env, cwd });
+    assert.equal(status, 2, `${argv.join(' ')}: ${stderr}`);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^usage: quotient allow/m);
   }
 });

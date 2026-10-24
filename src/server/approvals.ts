@@ -57,7 +57,9 @@ const invalid = (detail: string): { ok: false; detail: string } => ({ ok: false,
 const isCanonicalAbsolute = (value: unknown): value is string =>
   typeof value === 'string' && isAbsolute(value) && resolve(value) === value;
 
-const isDigest = (value: unknown): value is string =>
+/** A digest is 64 lowercase hex characters, and nothing else. Exported so the
+ *  verbs parse the digest they are given by the same rule the store reads it. */
+export const isDigest = (value: unknown): value is string =>
   typeof value === 'string' && SHA256_HEX.test(value);
 
 /** VALUE as a record whose keys are exactly KEYS, or why it is not one. AT names
