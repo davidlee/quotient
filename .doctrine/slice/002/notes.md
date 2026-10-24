@@ -6,13 +6,23 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: <yyyy-mm-dd> · <PHASE-NN | stage> · <head-commit>
+fresh-as-of: 2026-10-24 · design/drafting · 64080bc
 
 ### Produced
+- slice opened, re-scoped, researched (rounds 1–2), design run to drafting — commits a8dc74a..64080bc; no code yet
+- minted: DEC-007..011 (shaping); IDE-001 — policy extends (likely obsolete); IDE-002 — broader pi extensions (out of scope)
+- design review 1 (informal Codex) integrated — § Design review 1
 
 ### Learned
+- research via quotient `pi_agent` (profile `research`): cheap (~$0.03/thread), cited, needs ✓ spot-checks; raw = run `transcript.md` copied to `research/raw/`
 
 ### Open
+- DEC-007 — machine/project split; root = longest roots entry
+- DEC-008 — approval is the selection; no fallback once approved
+- DEC-009 — approvals.json; `allow <path> <cap>=<sha>`; `revoke`; lock
+- DEC-010 — project form substitutes slot executable; real path outside roots/exposure/session home
+- DEC-011 — stay on /2 with explicit compatibility rule
+- IMP-003 — Nix helper should emit single-file forms (after SL-002)
 
 ## Design triage (2026-10-24, exploring)
 

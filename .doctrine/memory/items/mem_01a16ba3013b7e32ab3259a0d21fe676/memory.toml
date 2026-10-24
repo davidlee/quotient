@@ -1,0 +1,46 @@
+memory_uid = "mem_01a16ba3013b7e32ab3259a0d21fe676"
+memory_key = "mem.pattern.quotient.pi-agent-research"
+schema_version = 1
+memory_type = "pattern"
+status = "active"
+title = "Run doctrine research threads through quotient pi_agent"
+summary = "Research threads via quotient pi_agent (profile research): cheap, cited; spot-check load-bearing claims; copy run transcript.md to research/raw/"
+created = "2026-10-24"
+updated = "2026-10-24"
+
+[scope]
+paths = [".doctrine/slice"]
+globs = []
+commands = []
+tags = ["research", "quotient", "orchestration"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "c75a805cb7352231524403de8a825d39d468ba4b"
+ref_name = "refs/heads/main"
+checkout_state_id = "d1b6783f4315676f3f3a2ece1a219ca82858a7671498e289b1d67d2ef1c10662"
+base_commit = "64080bcb396153572c9c4f30a215640aeb780ac3"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
+[[source]]
+kind = "slice"
+ref = "SL-002"
+
