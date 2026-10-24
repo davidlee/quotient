@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-24 · design inquiring (run rev 21) · HEAD+pending commit
+fresh-as-of: 2026-10-24 · design inquiring (run rev 21) · 00cc7b5
 
 ### Produced
 - slice scoped + research round (commit edbae66); design run inq-1..inq-10 all disposed
