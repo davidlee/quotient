@@ -6,23 +6,26 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-24 · audit · db1fff6 + this commit
+fresh-as-of: 2026-10-24 · audit concluded (RV-009) · this commit
 
 ### Produced
 - PHASE-01..06 done; release 0.3.0 — commits 9aabdf9..e660bd6 (fork branch `sl-002`, fast-forwarded to main), db1fff6; `just gate` green at e660bd6 (425/0, pack-check 4/4)
 - per-phase deltas and review refinements — § Execution log below
 - minted: RSK-001 — unapproved form link hashed in full before the approval check
+- RV-009 — audit ledger, done; synthesis and reconciliation brief in `review-009.md`
+- RV-006 — F-1, F-3 verified against shipped tests; concluded, done
+- source-delta registry rows for PHASE-01..06 (bootstrapped at audit, RV-009 F-6)
+- seven test retitles so `slice verify-vt 2` passes (RV-009 F-3)
 - operator chore, not backlog: rebuild and restart the quotient MCP server so the ISS-001 fix is live
 - `.worktrees/sl-002` fork and branch `sl-002` still present (merged)
 
 ### Learned
-- mem.pattern.quotient.pi-agent-orchestration — 30-request calls, rotating sessions near 120k, commit before the gate, review workers
+- mem.pattern.quotient.pi-agent-orchestration — 30-request calls, rotating sessions near 120k, commit before the gate, review workers; record-delta per phase; VT keywords in test titles
 
 ### Open
-- DEC-012 — the approvals store refuses non-canonical paths; reconcile with design sec-2
-- DEC-013 — `allow` refuses when a deeper approval governs; reconcile with design sec-3
+- RV-009 F-1, F-2, F-4 — reconciliation brief items (design sec-2, sec-3, selector add) for /reconcile
+- DEC-012, DEC-013 — proposed; settle at reconcile with operator assent
 - RSK-001 — deferred robustness gap (a size cap is policy the design doesn't state)
-- RV-006 F-1, F-3 — probe-routed design findings (`doctrine review show RV-006 -f 1,3`) awaiting post-phase verification at audit; this is why RV-006 is still active
 - IMP-003 — the Nix helper should emit single-file forms (after SL-002)
 - IMP-004, IMP-005 — follow-up refactors from the arch pass (unchanged)
 

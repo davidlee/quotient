@@ -10,7 +10,7 @@ raiser    = "codex"
 responder = "responder"
 rounds_base = 0
 contests_base = 0
-concluded = false
+concluded = true
 
 [[review.turn]]
 act = "conclude"
@@ -27,12 +27,19 @@ act = "conclude"
 role = "raiser"
 note = "F-6-only follow-up pass complete as codex. Verified the exact-stored-root revoke disposition against amended DEC-009, design sec-3 target resolution/Revoke and sec-4 regression obligations, and reconciled SL-002. Removed-policy-root and deleted-directory approvals are addressable independently of current roots/filesystem resolution; exact-key deletion preserves parent approvals and unknown targets refuse. No new findings from this revision. Earlier F-1..F-5 outcomes and accepted limitations were not reopened. No implementation/runtime checks performed; only RV-006 ledger changed."
 
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Final pass at SL-002 audit: the two probe-routed findings (F-1, F-3), whose terminal close was deferred to their phase criteria, verified against the shipped tests (server.test.ts:689; approve.test.ts:356 plus its batch and changed-bytes siblings) with `just gate` green at e660bd6. F-2, F-4, F-5, F-6 were already verified. No new findings.
+"""
+
 [target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
 ref   = "SL-002"
 
 [[finding]]
 id = "F-1"
-status = "answered"
+status = "verified"
 severity = "blocker"
 title = "Retargeting a writable roots symlink can discard approval selection and restore the machine default"
 detail = """
@@ -78,6 +85,13 @@ response = """
 Re-disposed with route probe; substance unchanged from the verified answer. Design repair (operator choice): the governing approval is the deepest approval for the capability whose recorded canonical root contains the call's canonical root; it is the lookup base and wins over any roots-entry match. DEC-007/008 amended; design sec-2 Step 5, Residual: relocation, Invariants.
 Probe. Must hold against: a write delegate that can create, delete or retarget symlinks and directories anywhere inside its writable root (including a symlink that is, or lies on the path of, a roots entry), in both orders of the roots list; after its writes, a later call whose canonical root lies inside an approved root runs that approval's identity or refuses, and never runs the machine default form. Need not hold against: relocation, where the orchestrator names a cwd through a delegate-writable symlink and the call runs in a different directory outside every approval (documented residual); an unconfined orchestrator running quotient allow or revoke.
 Criterion must assert: with roots /work and /work/current (both orders), an approval at the canonical /work/A, and each retarget variant (current pointed into /work/A/sub; current pointed away from /work/A), a call whose canonical root is inside /work/A refuses or runs A's approved identity, observed in the spawn audit record (form_source project, form_root /work/A). Host phase constraint: the phase that implements step 5 selection in server.ts with forms.ts and approvals.ts, after the approvals reader exists; uses test-rig helpers to plant forms outside roots.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = """
+Probe criterion verified post-phase, at SL-002 audit (RV-009), against the shipped test src/server/server.test.ts:689 "a roots entry retargeted into or away from an approved project still runs its form, roots in both orders (RV-006 F-1)" (PHASE-04 VT-1). It builds roots [work, work/current] in both orders ('entry first', 'alias first'), an approval at the canonical work/A, and both retarget variants (current -> A/sub; current -> work/other). For each of the four cases a call whose canonical root is inside A runs only the approved form (formsRun = ['approved']) and the spawn record shows form_source 'project', form_root = A and form_sha256 = the approved digest; the machine form never runs. Discriminates: a lookup base of rootsEntry alone sends the 'into' case to work/A/sub (no link, ungoverned -> machine form) and fails the assertion. `just gate` green at e660bd6 (425 pass). Residual relocation stays documented, as accepted.
 """
 
 [[finding]]
@@ -133,7 +147,7 @@ note = "VERIFIED, route review: re-read the routed response, DEC-010, design.md:
 
 [[finding]]
 id = "F-3"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "Digest-only allow confirmation can approve a different real path than the operator reviewed"
 detail = """
@@ -179,6 +193,13 @@ response = """
 Re-disposed with route probe; substance unchanged from the verified answer. Design repair: quotient allow PATH CAP=REALPATH@SHA256 records only if, under the store lock, the fresh probe's real path and sha256 both equal those given; otherwise nothing is written and it exits 1. DEC-009 amended; design sec-3 Record.
 Probe. Must hold against: a write delegate that repoints the project link between the operator's report and the record command, to a different real path with byte-identical content, or to different bytes at the same path; and a batch where one pair matches and another does not. Need not hold against: an unconfined orchestrator that runs both the report and the record itself; a target the operator left delegate-writable (F-2 obligation).
 Criterion must assert: after a report shows real path A with digest H, repointing the link to B with identical bytes makes allow ROOT write=A@H exit 1 with both identities named and leave approvals.json byte-identical; the matching case records exactly A with H. Host phase constraint: the phase that implements src/approve.ts allow, after updateApprovals and probeProjectForm exist.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = """
+Probe criterion verified post-phase, at SL-002 audit (RV-009), against src/approve.test.ts:356 "the same bytes at another path after the review refuse to record, and leave the store byte-identical (RV-006 F-3)" (PHASE-05 VT-1). Two forms with identical bytes (sha256 equal, asserted); after recording A@H the link is repointed to B; `allow ROOT write=A@H` exits 1, stderr names both A and B and "nothing was recorded", approvals.json is byte-identical, and A still governs; the matching case `write=B@H` records exactly B with H. The batch half (one mismatching pair writes nothing) is approve.test.ts "one bad pair in a batch records none…", and changed bytes at the same path is "changed bytes refuse to record and write nothing". Gate green at e660bd6.
 """
 
 [[finding]]

@@ -138,7 +138,7 @@ test('the report names the refusal admission would reach, from the same decision
 
 // ── T2: the report's two halves apart (RV-008 F-1, VT-3) ───────────────────
 
-test('a shallower approval governs the report; its own link and the candidate vary independently', () => {
+test('a shallower approval governs the report; its own link (adding revoke advice) and the candidate vary independently', () => {
   const shallower = approval({ root: '/work', path: '/nix/store/work/bin/quotient-write', sha256: 'b'.repeat(64) });
   const candidate = usable('/nix/store/satan/bin/quotient-write', 'c'.repeat(64), '/work/satan/.quotient/forms/write');
   const matching = usable(shallower.path, shallower.sha256, '/work/.quotient/forms/write');

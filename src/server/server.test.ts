@@ -547,7 +547,7 @@ function nestedApprovals(t: TestContext): { rig: Rig; outer: RigForm; deep: RigF
   return { rig, outer, deep, deepRoot };
 }
 
-test('the deepest approval containing the call governs it', async (t) => {
+test('nested approvals: the deepest approval containing the call governs it', async (t) => {
   const { rig, deep, deepRoot } = nestedApprovals(t);
   await rigCall(rig, { prompt: 'work', profile: 'write', cwd: deepRoot });
   assert.deepEqual(formsRun(rig), ['deep']);
@@ -565,7 +565,7 @@ test('a shallower approval governs calls outside the deeper root', async (t) => 
   assert.equal(spawn.form_sha256, outer.sha256);
 });
 
-test('an approval whose root is no longer a roots entry still governs it', async (t) => {
+test('an approval whose root is no longer in roots still governs it', async (t) => {
   const rig = newRig(t, { write: marks('machine') });
   const stale = join(rig.root, 'stale');
   mkdirSync(stale);
@@ -654,7 +654,7 @@ test('a malformed approvals store refuses form-unapproved and names the store, e
   assert.match(failure.detail, /malformed/);
 });
 
-test('a profile the slot cannot deliver refuses profile-invalid before the store is read', async (t) => {
+test('a profile the slot cannot deliver refuses profile-invalid: the extensions check precedes the store', async (t) => {
   const rig = newRig(t, { write: marks('machine') });
   patchPolicy(rig, 'profiles', { read: 'read', write: 'write', 'write-mcp': 'write' });
   writeProfiles(rig.profilesDir, { 'write-mcp': MCP_PROFILE });
@@ -686,7 +686,7 @@ function aliasedRig(
   return { rig, approvedRoot, form };
 }
 
-test('a roots entry retargeted into or away from an approved project still runs its form (RV-006 F-1)', async (t) => {
+test('a roots entry retargeted into or away from an approved project still runs its form, roots in both orders (RV-006 F-1)', async (t) => {
   for (const roots of ['entry first', 'alias first'] as const) {
     for (const alias of ['into the approval', 'away from the approval'] as const) {
       const where = `roots ${roots}, alias ${alias}`;
@@ -796,7 +796,7 @@ test('a legacy launch-dir profile layer fails start-up, naming the path and the 
   assert.deepEqual(readdirSync(rig.markerDir), [], 'no launcher ran');
 });
 
-test('a legacy launch-dir help layer fails start-up too, naming the help destination', async (t) => {
+test('a legacy launch-dir .quotient/help layer fails start-up too, naming the help destination', async (t) => {
   const rig = newRig(t);
   const layer = plantLegacy(rig, 'help');
   const failure = await startUpRefusal(rig);

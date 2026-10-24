@@ -432,7 +432,7 @@ test('allowlisting is by path components, never by string prefix', () => {
   assert.equal(viaLink.root, realpathSync(tree.one));
 });
 
-test('the roots entry is the deepest containing one, whichever order the policy lists the roots in', () => {
+test('nested roots: the roots entry is the deepest containing one, whichever order the policy lists the roots in', () => {
   const tree = roots();
   const current = join(tree.one, 'current');
   symlinkSync(join(tree.one, 'sub'), current);

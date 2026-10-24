@@ -1,0 +1,212 @@
+id    = 9
+slug  = "reconciliation-review-of-sl-002"
+title = "reconciliation review of SL-002"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "reconciliation"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "auditor"
+responder = "author"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Conformance audit of SL-002 on main at ee5b8e1 (code = e660bd6): just gate; per-file lint ratchet and shellcheck; slice conformance after bootstrapping the delta registry; slice verify-vt; RV-006 F-1/F-3 probe criteria against shipped tests; DEC-012/DEC-013 against design sec-2/sec-3 and the shipped contracts. F-3 and F-6 fixed in-audit; F-1, F-2, F-4 carried to the reconciliation brief; F-5 tolerated.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-002"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "minor"
+title = "Design sec-2 says a non-absolute root/path makes the store malformed; shipped code refuses any non-canonical one (DEC-012)"
+detail = """
+Expected: design.md sec-2 "The approvals store" states the closed-world rules the reader enforces.
+Observed: the closed-world bullet lists "a non-absolute path" (design.md:227). The shipped reader refuses any `root` or `path` where `path.resolve(x) !== x` (trailing slash, `.`, `..`, `//`), and detects duplicates on that canonical form, without normalising — DEC-012 (proposed). docs/contract/quotient-approvals-1.md:55-70 and :187 already state the canonical rule. The design is the stale artefact; the code and contract agree.
+"""
+disposition = "design-wrong"
+response = """
+The code and contract are right; design sec-2 is stale. Reconciliation brief "Per-slice (direct edit)": design.md sec-2 "The approvals store" closed-world bullet — replace "a non-absolute path" with "a `root` or `path` that is not canonical absolute (`path.resolve(x) !== x`: relative, trailing slash, `.`, `..`, `//`), refused rather than normalised, with duplicates detected on the canonical form", citing DEC-012. DEC-012 itself is proposed: settling it accepted is part of reconcile (needs the operator's assent).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+The code and contract are right; design sec-2 is stale. Reconciliation brief "Per-slice (direct edit)": design.md sec-2 "The approvals store" closed-world bullet — replace "a non-absolute path" with "a `root` or `path` that is not canonical absolute (`path.resolve(x) !== x`: relative, trailing slash, `.`, `..`, `//`), refused rather than normalised, with duplicates detected on the canonical form", citing DEC-012. DEC-012 itself is proposed: settling it accepted is part of reconcile (needs the operator's assent).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "minor"
+title = "Design sec-3 says recording adds a deeper approval that governs; shipped allow refuses when a deeper approval already governs (DEC-013)"
+detail = """
+Expected: design.md sec-3 "quotient allow and quotient revoke" describes what record does in every governing-approval position.
+Observed: design.md:337 says "recording then adds a deeper approval that governs calls inside the roots entry", assuming the governing approval is shallower. When a stored approval is deeper than the roots entry (e.g. left from an older roots list), a new roots-entry approval would change nothing. Shipped `allow` refuses to record under the lock, names `quotient revoke <deeper root>`, and the report prints that advice instead of an inert `allow` command — DEC-013 (proposed); src/approve.test.ts:301 ("a deeper approval keeps governing…"); quotient-approvals-1.md:118, :136-137; quotient-policy-2.md:238-242. The design is the stale artefact.
+"""
+disposition = "design-wrong"
+response = """
+The code and contracts are right; design sec-3 is stale. Reconciliation brief "Per-slice (direct edit)": design.md sec-3 "quotient allow and quotient revoke" Report paragraph — qualify "recording then adds a deeper approval…" to the shallower-governing case, and add a fourth Record check: when the governing approval is deeper than the roots entry, record refuses under the lock naming `quotient revoke <deeper root>`, and the report prints that advice instead of an `allow` command. Cite DEC-013. DEC-013 is proposed: settle accepted at reconcile with the operator's assent.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+The code and contracts are right; design sec-3 is stale. Reconciliation brief "Per-slice (direct edit)": design.md sec-3 "quotient allow and quotient revoke" Report paragraph — qualify "recording then adds a deeper approval…" to the shallower-governing case, and add a fourth Record check: when the governing approval is deeper than the roots entry, record refuses under the lock naming `quotient revoke <deeper root>`, and the report prints that advice instead of an `allow` command. Cite DEC-013. DEC-013 is proposed: settle accepted at reconcile with the operator's assent.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "minor"
+title = "slice verify-vt fails five VT keyword mandates although each mandated behaviour is tested"
+detail = """
+Expected: `doctrine slice verify-vt 2` passes every VT criterion.
+Observed: five FAIL on keyword absence only:
+- PHASE-01 VT-2 `.quotient/help` — tested by server.test.ts:799 "a legacy launch-dir help layer fails start-up too…" (asserts the layer path, stderr line and profile-invalid).
+- PHASE-03 VT-1 `nested roots` — profiles.test.ts:435 "the roots entry is the deepest containing one, whichever order…".
+- PHASE-04 VT-1 `both orders` — server.test.ts:689 (loops 'entry first' / 'alias first' × both alias variants).
+- PHASE-04 VT-3 `nested approvals` — server.test.ts:550, :559 (deepest governs; shallower governs outside).
+- PHASE-05 VT-3 `revoke advice` — approve.test.ts:141 (asserts "advice    quotient revoke /work" when the governing link is missing).
+Plan criteria are immutable, so the fix is to make test titles carry the plan's vocabulary.
+"""
+disposition = "fix-now"
+response = """
+Fixed in this audit: six test titles now carry the plan's vocabulary, no assertion changed — server.test.ts:550 "nested approvals: …", :568 "…no longer in roots…", :657 "…the extensions check precedes the store", :689 "…roots in both orders…", :799 "….quotient/help layer…"; profiles.test.ts:435 "nested roots: …"; approve.test.ts:141 "…(adding revoke advice)…". (PHASE-04 VT-3 also lacked `no longer in roots` and `precedes the store`, hidden behind its first failing keyword.) `slice verify-vt 2`: zero FAIL. Those three files: 94/94 pass; lint 0 / 49 / 32 errors, at baseline.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed in this audit: six test titles now carry the plan's vocabulary, no assertion changed — server.test.ts:550 "nested approvals: …", :568 "…no longer in roots…", :657 "…the extensions check precedes the store", :689 "…roots in both orders…", :799 "….quotient/help layer…"; profiles.test.ts:435 "nested roots: …"; approve.test.ts:141 "…(adding revoke advice)…". (PHASE-04 VT-3 also lacked `no longer in roots` and `precedes the store`, hidden behind its first failing keyword.) `slice verify-vt 2`: zero FAIL. Those three files: 94/94 pass; lint 0 / 49 / 32 errors, at baseline.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "nit"
+title = "Conformance: src/server/policy.test.ts edited but matched by no design-target selector"
+detail = """
+Expected: every edited path matches a design-target selector.
+Observed: `slice conformance 2` reports `M src/server/policy.test.ts` undeclared (PHASE-03, commits 8a5a357 and ffd31fa: writablePaths tests). It is PHASE-03 VT-6's own test_file, so the edit is in scope; the selector registry just omits it (src/server/policy.ts is declared).
+"""
+disposition = "design-wrong"
+response = """
+The selector registry omits a test file the plan itself names (PHASE-03 VT-6). Reconciliation brief "Per-slice (direct edit)": `doctrine slice selector add` for src/server/policy.test.ts as a design-target (load-bearing; conformance reads the registry), mirrored in design.md sec-4 code-impact table / selector list.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+The selector registry omits a test file the plan itself names (PHASE-03 VT-6). Reconciliation brief "Per-slice (direct edit)": `doctrine slice selector add` for src/server/policy.test.ts as a design-target (load-bearing; conformance reads the registry), mirrored in design.md sec-4 code-impact table / selector list.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-5"
+status = "verified"
+severity = "nit"
+title = "Conformance: .doctrine/slice/002/notes.md counts as an undeclared edit"
+detail = """
+Expected: no undeclared paths.
+Observed: PHASE-01's commit 9aabdf9 carried a notes.md update with the code, so the recorded delta includes it. It is the slice's own scratchpad, not a design target.
+"""
+disposition = "tolerated"
+response = """
+Tolerated: the slice's own notes rode in PHASE-01's commit. It is doctrine state, not product code, and declaring `.doctrine/` paths as design targets would put noise in the selector set for every slice. The undeclared row is understood and harmless; no reconcile write.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = """
+Tolerated: the slice's own notes rode in PHASE-01's commit. It is doctrine state, not product code, and declaring `.doctrine/` paths as design targets would put noise in the selector set for every slice. The undeclared row is understood and harmless; no reconcile write.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "minor"
+title = "The source-delta registry was empty at audit; one phase sheet carried a stale start stamp"
+detail = """
+Expected: each phase's source delta recorded as it landed, so `slice conformance` and `slice verify-vt` attribution work at audit.
+Observed: at audit start, conformance read 0 conformant / 37 undelivered: no phase had a registry row (phases were driven through quotient pi_agent workers and orchestrator commits, with no solo phase binding). Bootstrapped at audit with `slice record-delta`: PHASE-01 --commit 9aabdf9; PHASE-02 --commit 065589c --force (the phase sheet's start stamp is b1fc71b, the pre-PHASE-01 design-lock commit, so the guard read the single commit as dropping PHASE-01's 9aabdf9); PHASE-03 065589c..ffd31fa; PHASE-04 ffd31fa..ce3f57b; PHASE-05 ce3f57b..1cf28f8; PHASE-06 1cf28f8..e660bd6 (includes the 0.3.0 bump, PHASE-06 EX-5). Ranges taken from `git log 9aabdf9~1..e660bd6`, one feat commit plus at most one review-fix commit per phase.
+"""
+disposition = "fix-now"
+response = """
+Fixed in this audit: all six phases now have registry rows (ranges in the finding). `slice conformance 2` reads 42 conformant, 0 undelivered, 2 undeclared (F-4, F-5). Durable lesson harvested into mem.pattern.quotient.pi-agent-orchestration: record each phase's delta with `slice record-delta` as the orchestrator commits it.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed in this audit: all six phases now have registry rows (ranges in the finding). `slice conformance 2` reads 42 conformant, 0 undelivered, 2 undeclared (F-4, F-5). Durable lesson harvested into mem.pattern.quotient.pi-agent-orchestration: record each phase's delta with `slice record-delta` as the orchestrator commits it.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

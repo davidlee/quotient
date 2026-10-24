@@ -7,3 +7,6 @@ Driving a slice's phases through `mcp__quotient__pi_agent` (`implement` worker, 
 - The node test reporter may print `ℹ pass` rather than `# pass` in the sandbox, so grep for both.
 - A max-thinking `review` worker given a diff file under `.doctrine/state/` plus the plan's EX/VT criteria found real defects in five of six phases. Ask it to verify each finding and to reserve its last call for the answer.
 - Before PHASE-01 of SL-002 shipped, a write agent rooted at the server's launch directory was refused (ISS-001); a doctrine fork under `.worktrees/` avoided it.
+
+- No solo phase binding runs on this path, so nothing records the phase's source delta. After committing each phase, run `doctrine slice record-delta <slice> PHASE-NN --start <pre-phase commit> --end <phase tip>`; otherwise `slice conformance` reads every selector undelivered at audit. SL-002 bootstrapped all six rows at audit (RV-009 F-6). A phase sheet scaffolded before an earlier phase landed carries a stale start stamp, and `--commit` then needs `--force`.
+- `slice verify-vt` matches each VT criterion's keywords literally against its test file. Put the plan's keywords in test titles while writing them; SL-002's audit renamed seven titles (RV-009 F-3).
