@@ -1,0 +1,122 @@
+id    = 7
+slug  = "plan-review-of-sl-002"
+title = "plan review of SL-002"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "plan"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "codex"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Adversarial plan pass over SL-002 plan.toml and plan.md at commits 552cd2e and 4f57c16, against the locked design sec-1..4, accepted DEC-007..DEC-011, slice scope, and RV-006 F-1/F-3 probe responses and host-phase constraints. Examined current config, server admission/start-up, profiles/root matching, policy/slot selection, childview, spawn, paths, test-rig, CLI/help, drift and relevant existing tests, plus justfile, pack-check and hostile-audit. Checked all design sec-4 verification-table rows and sec-3 documentation/code-impact allocations; accepted the session's per-file lint ratchet at b5c441e and exclusion of just lint from just gate. RV-006 F-1 is faithfully transcribed into PHASE-04/EX-5 and VT-1 after the approvals reader; F-3 into PHASE-05/EX-4 and VT-1 after updateApprovals/probeProjectForm, with changed-byte/batch obligations in adjacent criteria. No missing placement or settled-design objection raised. Four findings: F-1 major (deterministic selection-to-spawn mutation window missing from VT-4), F-2 minor (coupled existing launch-layer test migrations not explicitly allocated to PHASE-01), F-3 minor (governed mismatch loses exact re-approval-command requirement), F-4 minor (PHASE-03/VT-4 mandate already matches unchanged code). No blockers found. Evidence is source/artifact inspection and a read-only in-memory TOML/keyword probe; no tests, builds, paid model calls, confinement probes or future SL-002 runtime behavior were executed. Only review-ledger verbs were used for writes. Pass concluded as raiser codex; responder dispositions remain outstanding."
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-002"
+
+[[finding]]
+id = "F-1"
+status = "answered"
+severity = "major"
+title = "PHASE-04's repoint probe does not require mutation between selection and spawn"
+detail = """
+Expected: the admission-to-exec test must distinguish executing the real path captured at step 5 from executing the project symlink later (locked design.md:128-134, :273, :449; DEC-008). Observed: PHASE-04/VT-4 (plan.toml:119) only says to repoint 'after admission' and observe the running call; it does not require the repoint to happen before exec, or specify positive evidence for that ordering. PHASE-04/EX-2 states the correct implementation, but the corresponding VT can pass without exercising its critical window.
+
+Verified current-code constraint: the in-process rig starts serve directly (src/server/test-rig.ts:402-419, :427-428). callTool runs root/form selection, session acquisition and child-view checks synchronously until its runChild call (src/server/server.ts:283-393); runChild reaches spawn synchronously before its first await (src/server/spawn.ts:221-303). Waiting for a launcher marker or a normal test event-loop turn and then repointing is already too late to test pathname capture. Inferred false-positive scenario: an implementation that hashes/resolves A but hands the project link to spawn still passes a test that waits for A to start before repointing the link to B. No SL-002 runtime implementation was executed.
+
+Repair: make VT-4 require the order select/hash A -> pause before process creation -> repoint the link to B -> resume -> prove A ran and B did not, with the audit identity checked too. Assign the phase responsibility for a deterministic barrier or equivalent controlled spawn observation; require a negative control in which executing the link fails the test. This narrows the verification criterion without changing the approved execution mechanism."""
+disposition = "fix-now"
+route = "review"
+response = "Observation verified: no await between selection and spawn (spawn.ts:221-303), so a 'repoint after admission' test cannot hit the window, and VT-4 as written could pass with the link exec'd. Prescription narrowed: no barrier needed. The spawn record's form is the exact command passed to spawn() (spawn.ts:224 launchCommand -> :279 audit form: command -> :296 spawn(command, argv)). PHASE-04/VT-4 now asserts record.form === the captured real path and !== the link path; an implementation handing the link to spawn fails it (the negative control), with no new test seam. The post-settle repoint check stays as a secondary observation."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Observation verified: no await between selection and spawn (spawn.ts:221-303), so a 'repoint after admission' test cannot hit the window, and VT-4 as written could pass with the link exec'd. Prescription narrowed: no barrier needed. The spawn record's form is the exact command passed to spawn() (spawn.ts:224 launchCommand -> :279 audit form: command -> :296 spawn(command, argv)). PHASE-04/VT-4 now asserts record.form === the captured real path and !== the link path; an implementation handing the link to spawn fails it (the negative control), with no new test seam. The post-settle repoint check stays as a secondary observation."
+
+[[finding]]
+id = "F-2"
+status = "answered"
+severity = "minor"
+title = "PHASE-01 does not place the existing launch-layer test migrations in its green boundary"
+detail = """
+Expected: the phase removing launch-dir layers must carry the tests and fixtures coupled to those layers, before its just gate exit. PHASE-01/EX-2..EX-6 remove the layers, add legacy start-up rejection and move release fixtures; its verification rows (plan.toml:35-41) cover new server/config/CLI cases but do not identify the existing help/childview test migration. plan.md:45-49 defers the remaining help work to PHASE-06, whose VT-2 is the first explicit help.test.ts mandate (plan.toml:171).
+
+Verified static incompatibilities in the current suite: src/help/help.test.ts:244-251 plants <launch>/.quotient/help/tool.md and expects it to supply the server's tool description; under PHASE-01/EX-3 that presence must instead refuse start-up. src/cli.test.ts:120-128 plants a bad launch-layer profile and requires stderr to name bad.md, whereas the prescribed legacy check rejects the layer before reading that document. src/server/childview.test.ts:161-182 expects four protected profile/help layers, :262-274 explicitly requires a write root at the launch dir to refuse, and :277-281 requires launch help exposure to refuse. Those assertions contradict the phase's new behavior. Config assertions also need migration, but PHASE-01/VT-3 already places config tests in this phase.
+
+Repair: explicitly include migration/replacement of these help, CLI and childview assertions in PHASE-01's criteria/verification. Retain coverage of XDG protection, bad XDG profiles and XDG help overrides, and replace the old launch assertions with the intended admission/legacy-rejection cases. This is a missing coupled-test allocation, not a claim that the six-phase architecture cannot work: just gate would catch the unchanged assertions, and a phase implementer could currently discover the missing work."""
+disposition = "fix-now"
+response = "Verified (help.test.ts:244-251, cli.test.ts:120-128, childview.test.ts:161-170,262-281). Added PHASE-01/EX-8 (migrate these assertions, keep XDG coverage) and VT-5 (childview: write root at the launch directory admitted) and VT-6 (help: launch-dir help layer fails start-up, XDG override kept)."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified (help.test.ts:244-251, cli.test.ts:120-128, childview.test.ts:161-170,262-281). Added PHASE-01/EX-8 (migrate these assertions, keep XDG coverage) and VT-5 (childview: write root at the launch directory admitted) and VT-6 (help: launch-dir help layer fails start-up, XDG override kept)."
+
+[[finding]]
+id = "F-3"
+status = "answered"
+severity = "minor"
+title = "Changed governed forms lose the design's exact re-approval-command criterion"
+detail = """
+Expected: design.md:136 requires refusal details to identify the base/governing state, link, real path, observed digest and approved identity where present, and an exact quotient allow command for form-unapproved on a usable form. This includes an ordinary rebuild of an already-approved form, not only first approval.
+
+Observed: PHASE-03/EX-3 (plan.toml:83) requires the exact command only for the ungoverned branch; governed identity mismatch need only name both identities. PHASE-03/VT-3 (:91) explicitly narrows its command assertion to 'ungoverned form-unapproved'. PHASE-04/VT-2 (:117) repeats that split: link-without-entry includes a command, while rebuilt bytes/repointed paths only require both identities. Neither phase otherwise carries the full sec-2 refusal-detail requirement as a criterion.
+
+Concrete inferred omission: for an approval at an unchanged policy root A, rebuilding its otherwise-usable form could produce form-unapproved with old/new identities but no ready-to-run re-approval command and still satisfy every listed assertion. That falls short of the locked design's operator interface. Repair: add the full diagnostic requirement to the selection criterion and assert an exact allow A CAP=NEW_REALPATH@NEW_SHA256 command in the governed-mismatch unit/server case as well as the first-approval case. Verified by comparing the design and authored criteria; no future runtime behavior is claimed."""
+disposition = "fix-now"
+response = "Verified against design.md:136. PHASE-03/EX-3 now requires the re-approval allow command (approval root, new path, new sha256) for a governed identity change and states the full sec-2 refusal-detail list for every refusal; PHASE-03/VT-3 and PHASE-04/VT-2 assert the command in both form-unapproved cases."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified against design.md:136. PHASE-03/EX-3 now requires the re-approval allow command (approval root, new path, new sha256) for a governed identity change and states the full sec-2 refusal-detail list for every refusal; PHASE-03/VT-3 and PHASE-04/VT-2 assert the command in both form-unapproved cases."
+
+[[finding]]
+id = "F-4"
+status = "answered"
+severity = "minor"
+title = "PHASE-03/VT-4's sole keyword already passes on the pre-slice drift test"
+detail = """
+Expected: a structured VT mandate must have signal for its stated obligation, here that the refusal guard sees ProjectFormRefusal and both new reasons are documented. Observed: PHASE-03/VT-4 (plan.toml:92) selects src/drift.test.ts with keywords = ['Refusal'], no patterns. That substring already occurs repeatedly in the unchanged file (src/drift.test.ts:86-95, :307-310), so the mandate passes before forms.ts or the new refusal rows exist.
+
+Read-only reproduction: parse plan.toml with Python tomllib, read each VT test_file, and check all(k in source for k in keywords). PHASE-03/VT-4 reports ALREADY PASSES on the reviewed tree; it was the only VT row with an existing test file whose entire keyword set already matched before SL-002 implementation. The actual drift suite remains useful: codeRefusals scans new production refusal unions automatically (:91-99), and the suite compares them with the contract (:307-310). This finding concerns the structured mandate's lack of additional signal, not a claim that the existing drift test is broken.
+
+Repair: point the mandate at the phase-owned forms.ts export with distinguishing ProjectFormRefusal/form-invalid/form-unapproved signals and retain a separate explicit check that the existing drift suite ran green, or make this an agent verification that cites the existing guard and its execution evidence. Avoid adding a meaningless comment to drift.test.ts merely to satisfy a novel keyword."""
+disposition = "fix-now"
+response = "Verified ('Refusal' occurs 10x in drift.test.ts). PHASE-03/VT-4 now targets src/server/forms.ts with keywords 'export type ProjectFormRefusal', 'form-invalid', 'form-unapproved'; new PHASE-03/VA-2 records the drift suite run and the contract rows. Class sweep: no other VT row's keyword set fully matches the pre-slice tree (4 rows share one pre-existing keyword alongside new ones)."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified ('Refusal' occurs 10x in drift.test.ts). PHASE-03/VT-4 now targets src/server/forms.ts with keywords 'export type ProjectFormRefusal', 'form-invalid', 'form-unapproved'; new PHASE-03/VA-2 records the drift suite run and the contract rows. Class sweep: no other VT row's keyword set fully matches the pre-slice tree (4 rows share one pre-existing keyword alongside new ones)."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.
