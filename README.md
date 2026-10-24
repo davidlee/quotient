@@ -119,8 +119,11 @@ The policy is meant to be read-only (`0444`): edit a copy and reinstall it.
   the old cumulative `maxima.tokens` value cannot be converted automatically.
 - `profiles`: every profile a call may use, with its capability.
 - `forms`: the executable that confines pi, one per capability. quotient ships
-  no forms; `quotient help form` says what one must guarantee. Without a write
-  form, `"write": { "unconfined": "/absolute/path/to/pi" }` runs pi directly,
+  no forms: a form is the operator's choice, and `quotient help form` says what
+  one must guarantee. On Linux, the flake's `lib.mkFormFamily` builds a read and
+  a write form from your nixpkgs, a jail.nix and a pi;
+  [`docs/nix-forms.md`](docs/nix-forms.md) is the manual. Without a write form,
+  `"write": { "unconfined": "/absolute/path/to/pi" }` runs pi directly,
   with your user's full access. Read `quotient help policy` (The unconfined
   form) before using it.
 

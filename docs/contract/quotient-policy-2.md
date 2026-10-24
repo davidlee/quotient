@@ -219,9 +219,11 @@ to the executable quotient should run in place of the machine's form.
 **The lookup base.** The deepest recorded approval root containing the call's
 canonical root (`quotient-approvals-1.md`, What an approval governs); with no
 such approval, the longest `roots` entry containing the call's root. A project
-nested inside a larger root, or a worktree of it, therefore needs its own
-`roots` entry and its own approval: the base is never guessed, and the directory
-the server was launched in has no part in it.
+nested inside a larger root inherits that root's form; to use a different one it
+needs its own `roots` entry and its own approval. A worktree inside an approved
+root is such a nested project, and worktrees kept beside the root need a `roots`
+entry and an approval for the directory that holds them. The base is never
+guessed, and the directory the server was launched in has no part in it.
 
 **What runs.** The governing approval and the link at the base decide:
 

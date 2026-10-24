@@ -26,7 +26,8 @@ Installation ships examples; it does not copy profiles into user configuration.
    merge their capability pins into the policy.
 3. **Choose a form for each capability.** A form is the executable that
    confines pi: it decides what the delegate can read and write. Put each
-   form's absolute path under `forms.read` and `forms.write`.
+   form's absolute path under `forms.read` and `forms.write`. On Linux with Nix,
+   `docs/nix-forms.md` builds a read and a write form pair.
    `quotient help form` says what a form must guarantee. A project may
    substitute its own executable for its root; see Project forms below.
 4. **Add the server to your client.** `quotient help clients` prints the

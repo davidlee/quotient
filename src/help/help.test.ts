@@ -60,6 +60,41 @@ const CONTEXT: RenderContext = {
   launchDir: '/abs/project',
 };
 
+/** FIELD of VALUE, which must be a record; a test failure when it is not. */
+function field(value: unknown, name: string): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {assert.fail(`no ${name}: not an object (${JSON.stringify(value)})`);}
+  return Reflect.get(value, name);
+}
+
+/** One element of VALUE, which must be an array; a test failure when it is not. */
+function element(value: unknown, index: number): unknown {
+  if (!Array.isArray(value)) {assert.fail(`no element ${String(index)}: not an array`);}
+  return value[index];
+}
+
+/** FIELD of VALUE as a string; a test failure when it is not one. */
+function stringField(value: unknown, name: string): string {
+  const found = field(value, name);
+  if (typeof found !== 'string') {assert.fail(`no ${name}: not a string (${JSON.stringify(found)})`);}
+  return found;
+}
+
+/** The two answers a server gives at start-up, as this file reads them:
+ *  initialize's instructions and the one tool description. `converse` types the
+ *  JSON-RPC envelope only, so each field is checked rather than asserted. */
+function startUpText(replies: readonly unknown[]): { instructions: string; description: string } {
+  return {
+    instructions: stringField(field(replies[0], 'result'), 'instructions'),
+    description: stringField(element(field(field(replies[1], 'result'), 'tools'), 0), 'description'),
+  };
+}
+
+/** The pi-agent-result/2 document one `tools/call` reply carries. */
+function callDocument(reply: unknown): unknown {
+  const document: unknown = JSON.parse(stringField(element(field(field(reply, 'result'), 'content'), 0), 'text'));
+  return document;
+}
+
 test('help: every section resolves; refusals is an alias of result; an unknown name is none', () => {
   assert.deepEqual(HELP_SECTIONS, ['agent', 'tool', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce']);
   assert.equal(sectionName('refusals'), 'result');
@@ -188,7 +223,7 @@ test('help: the profile table renders each profile with its pinned capability, o
 test('clients: both snippets carry the absolute bin path; tool_timeout_sec is wall_clock_s + 60', () => {
   const text = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, wallClockS: 300 } });
   const json = /```json\n([\s\S]*?)```/.exec(text);
-  assert.ok(json, 'a json block');
+  assert.ok(json !== null, 'a json block');
   assert.deepEqual(JSON.parse(json[1]), { mcpServers: { quotient: { command: '/abs/bin/quotient' } } });
   assert.ok(text.includes('[mcp_servers.quotient]'), 'the Codex table');
   assert.match(text, /\[mcp_servers\.quotient\]\ncommand = "\/abs\/bin\/quotient"\ncwd = "\/abs\/project"/);
@@ -274,6 +309,10 @@ test('help: the rendered clients snippet and the setup section teach XDG only, a
   assert.ok(profiles.includes('quotient/profiles/'), 'the profiles section names the XDG layer');
 });
 
+test('help: the setup section names the doc that builds a form family', () => {
+  assert.ok(builtin('help/setup.md').includes('docs/nix-forms.md'), 'the setup section points at docs/nix-forms.md');
+});
+
 test('policyView: a readable policy gives its pins and wall clock; otherwise why not', () => {
   const { dir, policyPath } = workspace();
   assert.deepEqual(policyView({ ok: true, path: policyPath }), { ok: true, profiles: { read: 'read', write: 'write' }, wallClockS: 600 });
@@ -303,7 +342,7 @@ function expected(env: Env, launchDir: string): { agent: string; tool: string; d
 
 async function selfDescription(env: Env, launchDir: string): Promise<{ instructions: string; description: string; stderr: string }> {
   const { replies, stderr } = await converse([line({ id: 1, method: 'initialize' }), line({ id: 2, method: 'tools/list' })], env, { launchDir });
-  return { instructions: replies[0].result.instructions, description: replies[1].result.tools[0].description, stderr };
+  return { ...startUpText(replies), stderr };
 }
 
 test('server: initialize instructions equals the assembled agent section; the tool description equals tool', async () => {
@@ -359,13 +398,15 @@ test('server: an unreadable help layer refuses start-up: every call is profile-i
     env,
     { launchDir: join(dir, 'launch') },
   );
-  assert.match(replies[0].result.instructions, /refused start-up/);
-  assert.ok(replies[0].result.instructions.includes(layer));
-  assert.ok(replies[1].result.tools[0].description.includes(layer));
-  const doc = JSON.parse(replies[2].result.content[0].text);
-  assert.equal(doc.state, 'refused');
-  assert.equal(doc.refusal.reason, 'profile-invalid');
-  assert.ok(doc.refusal.detail.includes(layer), 'the help path is in detail');
+  const { instructions, description } = startUpText(replies);
+  const doc = callDocument(replies[2]);
+  assert.match(instructions, /refused start-up/);
+  assert.ok(instructions.includes(layer));
+  assert.ok(description.includes(layer));
+  assert.equal(field(doc, 'state'), 'refused');
+  const refusal = field(doc, 'refusal');
+  assert.equal(field(refusal, 'reason'), 'profile-invalid');
+  assert.ok(stringField(refusal, 'detail').includes(layer), 'the help path is in detail');
   assert.ok(stderr.includes(layer), 'one stderr line names it');
 });
 
