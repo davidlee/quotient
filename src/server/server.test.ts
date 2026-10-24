@@ -7,32 +7,52 @@
 //
 // Hermetic: every test mints its own temp tree; the ambient environment is
 // never read and nothing is spawned except the server and the rig's stubs.
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { packageVersion } from '../root.ts';
 import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
 import {
   attempts,
   callLine,
   converse,
+  executableAt,
   isAlive,
   jsonLines,
   line,
   markerPids,
   newRig,
   onlyRunDir,
+  patchPolicy,
+  plantProjectForm,
+  profileDocument,
+  readText,
+  rigApprovalsPath,
+  rigForm,
+  runDirs,
   SETTLED,
   serveRig,
   serverCommand,
+  spawnRecord,
   validPolicy,
   waitForPath,
   workspace,
+  writeApprovals,
+  writeProfiles,
   xdgHelpLayer,
-  xdgProfileLayer, type Env, type Rig 
+  xdgProfileLayer, type Env, type Rig, type RigForm 
 } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
@@ -360,6 +380,343 @@ test('a write call rooted at the launch directory is admitted (ISS-001)', async 
     const { doc } = payload(reply);
     assert.equal(field(doc, 'refusal'), null, `the call was admitted, not refused: ${JSON.stringify(reply)}`);
   }
+});
+
+// ── The admitted form (SL-002 PHASE-04, design sec-2 step 5) ───────────────
+
+/** A form that appends NAME to the rig's marker file, records its own `$0` and
+ *  argv, then settles: which form ran, and what it was handed, is then readable. */
+const marks = (name: string): string =>
+  `printf '${name}\\n' >> "@MARKER@/forms"\nprintf '%s\\n' "$0" > "@MARKER@/argv0"\nprintf '%s\\n' "$@" > "@MARKER@/argv"\n${SETTLED}\nexit 0`;
+
+/** Every form that ran in RIG, in order, by the name its marker records. */
+function formsRun(rig: Rig): string[] {
+  const text = readText(join(rig.markerDir, 'forms')).trim();
+  return text.length === 0 ? [] : text.split('\n');
+}
+
+/** One tools/call against RIG: the answer `payload` reads, as it reads it. */
+type RigReply = ReturnType<typeof payload>;
+
+/** One tools/call against RIG. */
+async function rigCall(
+  rig: Rig,
+  args: Record<string, unknown> = { prompt: 'work', profile: 'write', cwd: rig.root },
+): Promise<RigReply> {
+  const { replies } = await converse([callLine(7, args)], rig.env, { launchDir: rig.launchDir });
+  assert.equal(replies.length, 1);
+  return payload(replies[0]);
+}
+
+/** The run's `spawn` record: what was launched, and from where. */
+const spawnOf = (rig: Rig): Record<string, unknown> => spawnRecord(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
+
+/** A refusal as an operator reads it: its reason and the detail that says why. */
+function refusalOf(doc: unknown): { reason: string; detail: string } {
+  const refusal = field(doc, 'refusal');
+  return { reason: String(field(refusal, 'reason')), detail: String(field(refusal, 'detail')) };
+}
+
+/** A call step 5 must refuse before the spawn: its refusal, and the proof that
+ *  nothing ran — no marker, no run directory. */
+async function refusedFormCall(
+  rig: Rig,
+  args: Record<string, unknown> = { prompt: 'work', profile: 'write', cwd: rig.root },
+): Promise<{ reason: string; detail: string }> {
+  const { doc } = await rigCall(rig, args);
+  assert.deepEqual(formsRun(rig), [], 'no form ran');
+  assert.deepEqual(runDirs(rig.runDir), [], 'no run directory was allocated');
+  return refusalOf(doc);
+}
+
+/** Plant and approve RIG's project form at its roots entry: the identity the
+ *  store records, and the link the project publishes. */
+function approveProjectForm(rig: Rig, body: string = marks('approved')): { form: RigForm; link: string } {
+  const form = rigForm(rig, 'approved', body);
+  const link = plantProjectForm(rig, form);
+  writeApprovals(rig, [{ form }]);
+  return { form, link };
+}
+
+test('with no project link and no approvals store the machine form runs, and the record names the policy', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const { doc } = await rigCall(rig);
+  assert.equal(field(doc, 'refusal'), null, 'the call was admitted, not refused');
+  assert.deepEqual(formsRun(rig), ['machine']);
+  const spawn = spawnOf(rig);
+  assert.equal(spawn.form_source, 'policy');
+  assert.equal(spawn.form, rig.writeLauncher);
+  assert.equal(Object.hasOwn(spawn, 'form_root'), false, 'a machine form has no approved root');
+  assert.equal(Object.hasOwn(spawn, 'form_sha256'), false, 'a machine form has no approved identity');
+});
+
+/** A write profile that names an `mcp__*` tool: only the slot's extensions can
+ *  deliver it, so the selected form must inherit the slot's list. */
+const MCP_PROFILE = profileDocument({ filesystem: 'write', tools: 'read, bash, mcp__files__read' });
+
+test('an approved project form runs its real path with the slot extensions inherited', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  patchPolicy(rig, 'forms', { read: rig.readLauncher, write: { path: rig.writeLauncher, extensions: ['builtin:mcp'] } });
+  patchPolicy(rig, 'profiles', { read: 'read', write: 'write', 'write-mcp': 'write' });
+  writeProfiles(rig.profilesDir, { 'write-mcp': MCP_PROFILE });
+  const { form, link } = approveProjectForm(rig);
+  const { doc } = await rigCall(rig, { prompt: 'work', profile: 'write-mcp', cwd: rig.root });
+  assert.equal(field(doc, 'refusal'), null, 'the call was admitted, not refused');
+  assert.deepEqual(formsRun(rig), ['approved']);
+  const spawn = spawnOf(rig);
+  assert.equal(spawn.form_source, 'project');
+  assert.equal(spawn.form_root, rig.root);
+  assert.equal(spawn.form_sha256, form.sha256);
+  assert.equal(spawn.form, form.path, 'the spawn execs the real path');
+  assert.notEqual(spawn.form, link, 'never the project link');
+  const argv = readText(join(rig.markerDir, 'argv')).trim().split('\n');
+  assert.equal(argv[argv.indexOf('-e') + 1], 'builtin:mcp', 'the inherited extension reaches the launcher');
+});
+
+test('a usable project link with no approval refuses form-unapproved and names the approval command', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const form = rigForm(rig, 'approved', marks('approved'));
+  const link = plantProjectForm(rig, form);
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'form-unapproved');
+  for (const named of [link, form.path, form.sha256]) {
+    assert.ok(failure.detail.includes(named), `${named} in ${failure.detail}`);
+  }
+  assert.ok(
+    failure.detail.includes(`quotient allow ${rig.root} write=${form.path}@${form.sha256}`),
+    failure.detail,
+  );
+});
+
+// ── Identity: a rebuilt, repointed or deleted form (VT-2) ─────────────────
+
+test('an approved form whose bytes changed refuses form-unapproved, naming both identities', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const { form, link } = approveProjectForm(rig);
+  const rebuilt = executableAt(form.path, marks('rebuilt'));
+  assert.notEqual(rebuilt.sha256, form.sha256, 'the rebuild must change the bytes');
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'form-unapproved');
+  for (const named of [link, form.sha256, rebuilt.sha256]) {
+    assert.ok(failure.detail.includes(named), `${named} in ${failure.detail}`);
+  }
+  assert.ok(
+    failure.detail.includes(`quotient allow ${rig.root} write=${form.path}@${rebuilt.sha256}`),
+    failure.detail,
+  );
+});
+
+test('an approved form repointed to another executable refuses form-unapproved, naming both paths', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const { form, link } = approveProjectForm(rig);
+  const other = rigForm(rig, 'other', marks('other'));
+  unlinkSync(link);
+  symlinkSync(other.path, link);
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'form-unapproved');
+  for (const named of [form.path, other.path]) {
+    assert.ok(failure.detail.includes(named), `${named} in ${failure.detail}`);
+  }
+});
+
+test('an approved form whose link was deleted refuses form-invalid, never the machine form', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const { link } = approveProjectForm(rig);
+  unlinkSync(link);
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'form-invalid');
+  assert.ok(failure.detail.includes(`quotient revoke ${rig.root}`), failure.detail);
+  assert.match(failure.detail, /restore it/);
+});
+
+// ── The governed rows: nesting, stale roots, unusable links, slots (VT-3) ──
+
+/** A rig with an approval at its roots entry and a second at `deep`: the nesting
+ *  the deepest-governs rule is read against. */
+function nestedApprovals(t: TestContext): { rig: Rig; outer: RigForm; deep: RigForm; deepRoot: string } {
+  const rig = newRig(t, { write: marks('machine') });
+  const deepRoot = join(rig.root, 'deep');
+  mkdirSync(deepRoot);
+  const outer = rigForm(rig, 'outer', marks('outer'));
+  const deep = rigForm(rig, 'deep', marks('deep'));
+  plantProjectForm(rig, outer);
+  plantProjectForm(rig, deep, { base: deepRoot });
+  writeApprovals(rig, [{ form: outer }, { root: deepRoot, form: deep }]);
+  return { rig, outer, deep, deepRoot };
+}
+
+test('the deepest approval containing the call governs it', async (t) => {
+  const { rig, deep, deepRoot } = nestedApprovals(t);
+  await rigCall(rig, { prompt: 'work', profile: 'write', cwd: deepRoot });
+  assert.deepEqual(formsRun(rig), ['deep']);
+  const spawn = spawnOf(rig);
+  assert.equal(spawn.form_root, deepRoot);
+  assert.equal(spawn.form_sha256, deep.sha256);
+});
+
+test('a shallower approval governs calls outside the deeper root', async (t) => {
+  const { rig, outer } = nestedApprovals(t);
+  await rigCall(rig);
+  assert.deepEqual(formsRun(rig), ['outer']);
+  const spawn = spawnOf(rig);
+  assert.equal(spawn.form_root, rig.root);
+  assert.equal(spawn.form_sha256, outer.sha256);
+});
+
+test('an approval whose root is no longer a roots entry still governs it', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const stale = join(rig.root, 'stale');
+  mkdirSync(stale);
+  const form = rigForm(rig, 'approved', marks('approved'));
+  plantProjectForm(rig, form, { base: stale });
+  writeApprovals(rig, [{ root: stale, form }]);
+  await rigCall(rig, { prompt: 'work', profile: 'write', cwd: stale });
+  assert.deepEqual(formsRun(rig), ['approved'], 'no silent revert to the machine form');
+  assert.equal(spawnOf(rig).form_root, stale);
+});
+
+test('a link resolving inside a roots entry, an exposure path or the session home refuses form-invalid', async (t) => {
+  for (const where of ['a roots entry', 'an exposure path', 'the session home'] as const) {
+    const rig = newRig(t, { write: marks('machine') });
+    if (where === 'an exposure path') {patchPolicy(rig, 'exposure', [join(rig.dir, 'exposure')]);}
+    const writablePath = { 'a roots entry': rig.root, 'an exposure path': join(rig.dir, 'exposure'), 'the session home': rig.sessionHome }[where];
+    plantProjectForm(rig, executableAt(join(writablePath, 'form.sh'), marks('inside')));
+    const failure = await refusedFormCall(rig);
+    assert.equal(failure.reason, 'form-invalid', where);
+    assert.match(failure.detail, /inside the writable path/, where);
+  }
+});
+
+test('a link that is not executable, dangles, or sits under a file refuses form-invalid', async (t) => {
+  const planters: { name: string; plant: (rig: Rig) => void }[] = [
+    {
+      name: 'not executable',
+      plant: (rig): void => {
+        const form = rigForm(rig, 'plain', marks('plain'));
+        chmodSync(form.path, 0o644);
+        plantProjectForm(rig, form);
+      },
+    },
+    {
+      name: 'dangling',
+      plant: (rig): void => {
+        const dir = join(rig.root, '.quotient', 'forms');
+        mkdirSync(dir, { recursive: true });
+        symlinkSync(join(rig.dir, 'gone.sh'), join(dir, 'write'));
+      },
+    },
+    {
+      name: 'under a file',
+      plant: (rig): void => {writeFileSync(join(rig.root, '.quotient'), 'not a directory\n');},
+    },
+  ];
+  for (const { name, plant } of planters) {
+    const rig = newRig(t, { write: marks('machine') });
+    plant(rig);
+    const failure = await refusedFormCall(rig);
+    assert.equal(failure.reason, 'form-invalid', name);
+  }
+});
+
+test('a project link at an unconfined machine slot refuses form-invalid (rule 4)', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  patchPolicy(rig, 'forms', { read: rig.readLauncher, write: { unconfined: join(rig.dir, 'bin', 'pi') } });
+  plantProjectForm(rig, rigForm(rig, 'approved', marks('approved')));
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'form-invalid');
+  assert.match(failure.detail, /only a confined machine slot/);
+});
+
+test('a project link with no machine slot refuses wrapper-unavailable, as today', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  patchPolicy(rig, 'forms', { read: rig.readLauncher });
+  plantProjectForm(rig, rigForm(rig, 'approved', marks('approved')));
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'wrapper-unavailable');
+});
+
+/** Write a store the reader rejects, at the rig's store path. */
+function corruptStore(rig: Rig): string {
+  const path = rigApprovalsPath(rig);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `{"schema":"quotient-approvals/1"}\n`);
+  return path;
+}
+
+test('a malformed approvals store refuses form-unapproved and names the store, even with no link', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const store = corruptStore(rig);
+  const failure = await refusedFormCall(rig);
+  assert.equal(failure.reason, 'form-unapproved');
+  assert.ok(failure.detail.includes(store), failure.detail);
+  assert.match(failure.detail, /malformed/);
+});
+
+test('a profile the slot cannot deliver refuses profile-invalid before the store is read', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  patchPolicy(rig, 'profiles', { read: 'read', write: 'write', 'write-mcp': 'write' });
+  writeProfiles(rig.profilesDir, { 'write-mcp': MCP_PROFILE });
+  corruptStore(rig);
+  const failure = await refusedFormCall(rig, { prompt: 'work', profile: 'write-mcp', cwd: rig.root });
+  assert.equal(failure.reason, 'profile-invalid');
+  assert.match(failure.detail, /passes no "-e builtin:mcp"/);
+});
+
+// ── The real path at admission: retarget and repoint (VT-1, VT-4) ─────────
+
+/** The RV-006 F-1 tree: `work` holds the approved project `work/A` and a
+ *  `current` alias a delegate can retarget, inside or away from `A`. */
+function aliasedRig(
+  t: TestContext,
+  options: { alias: 'into the approval' | 'away from the approval'; roots: 'entry first' | 'alias first' },
+): { rig: Rig; approvedRoot: string; form: RigForm } {
+  const rig = newRig(t, { write: marks('machine') });
+  const work = join(rig.dir, 'work');
+  const approvedRoot = join(work, 'A');
+  mkdirSync(join(approvedRoot, 'sub'), { recursive: true });
+  mkdirSync(join(work, 'other'));
+  const current = join(work, 'current');
+  symlinkSync(options.alias === 'into the approval' ? join(approvedRoot, 'sub') : join(work, 'other'), current);
+  patchPolicy(rig, 'roots', options.roots === 'entry first' ? [work, current] : [current, work]);
+  const form = rigForm(rig, 'approved', marks('approved'));
+  plantProjectForm(rig, form, { base: approvedRoot });
+  writeApprovals(rig, [{ root: approvedRoot, form }]);
+  return { rig, approvedRoot, form };
+}
+
+test('a roots entry retargeted into or away from an approved project still runs its form (RV-006 F-1)', async (t) => {
+  for (const roots of ['entry first', 'alias first'] as const) {
+    for (const alias of ['into the approval', 'away from the approval'] as const) {
+      const where = `roots ${roots}, alias ${alias}`;
+      const { rig, approvedRoot, form } = aliasedRig(t, { alias, roots });
+      // The call lands inside the approved project either way: through the alias
+      // when it points there, by its real path when it does not.
+      const cwd = alias === 'into the approval' ? join(rig.dir, 'work', 'current') : join(approvedRoot, 'sub');
+      await rigCall(rig, { prompt: 'work', profile: 'write', cwd });
+      assert.deepEqual(formsRun(rig), ['approved'], where);
+      const spawn = spawnOf(rig);
+      assert.equal(spawn.form_source, 'project', where);
+      assert.equal(spawn.form_root, approvedRoot, where);
+      assert.equal(spawn.form_sha256, form.sha256, where);
+    }
+  }
+});
+
+test('the spawn execs the resolved real path, and a later repoint changes neither record nor $0', async (t) => {
+  const rig = newRig(t, { write: marks('machine') });
+  const { form, link } = approveProjectForm(rig);
+  await rigCall(rig);
+  assert.deepEqual(formsRun(rig), ['approved']);
+  assert.equal(spawnOf(rig).form, form.path);
+  assert.notEqual(spawnOf(rig).form, link, 'never the link');
+  assert.equal(readText(join(rig.markerDir, 'argv0')).trim(), form.path, 'the launcher was exec\'d by its real path');
+  // Repointed after admission: what ran is fixed at step 5, so neither the
+  // record nor the launcher's own `$0` moves.
+  const other = rigForm(rig, 'other', marks('other'));
+  unlinkSync(link);
+  symlinkSync(other.path, link);
+  assert.equal(spawnOf(rig).form, form.path);
+  assert.equal(readText(join(rig.markerDir, 'argv0')).trim(), form.path);
 });
 
 // ── Legacy launch-dir layers fail start-up (DEC-011) ─────────────────────

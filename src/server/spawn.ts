@@ -29,7 +29,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
 import { countRecord, createTally, type Tally } from '../reduce/reduce.ts';
 import { attemptsPath, appendAudit, removeRun, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
-import type { Form } from './policy.ts';
+import type { Form, FormSource } from './policy.ts';
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument, type Profile } from './profiles.ts';
 import type { Termination } from './result.ts';
 
@@ -62,8 +62,12 @@ type Crossing = { unit: string; observed: number | null; limit: number | null };
 /** What an admitted call hands the spawn: the launch form, the profile it runs
  *  under, the active session directory the form binds, and the evidence root. */
 export type SpawnPlan = {
-  /** The policy's form for the profile's capability: a launcher, or pi itself. */
+  /** The form step 5 selected: a launcher, or pi itself — for a project form, the
+   *  resolved real path, never the project's link. */
   form: Form;
+  /** Where that form came from: the machine policy, or an approved project root.
+   *  The spawn copies it into the record, so the evidence names the selection. */
+  formSource: FormSource;
   profile: Profile;
   session: string;
   /** `<QUOTIENT_SESSION_HOME>/<session>` — pi's `--session-dir`, and a confined
@@ -278,6 +282,13 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
       root: plan.root,
       form: command,
       form_kind: plan.form.kind,
+      form_source: plan.formSource.kind,
+      // Only a project form has an approved identity to name: a machine form is
+      // operator-published like the policy, and hashing it would add a per-call
+      // read and a failure mode to every default install.
+      ...(plan.formSource.kind === 'project'
+        ? { form_root: plan.formSource.root, form_sha256: plan.formSource.sha256 }
+        : {}),
       profile: plan.profile.name,
       profile_digest: plan.profileDigest,
       profile_source: plan.profile.source,

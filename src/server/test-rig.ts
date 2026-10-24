@@ -13,13 +13,25 @@
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { resolveLocations } from '../config.ts';
 import { reduce, type Reduced } from '../reduce/reduce.ts';
 import { serve, type ServeOptions } from './server.ts';
-import { attemptsPath, type CallId } from './evidence.ts';
+import { APPROVALS_SCHEMA } from './approvals.ts';
+import { attemptsPath, sha256Hex, type CallId } from './evidence.ts';
+import type { Filesystem } from './profiles.ts';
 import { admitCall, type Admission } from './policy.ts';
 import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
@@ -133,12 +145,65 @@ export function workspace(policy: unknown = validPolicy(), options: { raw?: bool
   };
 }
 
-/** A stub launcher: a bash script in the test's own tree, `@MARKER@` replaced by
- *  the marker directory the stub records into (never the run dir). */
-function stubLauncher(dir: string, name: string, body: string, markerDir: string): string {
-  const path = join(dir, `${name}.sh`);
-  writeFileSync(path, `#!/usr/bin/env bash\nset -u\n${body.replaceAll('@MARKER@', markerDir)}\n`);
+/** A form's identity as the approvals store records it. */
+export type RigForm = { path: string; sha256: string };
+
+/**
+ * An executable at PATH in the rig's stub shape, with its identity, creating the
+ * directory it needs. The one place a test's executable is written: the machine
+ * forms a policy names and the project forms a probe judges are made the same way.
+ */
+export function executableAt(path: string, body: string = QUIET): RigForm {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `#!/usr/bin/env bash\nset -u\n${body}\n`);
   chmodSync(path, 0o755);
+  return { path, sha256: sha256Hex(readFileSync(path)) };
+}
+
+/** A stub launcher: an executable in the test's own tree, `@MARKER@` replaced by
+ *  the marker directory the stub records into (never the run dir). */
+const stubLauncher = (dir: string, name: string, body: string, markerDir: string): string =>
+  executableAt(join(dir, `${name}.sh`), body.replaceAll('@MARKER@', markerDir)).path;
+
+/** An executable inside the rig but outside every roots entry: a project form's
+ *  ordinary target, where no delegate admitted under the policy can rewrite it. */
+export function rigForm(rig: Rig, name: string, body: string = QUIET): RigForm {
+  return executableAt(join(rig.dir, `${name}.sh`), body.replaceAll('@MARKER@', rig.markerDir));
+}
+
+/** Plant `<base>/.quotient/forms/<capability>` as a symlink to TARGET, the shape
+ *  an operator publishes, and return the link's path. */
+export function plantProjectForm(
+  rig: Rig,
+  target: RigForm,
+  options: { base?: string; capability?: Filesystem } = {},
+): string {
+  const { base = rig.root, capability = 'write' } = options;
+  const dir = join(base, '.quotient', 'forms');
+  mkdirSync(dir, { recursive: true });
+  const link = join(dir, capability);
+  symlinkSync(target.path, link);
+  return link;
+}
+
+/** The approvals store the rig's server reads: `<rig XDG config>/quotient/approvals.json`. */
+export const rigApprovalsPath = (rig: Rig): string => join(rig.dir, 'config', 'quotient', 'approvals.json');
+
+/** Record approvals where `quotient allow` would: the rig's own XDG store. */
+export function writeApprovals(
+  rig: Rig,
+  entries: { root?: string; capability?: Filesystem; form: RigForm }[],
+): string {
+  const path = rigApprovalsPath(rig);
+  mkdirSync(dirname(path), { recursive: true });
+  const approvals = entries.map(({ root = rig.root, capability = 'write', form }) => ({
+    root,
+    capability,
+    path: form.path,
+    sha256: form.sha256,
+    approved_at: '2026-10-24T05:12:44.000Z',
+  }));
+  writeFileSync(path, `${JSON.stringify({ schema: APPROVALS_SCHEMA, approvals }, null, 2)}\n`);
   return path;
 }
 
@@ -341,6 +406,19 @@ export function jsonLines(path: string): Record<string, any>[] {
     .split('\n')
     .filter((raw) => raw.length > 0)
     .map((raw) => JSON.parse(raw) as Record<string, any>);
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** The `spawn` record of a run, read from its audit: what was launched, and from
+ *  where. The audit has no contract (research F5), so the record's shape is this
+ *  reader's and the suites' assertions'. */
+export function spawnRecord(audit: string): Record<string, unknown> {
+  const records: unknown[] = jsonLines(audit);
+  const spawn = records.find((record) => isRecord(record) && record.record === 'spawn');
+  if (!isRecord(spawn)) {assert.fail(`no spawn record in ${audit}`);}
+  return spawn;
 }
 
 /** The attempts ledger as records; a missing ledger reads as none. */

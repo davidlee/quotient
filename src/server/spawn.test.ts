@@ -37,6 +37,7 @@ import {
   resultDocument,
   SETTLED,
   serverCommand,
+  spawnRecord,
   waitForPath,
   waitForReplies, type Env, type Rig 
 } from './test-rig.ts';
@@ -68,6 +69,7 @@ const READ_PROFILE: Profile = {
 function planFor(rig: Rig, overrides: Partial<SpawnPlan> = {}): SpawnPlan {
   return {
     form: { kind: 'confined', path: rig.readLauncher, extensions: [] },
+    formSource: { kind: 'policy' },
     profile: READ_PROFILE,
     session: 'session1',
     sessionDir: join(rig.sessionHome, 'session1'),
@@ -227,6 +229,32 @@ test('the launcher receives the argv head and the tail separately: the session d
   assert.equal(spawned.form_kind, 'confined');
   assert.equal(spawned.form, rig.readLauncher);
   assert.deepEqual(spawned.argv, sawArgv, 'the audit names the argv the command received');
+});
+
+test('the spawn record pins the form, its source and, for a project form, its root and digest', async (t) => {
+  const rig = newRig(t);
+  const digest = 'd'.repeat(64);
+  const policyRun = await runChild(planFor(rig), { signal: noAbort().signal, env: rig.env });
+  const projectRun = await runChild(
+    planFor(rig, {
+      callId: 2,
+      form: { kind: 'confined', path: rig.writeLauncher, extensions: [] },
+      formSource: { kind: 'project', root: rig.root, sha256: digest },
+    }),
+    { signal: noAbort().signal, env: rig.env },
+  );
+
+  const policy = spawnRecord(policyRun.layout.audit);
+  assert.equal(policy.form, rig.readLauncher, 'the executed path');
+  assert.equal(policy.form_source, 'policy');
+  assert.equal(Object.hasOwn(policy, 'form_root'), false, 'a policy form has no root to name');
+  assert.equal(Object.hasOwn(policy, 'form_sha256'), false, 'a policy form is not hashed');
+
+  const project = spawnRecord(projectRun.layout.audit);
+  assert.equal(project.form, rig.writeLauncher, 'the project form substitutes the slot executable');
+  assert.equal(project.form_source, 'project');
+  assert.equal(project.form_root, rig.root);
+  assert.equal(project.form_sha256, digest);
 });
 
 test('an unconfined write form runs pi with pi\'s argv: no session positional, and form_kind is audited', async (t) => {

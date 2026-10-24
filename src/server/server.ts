@@ -19,9 +19,10 @@ import { legacyLayers, resolveLocations, usable, type Locations } from '../confi
 import { loadHelp, renderContext, sectionText, type HelpSnapshot, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
 import { createLatch, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
-import { admitCall, clampCeilings, formExtensions, selectSlot, transcriptBudget } from './policy.ts';
+import { admitCall, clampCeilings, formExtensions, selectSlot, transcriptBudget, writablePaths } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot, type Snapshot } from './profiles.ts';
 import { absent } from './paths.ts';
+import { chooseForm, lookupProjectForm } from './forms.ts';
 import { acquireSession } from './session.ts';
 import { checkChildView } from './childview.ts';
 import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe, type CallId, type RunLayout } from './evidence.ts';
@@ -285,12 +286,36 @@ async function callTool(
   const root = resolveRoot(request.cwd, context.launchDir, admission.policy.roots);
   if (!root.ok) {return refuse(root.reason, root.detail);}
 
-  // Step 5: the capability selects the wrapper form, and the form's declared
-  // extensions must be able to deliver the profile's tools (EX-7).
-  const form = selectSlot(admission.policy, profile.profile.filesystem);
-  if (!form.ok) {return refuse(form.reason, form.detail);}
-  const extensions = checkProfileExtensions(profile.profile, formExtensions(form.form));
+  // Step 5: the capability selects the machine slot, and the slot's declared
+  // extensions must be able to deliver the profile's tools (EX-7). Both come
+  // first, before the approvals store or the project's link is read, so a
+  // malformed store never pre-empts today's `profile-invalid` (design sec-2).
+  const slot = selectSlot(admission.policy, profile.profile.filesystem);
+  if (!slot.ok) {return refuse(slot.reason, slot.detail);}
+  const extensions = checkProfileExtensions(profile.profile, formExtensions(slot.form));
   if (!extensions.ok) {return refuse(extensions.reason, extensions.detail);}
+
+  // Whether an approval governs this call is itself the selection (DEC-008), so a
+  // store that cannot be read — or a location no store can be read from — decides
+  // nothing and refuses. The lookup is the one composition admission and `allow`
+  // share: store, governing approval, base, probe.
+  const approvalsPath = context.locations.approvalsPath;
+  if (!approvalsPath.ok) {
+    return refuse(
+      'form-unapproved',
+      `the approvals store location is unusable (${approvalsPath.detail}): no call can be shown to be approved, so nothing ran`,
+    );
+  }
+  const lookup = lookupProjectForm({
+    approvalsPath: approvalsPath.path,
+    capability: profile.profile.filesystem,
+    root: root.root,
+    rootsEntry: root.rootsEntry,
+    writable: writablePaths(admission.policy, admission.sessionHome),
+  });
+  if (!lookup.ok) {return refuse('form-unapproved', `${lookup.detail}: nothing ran`);}
+  const selected = chooseForm(slot, lookup.governing, lookup.base, lookup.probe);
+  if (!selected.ok) {return refuse(selected.reason, selected.detail);}
 
   // Step 6: the ceilings, clamped downward.
   const ceilings = clampCeilings(request.ceilings, admission.policy.maxima);
@@ -301,7 +326,7 @@ async function callTool(
   const tools = effectiveTools(profile.profile, request.tools);
   if (!tools.ok) {return refuse(tools.reason, tools.detail);}
 
-  // The admitted values (`root.root`, `form.form`, `ceilings.ceilings`,
+  // The admitted values (`root.root`, `selected.form`, `ceilings.ceilings`,
   // `tools.tools`) and the snapshot digest are what PHASE-06's spawn consumes.
 
   // Step 7: the session — grammar, ownership, and the (root, capability) binding
@@ -378,7 +403,8 @@ async function callTool(
 
     const run = await runChild(
       {
-        form: form.form,
+        form: selected.form,
+        formSource: selected.source,
         profile: profile.profile,
         session: session.session,
         sessionDir: session.sessionDir,
