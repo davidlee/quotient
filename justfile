@@ -1,4 +1,4 @@
-gate: test typecheck build nix-build hostile-audit pack-check
+gate: test typecheck build nix-build forms-probe hostile-audit pack-check
 
 # Not yet in `gate` (IMP-002): typescript-eslint strict, zero warnings, and shellcheck.
 lint:
@@ -16,6 +16,10 @@ build:
 
 nix-build:
     nix build .#default --no-link -L
+
+# 77 (no Nix, no bwrap, no user namespaces) fails the gate too: it requires them.
+forms-probe:
+    scripts/form-probe
 
 hostile-audit:
     bash -n scripts/hostile-audit

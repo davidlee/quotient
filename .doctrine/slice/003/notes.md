@@ -34,3 +34,9 @@ What a further pass over the SL-003 design would probe (written after RV-010's t
 - Whether `persistHome` plus the state mask behaves as stated (an empty `.local/state/quotient` in the persisted home).
 
 None of these needs another design pass. Each is settled by the first build and by the negative controls (route: demonstrate/control). A further adversarial pass is not needed before planning.
+
+## Execution notes (orchestrator)
+
+- quotient delegates cannot write in the repo root (`.quotient/profiles` is a protected layer) and run in a jail without nix, bwrap userns, git or shellcheck. Execution uses worktree `.worktrees/sl-003`; the orchestrator runs host commands and leaves full logs in `.doctrine/state/host/`.
+- PHASE-02 carried into PHASE-03: G6 is vacuous until `P/world` is bound (show G6 fails with the mask removed); mask paths from `protect` must be shell-escaped.
+- Audit evidence: mask-before-root relies on the server refusing roots that contain an evidence store; a session dir that is an ancestor of the root would make a read root writable (server-chosen, not checked by the form).

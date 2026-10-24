@@ -13,10 +13,16 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       packageJson = builtins.fromJSON (builtins.readFile ./package.json);
 
-      # `packages` is the server only; quotient ships no forms. A form is the
-      # operator's choice and is named by the policy.
+      # `packages` is the server only; `lib` holds an optional form-family
+      # builder over a caller-supplied jail.nix; quotient ships no forms. A form
+      # is the operator's choice and is named by the policy.
+      lib = {
+        mkFormFamily = import ./nix/form-family.nix;
+      };
     in
     {
+      inherit lib;
+
       packages = forAllSystems (
         system:
         let

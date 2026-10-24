@@ -408,6 +408,7 @@ test('no doctrine ids: nothing under docs/, examples/, help/, the README, flake.
   assert.ok(files.some((file) => file.endsWith('design.md')), 'the scan reaches docs/');
   assert.ok(files.some((file) => file.endsWith('help/agent.md')), 'the scan reaches help/');
   assert.ok(files.some((file) => file.endsWith('flake.nix')), 'the scan reaches flake.nix');
+  assert.ok(files.some((file) => file.endsWith('nix/form-family.nix')), 'the scan reaches nix/');
   assert.deepEqual(doctrineIdViolations(files), []);
 });
 

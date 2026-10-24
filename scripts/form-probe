@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+# form-probe — the behavioural probe over the probe form family (design sec-5).
+#
+# It builds the probe family from nix/checks (a family whose pi is the in-jail
+# probe script), lays out the fixed tree P=/tmp/quotient-form-probe, runs both
+# forms the way the server does (cwd = the root, argv = the session directory
+# plus pi's argv, stdin closed), then asserts the rows only the host can see.
+# The probe runs outside the Nix sandbox because it needs user namespaces.
+#
+# Every row is named. A row that never reports is a failure, not a silent pass:
+# the pi's rows are checked against its output, the host's against a list.
+#
+# Usage: scripts/form-probe [--keep]
+#
+# Exit: 0 every assertion passed · 1 any failed · 2 usage · 77 a prerequisite is
+#       missing (no Nix, or user namespaces denied). `just forms-probe` treats 77
+#       as a failure, because the gate requires the prerequisites.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+usage: scripts/form-probe [--keep]
+
+Builds the probe family from nix/checks and runs both forms over the fixed tree
+/tmp/quotient-form-probe. Exit 0 all passed, 1 any failed, 77 a prerequisite is
+missing. --keep leaves the tree in place for inspection.
+USAGE
+}
+
+keep=
+case "${1:-}" in
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  '') ;;
+  --keep) keep=1 ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+fatal() {
+  echo "form-probe: $*" >&2
+  exit 1
+}
+skip() {
+  echo "form-probe: SKIP — $*" >&2
+  exit 77
+}
+
+# ── Prerequisites (77) ─────────────────────────────────────────────────────
+command -v nix >/dev/null || skip "nix is not on PATH"
+
+# The probe pi names this tree at build time, so it is fixed: the probe cannot
+# be relocated to another prefix (design sec-5).
+P=/tmp/quotient-form-probe
+root=$P/root
+state=$P/world/state/quotient
+session=$state/sessions/this
+marker=/tmp/quotient-form-probe-marker
+canary=quotient-form-probe-canary
+prefix=quotient # the probe family takes mkFormFamily's default prefix
+
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+# The rows the pi must report for each capability, and the rows only the host
+# can see. Names are ids: the first word of every PASS/FAIL line.
+pi_rows=(G1 G1-cwd G2 G3 G4 G6-sessions-other G6-runs canary-proc1 canary-pi)
+host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 G7)
+
+failed=0
+reported=()
+pass() { printf 'PASS %s %s\n' "$1" "$2"; reported+=("$1"); }
+fail() {
+  printf 'FAIL %s %s\n' "$1" "$2" >&2
+  reported+=("$1")
+  failed=1
+}
+
+# P is a literal path, so a symlink there would let a planted tree stand in for
+# ours: refuse it, and create P itself rather than through `mkdir -p`.
+layout() {
+  [ ! -L "$P" ] || fatal "$P is a symlink; refusing to probe through it"
+  rm -rf -- "$P" "$marker"
+  mkdir "$P" || fatal "$P could not be created fresh"
+  mkdir -p "$root" "$state/sessions/this" "$state/sessions/other" "$state/runs/r"
+  printf 'quotient-form-probe\n' >"$root/hello.txt"
+  printf 'another session\n' >"$state/sessions/other/marker"
+  printf 'another run\n' >"$state/runs/r/marker"
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ -n "$keep" ]; then
+    echo "form-probe: kept $P (--keep)" >&2
+  else
+    rm -rf -- "$P"
+  fi
+  exit "$status"
+}
+
+# ── Build: the probe family's two forms ────────────────────────────────────
+form_of() { # <probe-read|probe-write> -> the form's path in the store
+  local out
+  out=$(cd "$repo" && nix build "./nix/checks#$1" --no-link --print-out-paths -L \
+    --override-input quotient "path:$repo") || fatal "nix build ./nix/checks#$1 failed"
+  printf '%s/bin/%s-%s\n' "$out" "$prefix" "${1#probe-}"
+}
+
+# The form execs its launcher directly (sec-2, "Anatomy of a form"), so the
+# launcher is one level down: the target of the form's exec line.
+launcher_of() { # <form script> -> the launcher's path in the store
+  local launcher
+  launcher=$(sed -n 's/^exec \(.*\) "\$@"$/\1/p' "$1")
+  [ -n "$launcher" ] || return 1
+  printf '%s\n' "$launcher"
+}
+
+# The launcher's own bwrap — the builder's empty-environment wrapper — so the
+# user-namespace check needs nothing on the host's PATH.
+bwrap_of() { # <form script> -> the bwrap the launcher execs
+  local launcher bwrap
+  launcher=$(launcher_of "$1") || return 1
+  bwrap=$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$launcher")
+  case "$bwrap" in '' | *$'\n'*) return 1 ;; esac
+  printf '%s\n' "$bwrap"
+}
+
+# ── Rows only the host can see ─────────────────────────────────────────────
+
+# A jailed process is one whose command line carries the run's nonce: the form
+# hands it to the hold pi, whose own argv keeps it while it waits. `/proc`
+# inside the jail is the jail's own pid namespace, so a jail-local pid means
+# nothing here.
+jailed_pids() { # <nonce> -> host pids whose cmdline carries it
+  local dir pid cmdline
+  for dir in /proc/[0-9]*; do
+    pid=${dir#/proc/}
+    # The probe itself is never a subject, even if it were to carry the nonce.
+    [ "$pid" = "$$" ] && continue
+    cmdline=$(tr '\0' ' ' 2>/dev/null <"$dir/cmdline") || continue
+    case "$cmdline" in *"$1"*) printf '%s\n' "$pid" ;; esac
+  done
+}
+
+# Every row the pi must report; a silent one is a failure.
+check_rows() { # <capability> <output>
+  local id
+  for id in "${pi_rows[@]}"; do
+    grep -qE "^(PASS|FAIL) $id " <<<"$2" || fail "$id" "$1: the probe pi never reported this row"
+  done
+}
+
+# G8: the form's three guards run before anything else, so a bad session
+# directory exits 64 and the probe pi never writes a marker.
+g8() { # <row id> <label> <session argument>
+  local status=0
+  ( cd "$root" && "$form_write" "$3" assert </dev/null >/dev/null 2>&1 ) || status=$?
+  if [ "$status" -eq 64 ] && [ -z "$(find "$session" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    pass "$1" "G8 $2 exits 64 and leaves no marker"
+  else
+    fail "$1" "G8 $2 — exit $status, session directory holds: $(find "$session" -mindepth 1 -maxdepth 1 -printf '%f ')"
+  fi
+}
+
+# A pid whose cmdline carries the nonce.
+carries_nonce() { # <pid> <nonce>
+  local cmdline
+  cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline") || return 1
+  case "$cmdline" in *"$2"*) return 0 ;; esac
+  return 1
+}
+
+# G7: killing the form's parent shell leaves no jailed process. A fresh nonce
+# goes into pi's argv (through the form's env, never this shell's argv), the
+# hold pi records that it reached hold and keeps the nonce while it waits, and
+# the host finds the jailed processes by scanning /proc for it — never by a pid
+# the jail reports, which would name some unrelated host process.
+g7() {
+  local parent waited pids nonce
+  nonce="$$-$RANDOM"
+  rm -f -- "$session/held"
+  ROOT=$root SESSION=$session FORM=$form_write NONCE=$nonce \
+    bash -c 'cd "$ROOT" && "$FORM" "$SESSION" hold "$NONCE" </dev/null' &
+  parent=$!
+  waited=0
+  while { [ ! -e "$session/held" ] || [ -z "$(jailed_pids "$nonce")" ]; } && [ "$waited" -lt 100 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if [ ! -e "$session/held" ] || [ -z "$(jailed_pids "$nonce")" ]; then
+    kill -KILL "$parent" 2>/dev/null || true
+    fail G7 "the hold pi did not reach hold with the nonce $nonce within 10 s"
+    return
+  fi
+  # `</dev/null` makes bash fork, so $parent is the shell the server stands in
+  # for. If it carries the nonce instead, it is the jailed tree itself and
+  # killing it would prove nothing.
+  if carries_nonce "$parent" "$nonce"; then
+    kill -KILL "$parent" 2>/dev/null || true
+    fail G7 "the parent process is itself the jailed tree; killing it proves nothing"
+    return
+  fi
+  kill -KILL "$parent" 2>/dev/null || true
+  wait "$parent" 2>/dev/null || true
+  waited=0
+  while [ -n "$(jailed_pids "$nonce")" ] && [ "$waited" -lt 20 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  pids=$(jailed_pids "$nonce")
+  if [ -n "$pids" ]; then
+    # Only pids carrying the nonce are ever killed.
+    printf '%s\n' "$pids" | xargs -r kill -KILL 2>/dev/null || true
+    fail G7 "jailed processes outlived the form's parent shell by 2 s: $(tr '\n' ' ' <<<"$pids")"
+  else
+    pass G7 "no jailed process outlived the form's parent shell"
+  fi
+}
+
+# Each form runs as the server runs it: cwd = the root, argv = the session
+# directory and pi's own argv, stdin closed.
+run_form() { # <read|write> <form> <pi argv…>
+  local capability=$1 form=$2 out status
+  shift 2
+  echo "form-probe: the $capability form"
+  # LANG and TERM are unset: the launcher must supply both (RV-010 F-5).
+  if out=$(cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$state" FORM_PROBE_CANARY="$canary" \
+    "$form" "$session" "$@" </dev/null 2>&1); then
+    status=0
+  else
+    status=$?
+  fi
+  printf '%s\n' "$out" | sed 's/^/  /'
+  [ "$status" -eq 0 ] || fail "$capability" "the $capability form exited $status"
+  check_rows "$capability" "$out"
+}
+
+# The launcher sets each forwarded name once: its entries replace base's
+# `fwd-env` ones, so a server without LANG or TERM still launches.
+setenv_once() { # <name> <launcher>
+  local count
+  count=$(grep -o -- "--setenv $1 " "$2" | wc -l || true)
+  if [ "$count" -eq 1 ]; then
+    pass "F5-setenv-$1" "the launcher sets $1 exactly once"
+  else
+    fail "F5-setenv-$1" "the launcher sets $1 $count time(s), wanted exactly once"
+  fi
+}
+
+# RV-010 F-5: HOME is forwarded and a precondition. Without it the launcher
+# exits non-zero under `set -u` before bwrap, so the probe pi never runs (G9).
+without_home() {
+  local status=0
+  rm -f -- "$root/probe-marker" "$session/probe-marker"
+  ( cd "$root" && env -u HOME -u LANG -u TERM XDG_STATE_HOME="$state" \
+    "$form_write" "$session" assert </dev/null >/dev/null 2>&1 ) || status=$?
+  if [ "$status" -ne 0 ] && [ ! -e "$root/probe-marker" ] && [ ! -e "$session/probe-marker" ]; then
+    pass F5-home "without HOME the form exits non-zero and the probe pi never runs"
+  else
+    fail F5-home "without HOME — exit $status"
+  fi
+}
+
+# ── The probe ──────────────────────────────────────────────────────────────
+form_read=$(form_of probe-read)
+form_write=$(form_of probe-write)
+[ -x "$form_read" ] || fatal "the probe family built no read form at $form_read"
+[ -x "$form_write" ] || fatal "the probe family built no write form at $form_write"
+
+# 77, not 1: a host that denies unprivileged user namespaces cannot probe, and
+# the jail's own bwrap is the thing to ask. /bin/sh is bound from the host root
+# here, so the check needs no PATH.
+probe_bwrap=$(bwrap_of "$form_write") || fatal "cannot parse the launcher's bwrap line"
+"$probe_bwrap" --unshare-user --ro-bind / / /bin/sh -c true 2>/dev/null ||
+  skip "the jail's bwrap cannot create an unprivileged user namespace"
+
+layout
+trap cleanup EXIT
+
+g8 G8-missing "a missing session directory" "$root/absent-session"
+g8 G8-relative "a relative session directory" "sessions/rel"
+g8 G8-file "a session directory that is a file" "$root/hello.txt"
+
+run_form read "$form_read" assert
+run_form write "$form_write" assert
+
+# sec-2 fixes the launcher's environment for the whole family; the write
+# launcher is the one the review names.
+if form_write_launcher=$(launcher_of "$form_write"); then
+  for name in LANG TERM; do setenv_once "$name" "$form_write_launcher"; done
+else
+  fail F5-setenv "the write form does not exec its launcher"
+fi
+without_home
+
+# G4, host side: the jail's /tmp is its own, so the marker is not here.
+if [ -e "$marker" ]; then
+  rm -f -- "$marker"
+  fail G4 "the jailed /tmp marker appeared on the host at $marker"
+else
+  pass G4 "the jail's /tmp is not the host's /tmp"
+fi
+
+g7
+
+# A row that never reported proves nothing, so it counts as a failure.
+for row in "${host_rows[@]}"; do
+  case " ${reported[*]} " in
+    *" $row "*) ;;
+    *) fail "$row" "never reported" ;;
+  esac
+done
+
+if [ "$failed" -ne 0 ]; then
+  echo "form-probe: FAIL — at least one assertion failed" >&2
+  exit 1
+fi
+echo "form-probe: PASS — every assertion passed"
