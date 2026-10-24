@@ -6,7 +6,8 @@
 // to `admit` (`admitCall` over the resolved locations); the ambient process environment is never read.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { clampCeilings, selectSlot, transcriptBudget, writablePaths, type Admission } from './policy.ts';
 import { sha256Hex } from './evidence.ts';
@@ -229,15 +230,21 @@ test('the machine slot is selected by capability; a capability with no form is w
   assert.match(write.detail, /write/);
 });
 
-test('writablePaths: every roots entry, exposure path and the session home, canonicalised', () => {
-  const policy = admittedPolicy({ roots: ['/work/one', '/work/two'], exposure: ['/home/operator/.pi'] });
+test('writablePaths: every roots entry, exposure path and the session home, by real path', () => {
+  // A symlinked exposure is the path a delegate can write through, so the list
+  // carries the canonical target, not the name the policy spells.
+  const dir = mkdtempSync(join(tmpdir(), 'quotient-writable-'));
+  const root = join(dir, 'root');
+  const target = join(dir, 'exposure-target');
+  const exposure = join(dir, 'exposure');
+  mkdirSync(root);
+  mkdirSync(target);
+  symlinkSync(target, exposure);
+  const sessions = join(dir, 'sessions');
 
-  assert.deepEqual(writablePaths(policy, '/state/sessions'), [
-    '/work/one',
-    '/work/two',
-    '/home/operator/.pi',
-    '/state/sessions',
-  ]);
+  const policy = admittedPolicy({ roots: [root], exposure: [exposure] });
+
+  assert.deepEqual(writablePaths(policy, sessions), [root, target, sessions], 'the symlink is the path it resolves to');
 });
 
 test('a form may declare the extensions it passes, and nothing else', () => {

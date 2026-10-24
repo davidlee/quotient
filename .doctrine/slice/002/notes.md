@@ -157,3 +157,14 @@ runs from this checkout. Workers have no git; the orchestrator commits and runs
   unlinked then created `wx`/0600 and removed on failure; a change's result is
   re-parsed before publishing; the lock is released only while it still carries
   this pid.
+
+### PHASE-03 — done
+
+- `src/server/forms.ts`: `lookupProjectForm`, `probeProjectForm`, `chooseForm`;
+  `rootsEntry` deepest match; `selectSlot`/`SlotSelection`/`SlotRefusal`;
+  `FormSource` and `writablePaths` in `policy.ts`; step-5 refusal rows in
+  `docs/contract/pi-agent-result-2.md`.
+- Review: `chooseForm(slot, governing, base, probe)` takes the probed base, so a
+  refusal names the link actually inspected (matters for PHASE-05's explicit
+  base); `governed` takes only the confined form variant; base-selection and
+  symlink-canonical tests strengthened and mutant-checked.

@@ -14,7 +14,7 @@
 //
 // Imports point one way: this module imports `approvals.ts`, never the reverse.
 import { accessSync, constants, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { basename, join } from 'node:path';
 import { governingApproval, readApprovals, type Approval } from './approvals.ts';
 import { sha256Hex } from './evidence.ts';
 import { absent, errorCode, within } from './paths.ts';
@@ -37,10 +37,6 @@ export type ProjectForm =
 /** The form's one location, spelled once: `<base>/.quotient/forms/<capability>`. */
 const projectLink = (base: string, capability: Filesystem): string =>
   join(base, '.quotient', 'forms', capability);
-
-/** The base a project link was built from: `projectLink`'s inverse, so a refusal
- *  can hand the operator the exact `quotient allow` command for that base. */
-const linkBase = (link: string): string => resolve(link, '..', '..', '..');
 
 /** The capability a project link names: its last component. */
 const linkCapability = (link: string): string => basename(link);
@@ -156,6 +152,10 @@ const governs = (governing: Approval | undefined): string =>
 /** A probe that found something at the link (the judged file, usable or not). */
 type PresentForm = Exclude<ProjectForm, { kind: 'absent' }>;
 
+/** The machine slot a project form can replace: a confined one, with an
+ *  executable and extensions. Rule 4 refuses every other slot kind. */
+type ConfinedForm = Extract<Form, { kind: 'confined' }>;
+
 /** What the probe observed, for a refusal that decides against it. */
 const observed = (probe: PresentForm): string =>
   probe.kind === 'usable' ? `${probe.link} resolves to ${identity(probe.path, probe.sha256)}` : probe.detail;
@@ -168,35 +168,33 @@ const UNCONFINED =
  * Rule 4: a project form substitutes only a confined slot's executable. A link or
  * an approval at an unconfined slot has nothing to substitute, so it refuses
  * rather than being ignored: a project can never express unconfined. Undefined
- * when there is neither, and the machine slot simply stands.
+ * when there is neither, and the machine slot simply stands. BASE is where the
+ * probe was taken, so the link named is one that was actually looked at.
  */
-function unconfinedRefusal(governing: Approval | undefined, probe: ProjectForm): string | undefined {
+function unconfinedRefusal(base: string, governing: Approval | undefined, probe: ProjectForm): string | undefined {
   if (probe.kind !== 'absent') {return `${observed(probe)}; ${governs(governing)}; ${UNCONFINED}`;}
   if (governing === undefined) {return undefined;}
-  return `${projectLink(governing.root, governing.capability)} is absent; ${governs(governing)}; ${UNCONFINED}`;
+  return `${projectLink(base, governing.capability)} is absent; ${governs(governing)}; ${UNCONFINED}`;
 }
 
-/** A usable project form nobody recorded: the operator's first approval. */
-const firstApproval = (probe: Extract<ProjectForm, { kind: 'usable' }>): SelectedForm => {
-  const base = linkBase(probe.link);
-  return {
-    ok: false,
-    reason: 'form-unapproved',
-    detail: `${observed(probe)}, and no approval governs ${base}: approve it with "quotient allow ${base} ${linkCapability(probe.link)}=${probe.path}@${probe.sha256}"`,
-  };
-};
+/** A usable project form nobody recorded: the operator's first approval at BASE. */
+const firstApproval = (base: string, probe: Extract<ProjectForm, { kind: 'usable' }>): SelectedForm => ({
+  ok: false,
+  reason: 'form-unapproved',
+  detail: `${observed(probe)}, and no approval governs ${base}: approve it with "quotient allow ${base} ${linkCapability(probe.link)}=${probe.path}@${probe.sha256}"`,
+});
 
 /**
  * The governed rows of the design's table. The approval is the selection: the
  * call runs exactly the approved identity or refuses, and deleting the link is
  * not a way back to the machine slot — only `quotient revoke` is.
  */
-function governed(machine: Form, governing: Approval, probe: ProjectForm): SelectedForm {
+function governed(machine: ConfinedForm, governing: Approval, base: string, probe: ProjectForm): SelectedForm {
   if (probe.kind === 'absent') {
     return {
       ok: false,
       reason: 'form-invalid',
-      detail: `${projectLink(governing.root, governing.capability)} is absent, and ${governs(governing)}: the approved form is missing; restore it, or run "quotient revoke ${governing.root}" to return these calls to the machine form`,
+      detail: `${projectLink(base, governing.capability)} is absent, and ${governs(governing)}: the approved form is missing; restore it, or run "quotient revoke ${governing.root}" to return these calls to the machine form`,
     };
   }
   if (probe.kind === 'invalid') {
@@ -219,27 +217,34 @@ function governed(machine: Form, governing: Approval, probe: ProjectForm): Selec
 }
 
 /**
- * Step 5's decision, pure: the machine slot, the governing approval and the
- * probe are read by the caller. First failure wins, in the design's order — the
- * slot, then rule 4, then the approval, then the link at its base.
+ * Step 5's decision, pure: the machine slot, the governing approval and what was
+ * found at BASE (`probeProjectForm` there) are read by the caller. First failure
+ * wins, in the design's order — the slot, then rule 4, then the approval, then
+ * the link at BASE.
  */
 export function chooseForm(
   slot: SlotSelection,
   governing: Approval | undefined,
+  base: string,
   probe: ProjectForm,
 ): SelectedForm {
   if (!slot.ok) {return slot;}
   const machine = slot.form;
+  // Rule 4 fails closed before the approval is consulted, and an unconfined slot
+  // with neither a link nor an approval simply stands; either way it is decided
+  // here, so every row below holds a confined machine slot.
   if (machine.kind === 'unconfined') {
-    const refusal = unconfinedRefusal(governing, probe);
-    if (refusal !== undefined) {return { ok: false, reason: 'form-invalid', detail: refusal };}
+    const refusal = unconfinedRefusal(base, governing, probe);
+    return refusal === undefined
+      ? { ok: true, form: machine, source: { kind: 'policy' } }
+      : { ok: false, reason: 'form-invalid', detail: refusal };
   }
-  if (governing !== undefined) {return governed(machine, governing, probe);}
+  if (governing !== undefined) {return governed(machine, governing, base, probe);}
   if (probe.kind === 'absent') {return { ok: true, form: machine, source: { kind: 'policy' } };}
   if (probe.kind === 'invalid') {
-    return { ok: false, reason: 'form-invalid', detail: `${probe.detail}; no approval governs ${linkBase(probe.link)}` };
+    return { ok: false, reason: 'form-invalid', detail: `${probe.detail}; no approval governs ${base}` };
   }
-  return firstApproval(probe);
+  return firstApproval(base, probe);
 }
 
 // ── The lookup (EX-7) ─────────────────────────────────────────────────────

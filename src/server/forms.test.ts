@@ -137,7 +137,8 @@ test('probeProjectForm: a target inside a root, an exposure path or the session 
 
 // ── The decision (EX-3, VT-3, VT-4) ────────────────────────────────────────
 
-const LINK = '/work/one/.quotient/forms/write';
+const BASE = '/work/one';
+const LINK = `${BASE}/.quotient/forms/write`;
 const MACHINE = '/nix/store/aaa/bin/pi-mcp-write';
 const APPROVED = '/nix/store/abc-quotient-write';
 const DIGEST = 'a'.repeat(64);
@@ -187,23 +188,23 @@ function refusedForm(selected: SelectedForm, reason: string): string {
 }
 
 test('chooseForm: an absent machine slot refuses wrapper-unavailable before the store or the link is considered', () => {
-  const selected = chooseForm(absentSlot, approval(), usable());
+  const selected = chooseForm(absentSlot, approval(), BASE, usable());
   if (selected.ok) {assert.fail('expected wrapper-unavailable for a capability with no slot');}
   assert.equal(selected.reason, 'wrapper-unavailable');
   assert.match(selected.detail, /write/);
 });
 
 test('chooseForm: an unconfined slot refuses form-invalid with a link or an approval; a project form is never unconfined', () => {
-  const linked = refusedForm(chooseForm(unconfinedSlot, undefined, usable()), 'form-invalid');
+  const linked = refusedForm(chooseForm(unconfinedSlot, undefined, BASE, usable()), 'form-invalid');
   assert.ok(linked.includes(LINK) && linked.includes(APPROVED), `names the link and the real path: ${linked}`);
   assert.match(linked, /never unconfined/);
 
-  const governed = refusedForm(chooseForm(unconfinedSlot, approval(), absentForm), 'form-invalid');
+  const governed = refusedForm(chooseForm(unconfinedSlot, approval(), BASE, absentForm), 'form-invalid');
   assert.ok(governed.includes(LINK), `names the link it would expect: ${governed}`);
   assert.ok(governed.includes(`${APPROVED} (sha256 ${DIGEST})`), `names the approved identity: ${governed}`);
 
   // With neither, the machine slot stands: there is nothing to substitute.
-  assert.deepEqual(chooseForm(unconfinedSlot, undefined, absentForm), {
+  assert.deepEqual(chooseForm(unconfinedSlot, undefined, BASE, absentForm), {
     ok: true,
     form: { kind: 'unconfined', pi: '/nix/store/aaa/bin/pi' },
     source: { kind: 'policy' },
@@ -211,23 +212,23 @@ test('chooseForm: an unconfined slot refuses form-invalid with a link or an appr
 });
 
 test('chooseForm: ungoverned — an absent link runs the machine slot, an unusable one is form-invalid, a usable one is form-unapproved', () => {
-  assert.deepEqual(chooseForm(confinedSlot, undefined, absentForm), {
+  assert.deepEqual(chooseForm(confinedSlot, undefined, BASE, absentForm), {
     ok: true,
     form: { kind: 'confined', path: MACHINE, extensions: ['builtin:mcp'] },
     source: { kind: 'policy' },
   });
 
-  const invalid = refusedForm(chooseForm(confinedSlot, undefined, invalidForm), 'form-invalid');
+  const invalid = refusedForm(chooseForm(confinedSlot, undefined, BASE, invalidForm), 'form-invalid');
   assert.ok(invalid.includes(invalidForm.detail), `the probe's reason is what the operator reads: ${invalid}`);
   assert.match(invalid, /no approval governs \/work\/one/);
 
-  const unapproved = refusedForm(chooseForm(confinedSlot, undefined, usable()), 'form-unapproved');
+  const unapproved = refusedForm(chooseForm(confinedSlot, undefined, BASE, usable()), 'form-unapproved');
   assert.ok(unapproved.includes(LINK) && unapproved.includes(APPROVED) && unapproved.includes(DIGEST), `names the link and identity: ${unapproved}`);
   assert.ok(unapproved.includes(`quotient allow /work/one write=${APPROVED}@${DIGEST}`), `the exact record command: ${unapproved}`);
 });
 
 test('chooseForm: a governed call runs the approved real path, with the slot extensions inherited', () => {
-  assert.deepEqual(chooseForm(confinedSlot, approval(), usable()), {
+  assert.deepEqual(chooseForm(confinedSlot, approval(), BASE, usable()), {
     ok: true,
     form: { kind: 'confined', path: APPROVED, extensions: ['builtin:mcp'] },
     source: { kind: 'project', root: '/work/one', sha256: DIGEST },
@@ -235,24 +236,40 @@ test('chooseForm: a governed call runs the approved real path, with the slot ext
 });
 
 test('chooseForm: a governed call refuses form-invalid when the approved form is missing or unusable', () => {
-  const missing = refusedForm(chooseForm(confinedSlot, approval(), absentForm), 'form-invalid');
+  const missing = refusedForm(chooseForm(confinedSlot, approval(), BASE, absentForm), 'form-invalid');
   assert.ok(missing.includes(LINK), `names the link: ${missing}`);
   assert.ok(missing.includes('quotient revoke /work/one'), `revoke returns the root to the machine form: ${missing}`);
 
-  const unusable = refusedForm(chooseForm(confinedSlot, approval(), invalidForm), 'form-invalid');
+  const unusable = refusedForm(chooseForm(confinedSlot, approval(), BASE, invalidForm), 'form-invalid');
   assert.ok(unusable.includes(invalidForm.detail), `the probe's reason: ${unusable}`);
   assert.ok(unusable.includes(`${APPROVED} (sha256 ${DIGEST})`), `names the approved identity: ${unusable}`);
 });
 
 test('chooseForm: a governed call refuses form-unapproved when either half of the identity changed, naming both and the command', () => {
-  const moved = refusedForm(chooseForm(confinedSlot, approval(), usable({ path: '/nix/store/def-quotient-write' })), 'form-unapproved');
+  const moved = refusedForm(chooseForm(confinedSlot, approval(), BASE, usable({ path: '/nix/store/def-quotient-write' })), 'form-unapproved');
   assert.ok(moved.includes(`${APPROVED} (sha256 ${DIGEST})`), `names the approved identity: ${moved}`);
   assert.ok(moved.includes(`/nix/store/def-quotient-write (sha256 ${DIGEST})`), `names the observed identity: ${moved}`);
   assert.ok(moved.includes(`quotient allow /work/one write=/nix/store/def-quotient-write@${DIGEST}`), `the re-approval command: ${moved}`);
 
-  const rebuilt = refusedForm(chooseForm(confinedSlot, approval(), usable({ sha256: REBUILT })), 'form-unapproved');
+  const rebuilt = refusedForm(chooseForm(confinedSlot, approval(), BASE, usable({ sha256: REBUILT })), 'form-unapproved');
   assert.ok(rebuilt.includes(`sha256 ${DIGEST}`) && rebuilt.includes(`sha256 ${REBUILT}`), `names both digests: ${rebuilt}`);
   assert.ok(rebuilt.includes(`quotient allow /work/one write=${APPROVED}@${REBUILT}`), `the re-approval command: ${rebuilt}`);
+});
+
+test('chooseForm: a refusal names the link at the base that was probed, not the approval root', () => {
+  // PHASE-05's `allow` probes a candidate base, which need not be the approval's
+  // root: naming the approval root's link would name a link nobody inspected.
+  const base = '/work/elsewhere';
+  const probed = join(base, '.quotient', 'forms', 'write');
+
+  const unconfined = refusedForm(chooseForm(unconfinedSlot, approval(), base, absentForm), 'form-invalid');
+  assert.ok(unconfined.includes(probed), `names the probed link: ${unconfined}`);
+  assert.ok(!unconfined.includes(LINK), `not the approval root's link: ${unconfined}`);
+
+  const missing = refusedForm(chooseForm(confinedSlot, approval(), base, absentForm), 'form-invalid');
+  assert.ok(missing.includes(probed), `names the probed link: ${missing}`);
+  assert.ok(!missing.includes(LINK), `not the approval root's link: ${missing}`);
+  assert.ok(missing.includes('quotient revoke /work/one'), `revoke still names the approval's root: ${missing}`);
 });
 
 // ── The lookup (EX-7, VT-5) ───────────────────────────────────────────────
@@ -283,33 +300,43 @@ const lookupInput = ({ capability = 'write', writable = [], ...rest }: LookupInp
 test('lookupProjectForm: a governing approval supplies the base, else the roots entry, and an explicit base overrides both', () => {
   const f = fixture();
   const root = realpathSync(f.base);
+  // The approval is recorded deeper than the roots entry, so a lookup that fell
+  // back to the roots entry would be visibly wrong; each base has its own link,
+  // so the probe's link says which base it ran at.
   const sub = join(root, 'sub');
-  mkdirSync(sub);
+  const callRoot = join(sub, 'deep');
+  mkdirSync(callRoot, { recursive: true });
+  const rootLink = join(root, '.quotient', 'forms', 'write');
+  const subLink = join(sub, '.quotient', 'forms', 'write');
+  mkdirSync(join(sub, '.quotient', 'forms'), { recursive: true });
+  symlinkSync(f.executable, rootLink);
+  symlinkSync(f.executable, subLink);
   const storePath = join(f.dir, 'approvals.json');
-  const entry = { root, capability: 'write', path: APPROVED, sha256: DIGEST, approved_at: '2026-10-24T05:12:44.000Z' };
+  const entry = { root: sub, capability: 'write', path: APPROVED, sha256: DIGEST, approved_at: '2026-10-24T05:12:44.000Z' };
 
-  const governed = lookupProjectForm(lookupInput({ approvalsPath: writeStore(storePath, [entry]), root: sub, rootsEntry: root }));
+  const governed = lookupProjectForm(lookupInput({ approvalsPath: writeStore(storePath, [entry]), root: callRoot, rootsEntry: root }));
   if (!governed.ok) {assert.fail(`expected the store to be read, got ${governed.detail}`);}
-  assert.equal(governed.base, root, 'the approval root, not the roots entry');
-  assert.equal(governed.governing?.path, APPROVED);
-  assert.deepEqual(governed.probe, { kind: 'absent' }, 'the probe ran at the approval root');
+  assert.equal(governed.base, sub, 'the approval root, not the roots entry');
+  assert.equal(governed.governing?.root, sub);
+  assert.equal(usableProbe(governed.probe).link, subLink, 'the probe ran at the approval root');
 
   // An absent store is an empty one: nothing governs, so the roots entry is the base.
-  const ungoverned = lookupProjectForm(lookupInput({ approvalsPath: join(f.dir, 'none.json'), root: sub, rootsEntry: root }));
+  const ungoverned = lookupProjectForm(lookupInput({ approvalsPath: join(f.dir, 'none.json'), root: callRoot, rootsEntry: root }));
   if (!ungoverned.ok) {assert.fail(`expected an absent store to be empty, got ${ungoverned.detail}`);}
   assert.equal(ungoverned.governing, undefined);
   assert.equal(ungoverned.base, root);
+  assert.equal(usableProbe(ungoverned.probe).link, rootLink, 'the probe ran at the roots entry');
 
   // An explicit base wins over both, and the probe is the one at that base.
   const other = join(f.dir, 'other');
   mkdirSync(join(other, '.quotient', 'forms'), { recursive: true });
   symlinkSync(f.executable, join(other, '.quotient', 'forms', 'write'));
   const explicit = lookupProjectForm(
-    lookupInput({ approvalsPath: writeStore(storePath, [entry]), root: sub, rootsEntry: root, base: other }),
+    lookupInput({ approvalsPath: writeStore(storePath, [entry]), root: callRoot, rootsEntry: root, base: other }),
   );
   if (!explicit.ok) {assert.fail(`expected the store to be read, got ${explicit.detail}`);}
   assert.equal(explicit.base, other);
-  assert.equal(explicit.probe.kind, 'usable', 'the probe ran at the explicit base');
+  assert.equal(usableProbe(explicit.probe).link, join(other, '.quotient', 'forms', 'write'), 'the probe ran at the explicit base');
 });
 
 test('lookupProjectForm: a malformed store refuses, naming the store and the failure', () => {
