@@ -24,6 +24,7 @@ fresh-as-of: 2026-10-24 · design inquiring (run rev 21) · 00cc7b5
 - DEC-020 — env-leak claim rests on jailed-agents.nix:61-68, to be proven by the DEC-022 probe
 - DEC-017 — residual: --args / add-runtime binds unchecked by checkFormFamily
 - DEC-017 — state mask under persistHome leaves an empty quotient state dir in the persisted home; document
+- PHASE-05 docs: `protect` has no effect inside the root (the mask precedes the root bind); say so.
 
 ## Further review
 

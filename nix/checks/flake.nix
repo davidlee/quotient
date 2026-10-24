@@ -33,10 +33,18 @@
 
           probe_root=/tmp/quotient-form-probe
           root=$probe_root/root
-          state=$probe_root/world/state/quotient
+          out=$root/out
+          exposure=$probe_root/exposure
+          world=$probe_root/world
+          state=$world/state/quotient
           session=$state/sessions/this
           other=$state/sessions/other
           runs=$state/runs/r
+          protect=$world/protect
+          protect_missing=$world/protect-missing
+          protect_space="$world/protect dir"
+          ro=$world/ro
+          secret=probe-secret
 
           capability=${capability}
 
@@ -61,6 +69,15 @@
               case "$entry" in
                 FORM_PROBE_CANARY=*) echo present; return ;;
               esac
+            done <"$1"
+            echo absent
+          }
+
+          # Substring presence over NUL-separated fields (cmdline, environ).
+          contains() {
+            local entry
+            while IFS= read -r -d $'\000' entry; do
+              case "$entry" in *"$2"*) echo present; return ;; esac
             done <"$1"
             echo absent
           }
@@ -104,13 +121,59 @@
           expect "$(attempt write /tmp/quotient-form-probe-marker)" landed \
             "G4 $capability: /tmp is writable in the jail"
 
-          # G6: another session and a run directory stay unreadable. Vacuous for
-          # now: the probe binds nothing under the state dir until the caller
-          # arguments land.
+          # The caller's literals and packages: `env` reaches bwrap's argv,
+          # `packages` reaches PATH.
+          expect "''${FORM_PROBE_LITERAL:-}" probe-literal \
+            "env-literal $capability: env reaches pi's environment"
+          expect "$(command -v grep >/dev/null 2>&1 && echo present || echo absent)" present \
+            "pkg-path $capability: packages are on the jailed PATH"
+
+          # G5: an exposure path is rw at its own path, the piFiles file is ro,
+          # and a host dir bound read-only by the caller's options is not
+          # writable.
+          expect "$(attempt write "$exposure/probe-marker")" landed \
+            "G5-exposure $capability: an exposure path is writable"
+          expect "$(cat "$HOME/.pi/agent/settings.json" 2>/dev/null)" probe-settings \
+            "G5-piFiles $capability: the piFiles file is bound at ~/.pi/agent"
+          expect "$(attempt write "$HOME/.pi/agent/settings.json")" refused \
+            "G5-piFiles-ro $capability: the piFiles file is read-only"
+          expect "$(attempt write "$ro/probe-marker")" refused \
+            "G5-world-ro $capability: a non-exposed host dir bound ro is not writable"
+          # The parent must be visible, or the refusal above would be true of a
+          # path that is simply absent: this row fails if `options` is dropped.
+          expect "$([ -d "$ro" ] && echo present || echo absent)" present \
+            "G5-world-ro-parent $capability: the caller's ro bind puts the host dir in the jail"
+
+          # An exposure inside the root: the root bind follows it, so `read`
+          # covers it.
+          out_want=refused
+          [ "$capability" = write ] && out_want=landed
+          expect "$(attempt write "$out/probe-marker")" "$out_want" \
+            "exposure-root $capability: an exposure inside the root is $out_want"
+
+          # A protect path missing on the host is not masked and does not fail
+          # the launch. The present protect path is asserted in the same row, so
+          # this fails if `protect` is dropped (`landed`) and never reports if an
+          # unconditional mask made bwrap fail.
+          expect "$(attempt read "$protect/marker")/$([ -e "$protect_missing" ] && echo present || echo absent)" \
+            refused/absent "protect-missing $capability: protect is in effect and an absent protect path reaches no mount"
+
+          # G6: another session, the run directory and a protected path stay
+          # unreadable under the caller's read-only bind and the state mask.
           expect "$(attempt read "$other/marker")" refused \
             "G6-sessions-other $capability: another session's directory is unreadable"
           expect "$(attempt read "$runs/marker")" refused \
             "G6-runs $capability: the run directory is unreadable"
+          expect "$(attempt read "$protect/marker")" refused \
+            "G6-protect $capability: a protected path is masked"
+          expect "$(attempt read "$protect_space/marker")" refused \
+            "G6-protect-space $capability: a protected path with a space is masked"
+
+          # The secret is delivered in the environment, never on bwrap's argv.
+          expect "$(printf %s "''${FORM_PROBE_SECRET:-}")" "$secret" \
+            "secret-env $capability: secretEnv reaches pi's environment"
+          expect "$(contains /proc/1/cmdline "$secret")" absent \
+            "secret-cmdline $capability: the secret is absent from /proc/1/cmdline"
 
           # Of the server's environment only HOME, LANG and TERM reach the jail
           # (jail.nix's fwd-env, the builder's set-env defaults); the canary must
@@ -126,22 +189,57 @@
           fi
           printf 'probe (%s): all assertions passed\n' "$capability"
         '';
+      # Every path the probe family names at build time is fixed under
+      # probeRoot (design sec-5): scripts/form-probe creates that tree fresh and
+      # removes it. `P/world` bound read-only by the caller's `options` is the
+      # operator mistake the state mask exists for.
+      probeRoot = "/tmp/quotient-form-probe";
+
+      probeArgs =
+        pkgs: capability:
+        {
+          inherit pkgs jail-nix;
+          pi = probePi pkgs capability;
+          packages = [ pkgs.gnugrep ];
+          options = c: [ (c.ro-bind "${probeRoot}/world" "${probeRoot}/world") ];
+          env = { FORM_PROBE_LITERAL = "probe-literal"; };
+          secretEnv = { FORM_PROBE_SECRET = "$(printf %s probe-secret)"; };
+          exposure = [
+            "${probeRoot}/root/out"
+            "${probeRoot}/exposure"
+          ];
+          protect = [
+            "${probeRoot}/world/protect"
+            "${probeRoot}/world/protect-missing"
+            "${probeRoot}/world/protect dir"
+          ];
+          piFiles = {
+            "settings.json" = pkgs.writeText "probe-settings.json" "probe-settings\n";
+          };
+          persistHome = "${probeRoot}/home";
+          network = false;
+        };
     in
     {
       packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          family =
-            capability:
-            quotient.lib.mkFormFamily {
-              inherit pkgs jail-nix;
-              pi = probePi pkgs capability;
-            };
+          probeFamily = capability: quotient.lib.mkFormFamily (probeArgs pkgs capability);
+          # G9's subject: the same family with an empty secret, so the launch must
+          # fail before the probe pi runs.
+          emptySecret = quotient.lib.mkFormFamily (
+            (probeArgs pkgs "write") // {
+              secretEnv = {
+                FORM_PROBE_SECRET = "$(true)";
+              };
+            }
+          );
         in
         {
-          probe-read = (family "read").read;
-          probe-write = (family "write").write;
+          probe-read = (probeFamily "read").read;
+          probe-write = (probeFamily "write").write;
+          probe-secret-empty = emptySecret.write;
         }
       );
     };

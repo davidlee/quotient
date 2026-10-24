@@ -57,8 +57,12 @@ command -v nix >/dev/null || skip "nix is not on PATH"
 # be relocated to another prefix (design sec-5).
 P=/tmp/quotient-form-probe
 root=$P/root
-state=$P/world/state/quotient
+exposure=$P/exposure
+home=$P/home # persistHome, created by the launcher's mkdir -p
+world=$P/world
+state=$world/state/quotient
 session=$state/sessions/this
+protect_space="$world/protect dir"
 marker=/tmp/quotient-form-probe-marker
 canary=quotient-form-probe-canary
 prefix=quotient # the probe family takes mkFormFamily's default prefix
@@ -67,8 +71,14 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 
 # The rows the pi must report for each capability, and the rows only the host
 # can see. Names are ids: the first word of every PASS/FAIL line.
-pi_rows=(G1 G1-cwd G2 G3 G4 G6-sessions-other G6-runs canary-proc1 canary-pi)
-host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 G7)
+pi_rows=(
+  G1 G1-cwd G2 G3 G4 env-literal pkg-path
+  G5-exposure G5-piFiles G5-piFiles-ro G5-world-ro G5-world-ro-parent exposure-root
+  protect-missing
+  G6-sessions-other G6-runs G6-protect G6-protect-space
+  secret-env secret-cmdline canary-proc1 canary-pi
+)
+host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 persistHome G9 G7)
 
 failed=0
 reported=()
@@ -85,10 +95,15 @@ layout() {
   [ ! -L "$P" ] || fatal "$P is a symlink; refusing to probe through it"
   rm -rf -- "$P" "$marker"
   mkdir "$P" || fatal "$P could not be created fresh"
-  mkdir -p "$root" "$state/sessions/this" "$state/sessions/other" "$state/runs/r"
+  # $home is deliberately absent: persistHome's own mkdir -p must create it.
+  mkdir -p "$root/out" "$exposure" "$state/sessions/this" "$state/sessions/other" \
+    "$state/runs/r" "$world/protect" "$world/ro" "$protect_space"
   printf 'quotient-form-probe\n' >"$root/hello.txt"
   printf 'another session\n' >"$state/sessions/other/marker"
   printf 'another run\n' >"$state/runs/r/marker"
+  printf 'protected\n' >"$world/protect/marker"
+  printf 'protected with a space\n' >"$protect_space/marker"
+  printf 'read-only\n' >"$world/ro/marker"
 }
 
 cleanup() {
@@ -103,11 +118,11 @@ cleanup() {
 }
 
 # ── Build: the probe family's two forms ────────────────────────────────────
-form_of() { # <probe-read|probe-write> -> the form's path in the store
+form_of() { # <attr> <read|write> -> the form's path in the store
   local out
   out=$(cd "$repo" && nix build "./nix/checks#$1" --no-link --print-out-paths -L \
     --override-input quotient "path:$repo") || fatal "nix build ./nix/checks#$1 failed"
-  printf '%s/bin/%s-%s\n' "$out" "$prefix" "${1#probe-}"
+  printf '%s/bin/%s-%s\n' "$out" "$prefix" "$2"
 }
 
 # The form execs its launcher directly (sec-2, "Anatomy of a form"), so the
@@ -124,7 +139,9 @@ launcher_of() { # <form script> -> the launcher's path in the store
 bwrap_of() { # <form script> -> the bwrap the launcher execs
   local launcher bwrap
   launcher=$(launcher_of "$1") || return 1
-  bwrap=$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$launcher")
+  # The launcher has several `exec` lines: the runtime-closure and secret
+  # descriptors, then bwrap. bwrap is the one execing an absolute path.
+  bwrap=$(sed -n 's/^exec \(\/[^ ]*\) .*/\1/p' "$launcher")
   case "$bwrap" in '' | *$'\n'*) return 1 ;; esac
   printf '%s\n' "$bwrap"
 }
@@ -184,6 +201,7 @@ g7() {
   nonce="$$-$RANDOM"
   rm -f -- "$session/held"
   ROOT=$root SESSION=$session FORM=$form_write NONCE=$nonce \
+    XDG_STATE_HOME=$world/state FORM_PROBE_CANARY=$canary \
     bash -c 'cd "$ROOT" && "$FORM" "$SESSION" hold "$NONCE" </dev/null' &
   parent=$!
   waited=0
@@ -227,8 +245,8 @@ run_form() { # <read|write> <form> <pi argv…>
   local capability=$1 form=$2 out status
   shift 2
   echo "form-probe: the $capability form"
-  # LANG and TERM are unset: the launcher must supply both (RV-010 F-5).
-  if out=$(cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$state" FORM_PROBE_CANARY="$canary" \
+  # LANG and TERM are unset: the launcher must supply both.
+  if out=$(cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$world/state" FORM_PROBE_CANARY="$canary" \
     "$form" "$session" "$@" </dev/null 2>&1); then
     status=0
   else
@@ -251,12 +269,12 @@ setenv_once() { # <name> <launcher>
   fi
 }
 
-# RV-010 F-5: HOME is forwarded and a precondition. Without it the launcher
-# exits non-zero under `set -u` before bwrap, so the probe pi never runs (G9).
+# HOME is forwarded and is a precondition. Without it the launcher exits
+# non-zero under `set -u` before bwrap, so the probe pi never runs (G9).
 without_home() {
   local status=0
   rm -f -- "$root/probe-marker" "$session/probe-marker"
-  ( cd "$root" && env -u HOME -u LANG -u TERM XDG_STATE_HOME="$state" \
+  ( cd "$root" && env -u HOME -u LANG -u TERM XDG_STATE_HOME="$world/state" \
     "$form_write" "$session" assert </dev/null >/dev/null 2>&1 ) || status=$?
   if [ "$status" -ne 0 ] && [ ! -e "$root/probe-marker" ] && [ ! -e "$session/probe-marker" ]; then
     pass F5-home "without HOME the form exits non-zero and the probe pi never runs"
@@ -265,11 +283,27 @@ without_home() {
   fi
 }
 
+# G9: an empty secretEnv value fails closed, before the launcher reaches bwrap,
+# so the probe pi never writes its markers.
+empty_secret() {
+  local status=0
+  rm -f -- "$root/probe-marker" "$session/probe-marker"
+  ( cd "$root" && env -u LANG -u TERM XDG_STATE_HOME="$world/state" \
+    "$form_secret_empty" "$session" assert </dev/null >/dev/null 2>&1 ) || status=$?
+  if [ "$status" -ne 0 ] && [ ! -e "$root/probe-marker" ] && [ ! -e "$session/probe-marker" ]; then
+    pass G9 "an empty secretEnv value exits non-zero and the probe pi never runs"
+  else
+    fail G9 "an empty secretEnv value — exit $status"
+  fi
+}
+
 # ── The probe ──────────────────────────────────────────────────────────────
-form_read=$(form_of probe-read)
-form_write=$(form_of probe-write)
+form_read=$(form_of probe-read read)
+form_write=$(form_of probe-write write)
+form_secret_empty=$(form_of probe-secret-empty write)
 [ -x "$form_read" ] || fatal "the probe family built no read form at $form_read"
 [ -x "$form_write" ] || fatal "the probe family built no write form at $form_write"
+[ -x "$form_secret_empty" ] || fatal "no empty-secret form at $form_secret_empty"
 
 # 77, not 1: a host that denies unprivileged user namespaces cannot probe, and
 # the jail's own bwrap is the thing to ask. /bin/sh is bound from the host root
@@ -296,6 +330,7 @@ else
   fail F5-setenv "the write form does not exec its launcher"
 fi
 without_home
+empty_secret
 
 # G4, host side: the jail's /tmp is its own, so the marker is not here.
 if [ -e "$marker" ]; then
@@ -303,6 +338,15 @@ if [ -e "$marker" ]; then
   fail G4 "the jailed /tmp marker appeared on the host at $marker"
 else
   pass G4 "the jail's /tmp is not the host's /tmp"
+fi
+
+# persistHome: the launcher created and bound P/home onto ~, so the mount point
+# bwrap made for piFiles is on the host there — a private tmpfs would have
+# discarded it.
+if [ -d "$home/.pi/agent" ]; then
+  pass persistHome "the persisted home holds the jail's ~/.pi/agent"
+else
+  fail persistHome "no $home/.pi/agent: persistHome did not bind P/home"
 fi
 
 g7

@@ -9,6 +9,15 @@
   jail-nix,
   pi,
   prefix ? "quotient",
+  packages ? [ ],
+  options ? (c: [ ]),
+  env ? { },
+  secretEnv ? { },
+  exposure ? [ ],
+  protect ? [ ],
+  piFiles ? { },
+  persistHome ? null,
+  network ? true,
 }:
 let
   inherit (pkgs) lib;
@@ -34,6 +43,28 @@ let
   # component: an invalid one fails at the call, not at the build.
   prefixOk = builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" prefix != null;
 
+  # A `piFiles` key is joined under `~/.pi/agent` in the jail, so it must not
+  # climb out of it; the host paths must be absolute, because bwrap would
+  # resolve a relative one against whatever cwd the launch had.
+  piFileKeyOk =
+    key: key != "" && !(lib.hasPrefix "/" key) && !(lib.elem ".." (lib.splitString "/" key));
+  hostPaths =
+    lib.optional (persistHome != null) {
+      arg = "persistHome";
+      path = persistHome;
+    }
+    ++ map (path: {
+      arg = "exposure";
+      inherit path;
+    }) exposure
+    ++ map (path: {
+      arg = "protect";
+      inherit path;
+    }) protect;
+  describePath = entry: "${entry.arg} \"${entry.path}\"";
+  badPiFiles = lib.filter (key: !(piFileKeyOk key)) (lib.attrNames piFiles);
+  badHostPaths = lib.filter (entry: !(lib.hasPrefix "/" entry.path)) hostPaths;
+
   # jail.nix's `set-env` shell-quotes its value, which would make a runtime
   # expression a literal. This is the marker its `escape` leaves alone, so the
   # launcher's shell expands the value when it builds bwrap's argv.
@@ -45,16 +76,42 @@ let
 
   # One line per masked path, no loop: bwrap cannot create a mount point inside
   # the read-only root bind that follows, and a path missing on the host has
-  # nothing to reveal.
-  maskLine = path: ''[ -e ${path} ] && quotient_mask+=(--tmpfs ${path})'';
+  # nothing to reveal. The argument is already a shell word — `stateDir` is a
+  # double-quoted expression, a `protect` path is host text and is escaped by
+  # the caller — so caller text never reaches the launcher unquoted.
+  maskLine = quoted: ''[ -e ${quoted} ] && quotient_mask+=(--tmpfs ${quoted})'';
+  maskLines = paths: lib.concatMapStrings (path: maskLine path + "\n") paths;
+  maskPaths = [ stateDir ] ++ map lib.escapeShellArg protect;
+
+  # A secret is the caller's shell expression, evaluated in the deferred tail:
+  # it is assigned to a private variable, refused if empty, and delivered as
+  # NUL-separated `--setenv` pairs on a bash-allocated descriptor, so no value
+  # ever reaches bwrap's argv. Nothing is emitted for an empty secretEnv.
+  secretNames = lib.attrNames secretEnv;
+  secretRuntime =
+    lib.concatMapStrings
+      (
+        name:
+        ''
+          quotient_secret_${name}=${secretEnv.${name}}
+          [ -n "$quotient_secret_${name}" ] || { echo "${prefix}: secretEnv ${name} is empty" >&2; exit 1; }
+        ''
+      )
+      secretNames
+    + lib.optionalString (secretNames != [ ]) ''
+      exec {quotient_secret_fd}< <(printf '%s\0' ${lib.concatMapStrings (
+        name: ''--setenv ${name} "$quotient_secret_${name}" ''
+      ) secretNames})
+    '';
 
   # The deferred tail (sec-2, "Argument order"): one jail.nix `defer`, so a
-  # caller's own deferred options cannot follow it. `rootFlag` is the one word
-  # the capabilities differ in; null is the baseline, which stops after the mask.
-  # G7 rests on jail.nix's own --die-with-parent; nothing here adds its negation.
-  # The baseline binds no root and does not chdir, so it must not assign
-  # `quotient_root` either: shellcheck fails the derivation on the unused
-  # variable (SC2034), and a launcher that cannot be built is no baseline.
+  # caller's own deferred options precede it and none can follow. `rootFlag` is
+  # the one word the capabilities differ in; null is the baseline, which stops
+  # after the mask. G7 rests on jail.nix's own --die-with-parent; nothing here
+  # adds its negation. The baseline binds no root and does not chdir, so it must
+  # not assign `quotient_root` either: shellcheck fails the derivation on the
+  # unused variable (SC2034), and a launcher that cannot be built is no
+  # baseline.
   tail =
     rootFlag: c:
     let
@@ -63,10 +120,11 @@ let
     c.defer (
       c.compose (
         lib.optionals isForm [ (c.add-runtime "quotient_root=$(pwd -P)") ]
+        ++ lib.optional (secretNames != [ ]) (c.add-runtime secretRuntime)
         ++ [
           (c.add-runtime ''
             quotient_mask=()
-            ${maskLine stateDir}
+            ${maskLines maskPaths}
           '')
           (c.unsafe-add-raw-args "\"\${quotient_mask[@]}\"")
         ]
@@ -75,8 +133,39 @@ let
           (c.unsafe-add-raw-args ''--bind "$QUOTIENT_ACTIVE_SESSION_DIR" "$QUOTIENT_ACTIVE_SESSION_DIR"'')
           (c.unsafe-add-raw-args ''--chdir "$quotient_root"'')
         ]
+        ++ lib.optional (secretNames != [ ]) (c.unsafe-add-raw-args ''--args "$quotient_secret_fd"'')
       )
     );
+
+  # `persistHome` binds the caller's directory rw onto `~` (sec-2, row 2). The
+  # target must stay unquoted so the launcher's shell expands `~`; `rw-bind`
+  # would escape it. The launcher creates the directory, since the caller names
+  # a path that need not exist yet.
+  persistHomePermission =
+    c:
+    c.compose [
+      (c.add-runtime "mkdir -p ${lib.escapeShellArg persistHome}")
+      (c.unsafe-add-raw-args "--bind ${lib.escapeShellArg persistHome} ~")
+    ];
+
+  # `piFiles` binds store paths read-only under `~/.pi/agent` (row 4), after the
+  # home, caller binds and exposure, so neither a persisted home nor a caller
+  # option can replace them.
+  piFilePermission =
+    c: subPath: source:
+    c.unsafe-add-raw-args
+      "--ro-bind ${lib.escapeShellArg (toString source)} ~/.pi/agent/${lib.escapeShellArg subPath}";
+
+  # The caller's own permissions at their sec-2 positions (row 3): packages,
+  # options and env, then the builder's exposure binds. Every path a caller
+  # supplies is escaped here; `env` values are escaped by `set-env`.
+  callerPermissions =
+    c:
+    [ (c.add-pkg-deps packages) ]
+    ++ (options c)
+    ++ lib.mapAttrsToList (name: value: c.set-env name value) env
+    ++ map (path: c.rw-bind path path) exposure
+    ++ lib.mapAttrsToList (piFilePermission c) piFiles;
 
   # Base forwards LANG and TERM with `fwd-env`, which exits under `set -u` when
   # the server lacks them; these entries replace base's (one `--setenv` per
@@ -86,8 +175,11 @@ let
     [
       (c.set-env "LANG" (rawEnv "\"\${LANG:-C.UTF-8}\""))
       (c.set-env "TERM" (rawEnv "dumb"))
-      (tail rootFlag c)
-    ];
+    ]
+    ++ lib.optional (persistHome != null) (persistHomePermission c)
+    ++ lib.optional network c.network
+    ++ callerPermissions c
+    ++ [ (tail rootFlag c) ];
 
   rootBindFlag = capability: if capability == "read" then "--ro-bind" else "--bind";
 
@@ -116,6 +208,14 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux
   "quotient form families need bubblewrap, which quotient only wires on Linux; this is ${pkgs.stdenv.hostPlatform.system}";
 assert lib.assertMsg prefixOk
   "mkFormFamily: prefix must match ^[A-Za-z0-9][A-Za-z0-9._-]*$, got \"${prefix}\"";
+# A secret name becomes a shell variable name, so it is not caller text that
+# can be quoted away: reject a name that is not a POSIX identifier.
+assert lib.assertMsg (lib.all lib.isValidPosixName secretNames)
+  "mkFormFamily: secretEnv names must be valid POSIX names, got ${lib.concatStringsSep ", " (lib.filter (name: !(lib.isValidPosixName name)) secretNames)}";
+assert lib.assertMsg (badPiFiles == [ ])
+  "mkFormFamily: piFiles keys must be non-empty relative paths without a \"..\" segment: ${lib.concatStringsSep ", " badPiFiles}";
+assert lib.assertMsg (badHostPaths == [ ])
+  "mkFormFamily: persistHome, exposure and protect paths must be absolute: ${lib.concatStringsSep ", " (map describePath badHostPaths)}";
 {
   read = form "read";
   write = form "write";
@@ -127,4 +227,10 @@ assert lib.assertMsg prefixOk
 
   inherit prefix;
   bwrap = emptyEnvBwrap;
+
+  # What the operator's policy must list as exposed: every rw bind source the
+  # builder adds beyond the root and the session directory.
+  exposure = exposure ++ lib.optional (persistHome != null) persistHome;
+  secretEnvNames = secretNames;
+  inherit network;
 }
