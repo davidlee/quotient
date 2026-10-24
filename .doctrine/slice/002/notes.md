@@ -22,7 +22,8 @@ fresh-as-of: 2026-10-24 · audit · db1fff6 + this commit
 - DEC-012 — the approvals store refuses non-canonical paths; reconcile with design sec-2
 - DEC-013 — `allow` refuses when a deeper approval governs; reconcile with design sec-3
 - RSK-001 — deferred robustness gap (a size cap is policy the design doesn't state)
-- RV-006 — still `active` although the design run recorded it as disposed; close or explain at audit
+- RV-006 F-1, F-3 — probe-routed design findings (`doctrine review show RV-006 -f 1,3`) awaiting post-phase verification at audit; this is why RV-006 is still active
+- IMP-003 — the Nix helper should emit single-file forms (after SL-002)
 - IMP-004, IMP-005 — follow-up refactors from the arch pass (unchanged)
 
 ## Design triage (2026-10-24, exploring)
