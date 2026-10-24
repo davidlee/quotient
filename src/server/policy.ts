@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { usable, type Locations } from '../config.ts';
 import { appendAttempt, sha256Hex, type CallId } from './evidence.ts';
-import { errorCode } from './paths.ts';
+import { canonicalPath, errorCode } from './paths.ts';
 import { MCP_EXTENSION, PROFILE_NAME, isFilesystem, type Filesystem } from './profiles.ts';
 
 
@@ -44,6 +44,16 @@ export type Form =
 export function formExtensions(form: Form): readonly string[] {
   return form.kind === 'confined' ? form.extensions : [];
 }
+
+/**
+ * Where the executable step 5 selected came from (design sec-2 "Evidence"): the
+ * policy's machine slot, or a project form the operator approved for ROOT with
+ * digest SHA256. Declared here, beside `Form`, so `spawn.ts` needs no import from
+ * `forms.ts`.
+ */
+export type FormSource =
+  | { kind: 'policy' }
+  | { kind: 'project'; root: string; sha256: string };
 
 /** The per-call wrapper forms, one per filesystem capability. The server names
  *  no jail flag; it selects a form and the form owns its confinement. */
@@ -298,21 +308,24 @@ function validatePolicy(value: unknown): PolicyCheck {
   return { ok: true, policy };
 }
 
-/** Step 5's refusal: the capability's wrapper form is not declared. */
-export type FormRefusal = 'wrapper-unavailable';
+/** Step 5's machine-slot refusal: the capability's wrapper form is not declared. */
+export type SlotRefusal = 'wrapper-unavailable';
 
-export type FormSelection = { ok: true; form: Form } | { ok: false; reason: FormRefusal; detail: string };
+export type SlotSelection = { ok: true; form: Form } | { ok: false; reason: SlotRefusal; detail: string };
 
 /**
- * Step 5: the profile's filesystem capability selects its wrapper form. In the
- * per-call posture that form is the confinement, so a capability with no form
- * has no way to run and refuses `wrapper-unavailable`.
+ * Step 5: the profile's filesystem capability selects the policy's machine slot.
+ * In the per-call posture that form is the confinement, so a capability with no
+ * slot has no way to run and refuses `wrapper-unavailable`.
+ *
+ * A capability with no slot refuses before the approvals store or a project link
+ * is read (`forms.ts`), so a missing slot is the first failure, as today.
  *
  * Static mode's `capability-mismatch` is not reachable here and has no branch:
  * step 1 refuses that posture, so this build never has a launch-time capability
  * for a per-call one to disagree with (design sec-2 steps 1, 5).
  */
-export function selectForm(policy: Policy, filesystem: Filesystem): FormSelection {
+export function selectSlot(policy: Policy, filesystem: Filesystem): SlotSelection {
   const form = policy.forms[filesystem];
   if (form === undefined) {
     return {
@@ -322,6 +335,17 @@ export function selectForm(policy: Policy, filesystem: Filesystem): FormSelectio
     };
   }
   return { ok: true, form };
+}
+
+/**
+ * Every path a delegate admitted under POLICY can write (form-1 G5): its roots,
+ * the policy's `exposure` paths and the session home. This is the one derivation
+ * of the writable set a project form's real path must lie outside (design sec-2
+ * "Usable", rule 3), so admission and `quotient allow` cannot disagree about it.
+ * Canonical, because the rule compares it against a real path.
+ */
+export function writablePaths(policy: Policy, sessionHome: string): string[] {
+  return [...policy.roots, ...policy.exposure, sessionHome].map((path) => canonicalPath(path));
 }
 
 /** Step 6's refusal: a ceiling the policy does not permit. */

@@ -326,10 +326,19 @@ export function resolveProfile(
 /** The three root refusals step 4 can produce. */
 export type RootRefusal = 'root-missing' | 'root-not-a-directory' | 'root-not-allowlisted';
 
-export type RootResolution = { ok: true; root: string } | { ok: false; reason: RootRefusal; detail: string };
+export type RootResolution =
+  /** Both canonical: the call's root, and the roots entry that matched it. */
+  | { ok: true; root: string; rootsEntry: string }
+  | { ok: false; reason: RootRefusal; detail: string };
 
 /**
- * Step 4: canonicalise the call's root and allowlist it by path components.
+ * Step 4: canonicalise the call's root and allowlist it by path components,
+ * reporting the matched roots entry as well.
+ *
+ * `rootsEntry` is the DEEPEST canonical roots entry containing the root, never
+ * the first in policy order: it is the lookup base for a call no approval
+ * governs (`forms.ts`), so the order of the policy's roots must not decide where
+ * a form is looked for. Which calls are accepted and refused is unchanged.
  *
  * An absent `cwd` is the server's launch directory, put through the same
  * allowlist with no exemption — an operator who has not allowlisted it gets
@@ -368,16 +377,23 @@ export function resolveRoot(
   // a realpath, so the comparison is against the allowlisted root's canonical form.
   // `/work/oneevil` is not inside `/work/one`, however much of it the string shares,
   // and a root that does not exist canonicalises to a path that matches nothing.
+  // Every matching entry contains `canonical`, so the deepest one contains all the
+  // others: `within(best, candidate)` is what makes the choice order-independent.
+  let rootsEntry: string | undefined;
   for (const allowedRoot of allowedRoots) {
-    if (within(canonicalPath(allowedRoot), canonical)) {
-      return { ok: true, root: canonical };
+    const matched = canonicalPath(allowedRoot);
+    if (within(matched, canonical) && (rootsEntry === undefined || within(rootsEntry, matched))) {
+      rootsEntry = matched;
     }
   }
-  return {
-    ok: false,
-    reason: 'root-not-allowlisted',
-    detail: `${canonical} is not inside an allowlisted root (${allowedRoots.join(', ') || 'none'})`,
-  };
+  if (rootsEntry === undefined) {
+    return {
+      ok: false,
+      reason: 'root-not-allowlisted',
+      detail: `${canonical} is not inside an allowlisted root (${allowedRoots.join(', ') || 'none'})`,
+    };
+  }
+  return { ok: true, root: canonical, rootsEntry };
 }
 
 /** DEC-103's token: the call asked for a tool the profile does not grant. */

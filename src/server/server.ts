@@ -19,7 +19,7 @@ import { legacyLayers, resolveLocations, usable, type Locations } from '../confi
 import { loadHelp, renderContext, sectionText, type HelpSnapshot, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
 import { createLatch, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
-import { admitCall, clampCeilings, formExtensions, selectForm, transcriptBudget } from './policy.ts';
+import { admitCall, clampCeilings, formExtensions, selectSlot, transcriptBudget } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot, type Snapshot } from './profiles.ts';
 import { absent } from './paths.ts';
 import { acquireSession } from './session.ts';
@@ -287,7 +287,7 @@ async function callTool(
 
   // Step 5: the capability selects the wrapper form, and the form's declared
   // extensions must be able to deliver the profile's tools (EX-7).
-  const form = selectForm(admission.policy, profile.profile.filesystem);
+  const form = selectSlot(admission.policy, profile.profile.filesystem);
   if (!form.ok) {return refuse(form.reason, form.detail);}
   const extensions = checkProfileExtensions(profile.profile, formExtensions(form.form));
   if (!extensions.ok) {return refuse(extensions.reason, extensions.detail);}

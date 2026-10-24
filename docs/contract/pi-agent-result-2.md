@@ -204,6 +204,8 @@ before step 1.
 | `root-not-a-directory` | step 4 | the call's root is not a directory |
 | `root-not-allowlisted` | step 4 | the canonical root is outside every `roots` entry |
 | `wrapper-unavailable` | step 5 | the policy declares no form for the profile's capability |
+| `form-invalid` | step 5 | the project form at the lookup base is missing while an approval governs, unreadable, not an executable regular file, inside a writable path, or substitutes an unconfined slot |
+| `form-unapproved` | step 5 | a usable project form is not approved, differs from the governing approval's identity, or the approvals store cannot be read |
 | `ceiling-above-maximum` | step 6 | a requested ceiling is above the policy's maximum |
 | `tools-not-allowed` | step 6 | the call asked for a tool the profile does not grant |
 | `session-invalid` | step 7 | the session id fails the session grammar |
@@ -214,3 +216,8 @@ before step 1.
 | `audit-unavailable` | before the run | the attempts ledger cannot be appended to, so nothing is launched |
 | `audit-failed` | before the run | the run's first audit record cannot be written, so nothing is launched |
 | `server-error` | any step | the server failed before a run was established |
+
+A later build may add a reason to this table without minting a new version: the
+envelope's fields do not change. A consumer must therefore handle a refusal
+reason it does not know as a refusal — nothing ran, and `refusal.detail` says
+why — never as a protocol fault or as a completed run.

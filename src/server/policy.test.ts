@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { clampCeilings, selectForm, transcriptBudget, type Admission } from './policy.ts';
+import { clampCeilings, selectSlot, transcriptBudget, writablePaths, type Admission } from './policy.ts';
 import { sha256Hex } from './evidence.ts';
 import { admit, attempts, validPolicy, workspace, type Env } from './test-rig.ts';
 
@@ -216,17 +216,28 @@ function admittedPolicy(overrides: Record<string, unknown> = {}) {
   return verdict.policy;
 }
 
-test('the profile capability selects its form; a form the policy does not declare is wrapper-unavailable', () => {
+test('the machine slot is selected by capability; a capability with no form is wrapper-unavailable', () => {
   const policy = admittedPolicy({ forms: { read: '/nix/store/aaa/bin/pi-mcp-read' } });
 
-  const read = selectForm(policy, 'read');
+  const read = selectSlot(policy, 'read');
   if (!read.ok) {assert.fail(`expected the read form, got ${read.reason}: ${read.detail}`);}
   assert.deepEqual(read.form, { kind: 'confined', path: '/nix/store/aaa/bin/pi-mcp-read', extensions: [] }, 'the string form declares no extension');
 
-  const write = selectForm(policy, 'write');
+  const write = selectSlot(policy, 'write');
   if (write.ok) {assert.fail('expected wrapper-unavailable for a capability with no form');}
   assert.equal(write.reason, 'wrapper-unavailable');
   assert.match(write.detail, /write/);
+});
+
+test('writablePaths: every roots entry, exposure path and the session home, canonicalised', () => {
+  const policy = admittedPolicy({ roots: ['/work/one', '/work/two'], exposure: ['/home/operator/.pi'] });
+
+  assert.deepEqual(writablePaths(policy, '/state/sessions'), [
+    '/work/one',
+    '/work/two',
+    '/home/operator/.pi',
+    '/state/sessions',
+  ]);
 });
 
 test('a form may declare the extensions it passes, and nothing else', () => {

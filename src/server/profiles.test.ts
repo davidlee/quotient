@@ -80,6 +80,12 @@ function refuseRoot(resolution: ReturnType<typeof resolveRoot>, reason: string, 
   if (detail !== undefined) {assert.match(resolution.detail, detail);}
 }
 
+/** The canonical root and roots entry of an accepted call. */
+function acceptRoot(resolution: ReturnType<typeof resolveRoot>): { root: string; rootsEntry: string } {
+  if (!resolution.ok) {assert.fail(`expected an allowed root, got ${resolution.reason}: ${resolution.detail}`);}
+  return resolution;
+}
+
 // ── The example documents ──────────────────────────────────────────────────
 
 test('every example document loads as a profile layer', () => {
@@ -424,6 +430,26 @@ test('allowlisting is by path components, never by string prefix', () => {
   const viaLink = resolveRoot(link, tree.dir, [tree.one]);
   if (!viaLink.ok) {assert.fail(`expected the symlink to canonicalise onto its target, got ${viaLink.reason}`);}
   assert.equal(viaLink.root, realpathSync(tree.one));
+});
+
+test('the roots entry is the deepest containing one, whichever order the policy lists the roots in', () => {
+  const tree = roots();
+  const current = join(tree.one, 'current');
+  symlinkSync(join(tree.one, 'sub'), current);
+  const sub = realpathSync(join(tree.one, 'sub'));
+  const outer = realpathSync(tree.one);
+
+  for (const allowed of [[tree.dir, tree.one, current], [current, tree.one, tree.dir]]) {
+    const nested = acceptRoot(resolveRoot(sub, tree.dir, allowed));
+    assert.equal(nested.root, sub);
+    assert.equal(nested.rootsEntry, sub, 'the nested entry is the lookup base, not the first match in policy order');
+
+    const parent = acceptRoot(resolveRoot(tree.one, tree.dir, allowed));
+    assert.equal(parent.rootsEntry, outer, 'an entry below the root does not contain it');
+  }
+
+  // Which calls are accepted is unchanged: the allowlist decision is the same.
+  refuseRoot(resolveRoot(tree.oneevil, tree.dir, [tree.one, current]), 'root-not-allowlisted', /oneevil/);
 });
 
 test('an absent cwd resolves to the server launch directory through the same allowlist, with no exemption', () => {

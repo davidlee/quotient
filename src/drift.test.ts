@@ -87,7 +87,7 @@ const backticked = (text: string, token: string): boolean => text.includes(`\`${
 
 /**
  * The refusal reasons declared only as TypeScript unions (`RefusalReason`,
- * `FormRefusal`, `SessionRefusal`, …), erased at runtime, so read from the
+ * `ProjectFormRefusal`, `SessionRefusal`, …), erased at runtime, so read from the
  * sources' `export type …Refusal… =` declarations; plus the runtime list in
  * result.ts. A reason added to a union fails until the contract names it.
  */
