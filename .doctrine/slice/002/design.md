@@ -40,7 +40,7 @@ The trust boundary is file write access. A confined delegate can write its root 
 - **DEC-010** fixes the layout (`forms/read`, `forms/write`), the substitution rule (a project form replaces only the executable of a confined machine slot and inherits its `extensions`), and the real-path rule that closes the swap race against this policy's delegates; host-wide immutability of an approved form is the operator's obligation.
 - **DEC-011** keeps `quotient-policy/2`, edited in place under an explicit compatibility rule, and fails start-up on legacy launch-dir layers.
 
-Two run-level dispositions carry no knowledge record and are specified here: the spawn audit record's form fields (inq-6, sec-2 "Evidence") and the root match returning the matched entry (inq-7, sec-2 "Step 4").
+Two run-level dispositions carry no knowledge record and are specified here: the spawn audit record's form fields (inq-6, sec-2 "Evidence") and the root match returning the matched `roots` entry as `rootsEntry` (inq-7, sec-2 "Step 4").
 
 The repository has no ADRs, policies, standards or specs; the contracts in `docs/contract/` are authoritative over narrative (`docs/design.md:3-4`). Evidence: `research/research.md` rounds 1–2; this design leans only on its ✓ rows and on sites re-read while drafting (`src/config.ts`, `src/server/{policy,profiles,childview,server,spawn,paths,evidence,session}.ts`, `src/cli.ts`, `docs/contract/{quotient-policy-2,form-1}.md`).
 
@@ -50,6 +50,8 @@ The repository has no ADRs, policies, standards or specs; the contracts in `docs
 ### Where the change sits in admission
 
 The admission order and its first-failure-wins rule are unchanged. Step 4 now also reports which `roots` entry matched; step 5 reads the approvals store and the project's link as well as the policy; step 8 protects one more store and two fewer.
+
+Within step 5 the existing checks keep their place: the slot lookup, then the profile-extensions check (`checkProfileExtensions` against the slot's `extensions`, refusing `profile-invalid`), then the approvals store and the project link. A project form inherits its slot's `extensions`, so the extensions check depends on the slot alone and never waits on the store; a malformed store therefore never pre-empts today's `profile-invalid`.
 
 ```mermaid
 flowchart TD
@@ -68,21 +70,21 @@ flowchart TD
 
 ```ts
 export type RootResolution =
-  | { ok: true; root: string; entry: string }   // entry: canonical roots entry
+  | { ok: true; root: string; rootsEntry: string }   // both canonical
   | { ok: false; reason: RootRefusal; detail: string };
 ```
 
-`entry` is the **longest** canonical entry that contains `root` — among matches, which are nested by path component, the deepest. Admission is unchanged: the same calls are accepted and refused with the same reasons and details. `entry` is the lookup base for a call no approval governs (below).
+`rootsEntry` is the **longest** canonical `roots` entry that contains `root` — among matches, which are nested by path component, the deepest. One name for one value: the design, the code and both contracts call it the roots entry. Admission is unchanged: the same calls are accepted and refused with the same reasons and details. `rootsEntry` is the lookup base for a call no approval governs (below).
 
 ### Step 5: selecting the form
 
 **Governing approval.** For the call's capability, the governing approval is the approval entry with the deepest recorded `root` that contains the call's canonical root (`within` from `src/server/paths.ts`). Approval roots are canonical paths written by the operator into a store no delegate can write, so no delegate can move them. The call's canonical root is where the call physically runs. Together these mean a call that lands anywhere inside an approved root is governed by that approval, however its `cwd` was spelled and however the `roots` entries currently resolve.
 
-**Lookup base.** The governing approval's `root` when there is one; otherwise step 4's `entry`. The project link is `<base>/.quotient/forms/<capability>`.
+**Lookup base.** The governing approval's `root` when there is one; otherwise step 4's `rootsEntry`. The project link is `<base>/.quotient/forms/<capability>`.
 
-Why the base is not simply `entry`: canonicalising a `roots` entry follows symlinks, and a write delegate can retarget a symlink inside its root. If `entry` were the only base, a delegate could make a deeper `roots` entry resolve into an approved project (or retarget an approved entry's alias away), so that later calls in the project matched an entry with no approval and ran the machine default — the downgrade DEC-008 forbids (RV-006 F-1).
+Why the base is not simply `rootsEntry`: canonicalising a `roots` entry follows symlinks, and a write delegate can retarget a symlink inside its root. If `rootsEntry` were the only base, a delegate could make a deeper `roots` entry resolve into an approved project (or retarget an approved entry's alias away), so that later calls in the project matched an entry with no approval and ran the machine default — the downgrade DEC-008 forbids (RV-006 F-1).
 
-The link is looked up with `lstat`. Only an absent entry (the existing `absent()` rule in `src/server/paths.ts:140-148`, under which a dangling symlink is *not* absent) means "no link". Any other failure — `EACCES`, `ENOTDIR` because `.quotient` is a file, a dangling link — refuses `form-invalid`.
+The link is looked up with `lstat`. Only an absent entry (the existing `absent()` rule in `src/server/paths.ts`, under which a dangling symlink is *not* absent) means "no link". Any other failure — `EACCES`, `ENOTDIR` because `.quotient` is a file, a dangling link — refuses `form-invalid`.
 
 ```mermaid
 flowchart TD
@@ -139,7 +141,7 @@ Refusal details name what an operator needs: the base and whether an approval go
 
 ### The selection module
 
-A new `src/server/forms.ts` owns step 5. `selectForm` in `src/server/policy.ts` stays the machine-slot lookup and is called from it.
+A new `src/server/forms.ts` owns step 5's project-form half. The machine-slot lookup in `src/server/policy.ts` is renamed to match the prose: `selectForm` / `FormSelection` / `FormRefusal` become `selectSlot` / `SlotSelection` / `SlotRefusal` (the refusal reason `wrapper-unavailable` is unchanged). `Form` keeps naming what will be executed.
 
 ```ts
 export type ProjectFormRefusal = 'form-invalid' | 'form-unapproved';
@@ -152,32 +154,57 @@ export type ProjectForm =
 
 export function probeProjectForm(base: string, capability: Filesystem, writable: readonly string[]): ProjectForm;
 
-export type FormSource =
-  | { kind: 'policy' }
-  | { kind: 'project'; root: string; sha256: string };
-
 export type SelectedForm =
-  | { ok: true; form: Form; source: FormSource }
-  | { ok: false; reason: FormRefusal | ProjectFormRefusal; detail: string };
+  | { ok: true; form: Form; source: FormSource }        // FormSource: policy.ts, beside Form
+  | { ok: false; reason: SlotRefusal | ProjectFormRefusal; detail: string };
+
+/** What step 5 knows about a project form before deciding: the governing approval, the base, the probe. */
+export type ProjectFormLookup =
+  | { ok: true; governing: Approval | undefined; base: string; probe: ProjectForm }
+  | { ok: false; detail: string };                       // approvals store unreadable or malformed
+
+/** The one composition admission and `quotient allow` share: read the store, take the
+ *  governing approval, pick the base, probe there. Touches the filesystem only through
+ *  readApprovals and probeProjectForm. */
+export function lookupProjectForm(input: {
+  approvalsPath: string;
+  capability: Filesystem;
+  root: string;                    // canonical call root
+  rootsEntry: string;
+  writable: readonly string[];     // writablePaths(policy, sessionHome)
+  base?: string;                   // `allow` passes its roots entry; admission omits it
+}): ProjectFormLookup;             // base defaults to governing?.root ?? rootsEntry
 
 /** The deepest approval for CAPABILITY whose root contains ROOT, if any. */
 export function governingApproval(approvals: readonly Approval[], root: string, capability: Filesystem): Approval | undefined;
 
 /** Step 5's decision. Pure: the store and the probe (at the base) are read by the caller. */
 export function chooseForm(
-  slot: FormSelection,             // selectForm(policy, capability)
+  slot: SlotSelection,             // selectSlot(policy, capability)
   governing: Approval | undefined,
   probe: ProjectForm,
 ): SelectedForm;
 ```
 
-`governingApproval` lives in `approvals.ts` beside the store's other readers. The caller in `server.ts` reads the store, takes the governing approval, picks the base (`governing?.root ?? entry`), probes there, and calls `chooseForm`. `probeProjectForm` is the one place the filesystem is touched for a project form; `quotient allow` uses it too, so the report the operator reads and the check admission makes cannot disagree. A capability with no machine slot refuses `wrapper-unavailable` before the store or the link is read, as today.
+`governingApproval` lives in `approvals.ts` beside the store's other readers. `lookupProjectForm` is the only composition of store, governing approval, base and probe: admission calls it, refuses `form-unapproved` naming the store when it returns `ok: false`, and otherwise passes `governing` and `probe` to `chooseForm`; `quotient allow` calls it with `base` set to its roots entry and renders the result. The two can therefore not disagree about what governs a root or what is at its link. `probeProjectForm` is the one place the filesystem is touched for a project form. A capability with no machine slot refuses `wrapper-unavailable` before the store or the link is read, as today.
+
+```ts
+// policy.ts, beside Form, so spawn.ts needs no import from forms.ts
+export type FormSource =
+  | { kind: 'policy' }
+  | { kind: 'project'; root: string; sha256: string };
+
+/** Every path a delegate admitted under POLICY can write (form-1 G5): roots, exposure, session home. */
+export function writablePaths(policy: Policy, sessionHome: string): string[];
+```
+
+`writablePaths` is the one derivation of usability rule 3's input; admission and `allow` both call it.
 
 ### The approvals store
 
 `src/server/approvals.ts` owns the store's format, reading, lookup and the one writer used by the CLI. Its format is specified by a new contract, `docs/contract/quotient-approvals-1.md` (sec-3).
 
-Location: `<xdgConfig>/quotient/approvals.json`, a new `Locations.approvalsPath: Resolved` beside `policyPath`. No environment variable (DEC-009). An unusable location (no absolute `XDG_CONFIG_HOME` or `HOME`) refuses at step 5 like an unreadable store.
+Location: `<xdgConfig>/quotient/approvals.json`, a new `Locations.approvalsPath: Resolved` beside `policyPath`. No environment variable (DEC-009). An unusable location (no absolute `XDG_CONFIG_HOME` or `HOME`) cannot reach step 5: with profiles XDG-only, such a host has no profile layer, so step 3 refuses first. The code still fails closed there (treated as an unreadable store), and no contract promises a reason for it.
 
 ```json
 {
@@ -247,7 +274,7 @@ The `spawn` record (`src/server/spawn.ts:278-292`) already carries `root` (canon
 
 Machine-policy forms are not hashed: they are operator-published like the policy itself, and hashing them would add a per-call read and a new failure mode to every default install. `AuditRecord` has no contract or drift guard (research F5), so a spawn test pins these fields.
 
-`RunPlan.form` stays a `Form`; the plan gains `formSource: FormSource`, which the spawn copies into the record.
+`SpawnPlan` (`src/server/spawn.ts`) takes both halves of the one `SelectedForm` step 5 produced: `form: Form` (for a project form, the confined real path with the slot's extensions) and the new `formSource: FormSource`, which the spawn copies into the record. `AuditRecord` is loosely typed, so the new fields are pinned only by a spawn test.
 
 ### Start-up: legacy layers
 
@@ -287,7 +314,7 @@ quotient allow <path> <cap>=<realpath>@<sha256>...  record, only if each named f
 quotient revoke <approval-root> [<cap>...]       remove stored entries (all capabilities when none named)
 ```
 
-`allow` resolves `<path>` (default: the current directory; relative paths against it) the way admission does: read the machine policy with `readPolicy` (`src/server/policy.ts:123`) at `Locations.policyPath`, take the writable set from its `roots` and `exposure` and `Locations.sessionHome`, canonicalise, and take the longest containing `roots` entry with the same function step 4 uses. That entry is the **record root**: `allow` approves the link at `<record root>/.quotient/forms/<cap>` and keys the entry by it. A path inside no entry, or an unreadable or invalid policy, exits 1 naming why; usage errors exit 2.
+`allow` resolves `<path>` (default: the current directory; relative paths against it) the way admission does: read the machine policy with `readPolicy` (`src/server/policy.ts:123`) at `Locations.policyPath`, take the writable set with `writablePaths(policy, Locations.sessionHome)`, canonicalise, and take the roots entry with the same function step 4 uses (`rootsEntry`). `allow` approves the link at `<rootsEntry>/.quotient/forms/<cap>` and keys the approval by that roots entry. It reads that link through `lookupProjectForm` with `base` set to the roots entry, so the governing approval it reports is the one admission would find. A path inside no entry, or an unreadable or invalid policy, exits 1 naming why; usage errors exit 2.
 
 **Report.** For each capability, one block:
 
@@ -305,9 +332,9 @@ to approve what is shown:
   quotient allow /home/op/work/satan write=/nix/store/abc…-quotient-write@9f2c…
 ```
 
-`governed` names the approval that governs calls at `<path>` today (sec-2), which may sit at a shallower root than the record root; recording then adds a deeper approval that governs calls inside the record root. An unusable link prints its `form-invalid` detail instead of an identity and contributes nothing to the suggested command. A governing approval whose link is missing or changed says so and suggests `quotient revoke` as well. Exit 0 whenever the report printed.
+`governed` names the approval that governs calls at `<path>` today (sec-2), which may sit at a shallower root than the roots entry; recording then adds a deeper approval that governs calls inside the roots entry. Rendering is a pure function of the lookups and the slot, so report tests assert text without a filesystem or argv. An unusable link prints its `form-invalid` detail instead of an identity and contributes nothing to the suggested command. A governing approval whose link is missing or changed says so and suggests `quotient revoke` as well. Exit 0 whenever the report printed.
 
-**Record.** Each `<cap>=<realpath>@<sha256>` (split at the last `@`; a sha256 contains none) is checked against a fresh `probeProjectForm` at the record root and against the machine slot, inside the store lock (`updateApprovals`'s `change`). All must pass or nothing is written: the form must be usable, the slot confined, and the observed real path **and** sha256 both equal to those given. A mismatch exits 1 naming both identities: the form changed between the operator's review and the record — new bytes, or the same bytes at another path (RV-006 F-3) — and what is there now was not reviewed. On success it writes `{ root, capability, path, sha256, approved_at }`, replacing any entry for that pair, and prints the recorded identities.
+**Record.** Each `<cap>=<realpath>@<sha256>` (split at the last `@`; a sha256 contains none) is checked against a fresh `probeProjectForm` at the roots entry and against the machine slot, inside the store lock (`updateApprovals`'s `change`). All must pass or nothing is written: the form must be usable, the slot confined, and the observed real path **and** sha256 both equal to those given. A mismatch exits 1 naming both identities: the form changed between the operator's review and the record — new bytes, or the same bytes at another path (RV-006 F-3) — and what is there now was not reviewed. On success it writes `{ root, capability, path, sha256, approved_at }`, replacing any entry for that pair, and prints the recorded identities.
 
 **Revoke.** Addresses a **stored** approval, not a path to resolve: `<approval-root>` must equal an entry's recorded `root` exactly, after making it absolute and lexically normalising it. `revoke` reads neither the policy nor the filesystem, because an approval keeps governing after its root leaves `roots` or its directory moves or disappears (sec-2), and a resolution through the current policy would reach a different key — at worst a parent's approval (RV-006 F-6). It removes that root's entries for the named capabilities (or all of them) and never touches another root's, so revoking a child never revokes a governing parent. Calls there then fall to whatever governs them: a shallower approval if one contains the root, else the machine slot if no link remains, or `form-unapproved` if one does. A root or capability with no stored entry exits 1 and lists the stored roots, so a mistyped root is never a silent success. The `allow` report prints the governing approval's root, ready to paste into `revoke`.
 
@@ -345,7 +372,7 @@ sequenceDiagram
 - **Header** (line 4): fix the copy slip — a breaking change mints the *next* version. Add the compatibility rule (DEC-011): a change is breaking when it changes what an existing policy document grants or selects without an operator act.
 - **Where things are:** profiles and help come from `<xdgConfig>/quotient/` only, read once at start-up; a `<launch dir>/.quotient/profiles` or `/help` fails start-up with migration guidance. Add the approvals store row (fixed path, no variable; format in `quotient-approvals-1.md`).
 - **Fields:** `forms.read` / `forms.write` are the **default** form per capability; a project may substitute the executable (new section below).
-- **How a call is admitted:** step 4 names the longest matching entry; step 5 reads the approvals store and the project link and adds `form-invalid` and `form-unapproved`.
+- **How a call is admitted:** step 4 names the longest matching roots entry; step 5 reads the approvals store and the project link and adds `form-invalid` and `form-unapproved`.
 - **Protected stores:** drop the launch-dir layers and the "cannot be rooted at the launch directory" consequence; add the approvals store, protected whether or not it exists.
 - **New section, Project forms:** the `.quotient/forms/{read,write}` layout; the governing approval (deepest approval root containing the call's canonical root) and otherwise the longest roots entry as the lookup base, so nested repositories and worktrees need their own entries; the governing-approval × link table; usability rules; inheritance of slot `extensions`; no unconfined; deletion is not revocation; relocation through delegate-writable symlinks, and the advice to name roots and `cwd`s by real path; what the hash covers (the executable's bytes only — what it reads or execs at run time is the operator's responsibility); operator obligations: an approved form must be immutable to every delegate on the host, not only to this policy's (Nix store paths are), and must embed confinement-critical inputs or keep them where no delegate can write. Points to `quotient-approvals-1.md` for the store.
 - **Publishing a policy:** restart after changing XDG profiles or help (launch-dir wording removed); a project form change needs `quotient allow`, not a restart.
@@ -384,9 +411,9 @@ sequenceDiagram
 ```mermaid
 flowchart LR
   CLI["cli.ts (verbs)"] --> APV["approve.ts: allow / revoke"]
-  APV --> FRM["server/forms.ts: probeProjectForm, chooseForm"]
+  APV --> FRM["server/forms.ts: lookupProjectForm, probeProjectForm, chooseForm"]
   APV --> APS["server/approvals.ts: readApprovals, governingApproval, updateApprovals"]
-  APV --> POL["server/policy.ts: readPolicy, selectForm"]
+  APV --> POL["server/policy.ts: readPolicy, selectSlot, writablePaths"]
   APV --> PRF["server/profiles.ts: resolveRoot"]
   SRV["server/server.ts: callTool step 5, loadStartup"] --> FRM
   SRV --> APS
@@ -399,21 +426,21 @@ flowchart LR
   CFG --> APV
 ```
 
-`forms.ts` imports only the `Approval` type from `approvals.ts`; `chooseForm` takes the governing approval as a value, and the two callers (`server.ts`, `approve.ts`) compose them. The filesystem is touched in `probeProjectForm`, `readApprovals` and `updateApprovals` only.
+`forms.ts` imports `readApprovals`, `governingApproval` and the `Approval` type from `approvals.ts`; `approvals.ts` imports nothing from `forms.ts`. `chooseForm` stays pure and takes the lookup's values. `FormSource` lives in `policy.ts` beside `Form`, so `spawn.ts` keeps importing only from `policy.ts`. The filesystem is touched in `probeProjectForm`, `readApprovals` and `updateApprovals` only; `lookupProjectForm` composes the first two.
 
 ### Code-impact commitments
 
 | path | change |
 |---|---|
 | `src/config.ts` | `Locations` loses the launch-dir layer entries and gains `approvalsPath: Resolved`; new `legacyLayers(launchDir)`; header comment's authority split updated |
-| `src/server/profiles.ts` | `resolveRoot` returns `{ root, entry }`, entry = longest canonical match |
-| `src/server/forms.ts` (new) | `ProjectFormRefusal`, `ProjectForm`, `FormSource`, `probeProjectForm`, `chooseForm` |
+| `src/server/profiles.ts` | `resolveRoot` returns `{ root, rootsEntry }`, rootsEntry = longest canonical match |
+| `src/server/forms.ts` (new) | `ProjectFormRefusal`, `ProjectForm`, `ProjectFormLookup`, `SelectedForm`, `lookupProjectForm`, `probeProjectForm`, `chooseForm` |
 | `src/server/approvals.ts` (new) | store format and validation, `readApprovals`, `governingApproval`, `updateApprovals` (lock + temp + rename) |
-| `src/server/policy.ts` | unchanged validator; `selectForm` kept as the slot lookup (comment points to `forms.ts`) |
-| `src/server/server.ts` | step 5 composes slot, store, governing approval, base, probe and `chooseForm`; `RunPlan` gets `formSource`; `checkChildView` gets `approvalsPath`; `loadStartup` checks `legacyLayers` first |
+| `src/server/policy.ts` | unchanged validator; `selectForm`/`FormSelection`/`FormRefusal` renamed `selectSlot`/`SlotSelection`/`SlotRefusal`; new `FormSource` beside `Form`; new `writablePaths(policy, sessionHome)` |
+| `src/server/server.ts` | step 5: `selectSlot`, extensions check, `lookupProjectForm`, `chooseForm`; `SpawnPlan` gets `formSource`; `checkChildView` gets `approvalsPath`; `loadStartup` checks `legacyLayers` first |
 | `src/server/childview.ts` | store kind `approvals-store` (never-writable); `ChildViewInput.approvalsPath`; comment on layers updated |
-| `src/server/spawn.ts` | `RunPlan.formSource`; `spawn` record gains `form_source`, `form_root`, `form_sha256` |
-| `src/approve.ts` (new) | `allow` and `revoke` verbs |
+| `src/server/spawn.ts` | `SpawnPlan.formSource`; `spawn` record gains `form_source`, `form_root`, `form_sha256` |
+| `src/approve.ts` (new) | `allow` and `revoke` verbs; pure report rendering |
 | `src/cli.ts` | `allow`, `revoke` cases; usage text; `help` runs the legacy-layer warning |
 | `src/help/help.ts` | prose and snippet changes (sec-3) |
 | `src/server/test-rig.ts` | drop the launch-dir layer from `newRig`; helpers to plant a project form (an executable script outside the roots), write an approvals store, and point `XDG_CONFIG_HOME` at the rig |
@@ -434,7 +461,7 @@ Red first for each; the ISS-001 case is the first red.
 | server: write call rooted at the launch dir is admitted | ISS-001: no `view-overlaps-protected` with a launch-dir root (the slice's acceptance case) |
 | server: no `.quotient`, no store | machine form runs; spawn record `form_source: "policy"`, no `form_sha256` |
 | server: approved project form runs (governed call) | the real path is exec'd (not the link); record carries `form_source`, `form_root`, `form_sha256`; slot `extensions` inherited (an `mcp__*` profile passes) |
-| server: link without entry | `form-unapproved`; detail has link, real path, sha256 and the `quotient allow` command |
+| server: link, no approval | `form-unapproved`; detail has link, real path, sha256 and the `quotient allow` command |
 | server: approved then rebuilt (bytes change) | `form-unapproved` naming both identities |
 | server: approved then repointed to another path | `form-unapproved` |
 | server: approved then link deleted | `form-invalid`, not the machine form |
@@ -445,16 +472,17 @@ Red first for each; the ISS-001 case is the first red.
 | server: link not executable; dangling; `.quotient` is a file | `form-invalid` |
 | server: machine slot unconfined with a project link | `form-invalid` |
 | server: machine slot absent with a project link | `wrapper-unavailable` (order unchanged) |
+| server: profile needs an extension the slot lacks, and the store is malformed | `profile-invalid` (the extensions check precedes the store read) |
 | server: malformed or unreadable approvals store | `form-unapproved` naming the store, for a call with no link too |
 | server: repoint after admission | the running call is unaffected (the spawn execs the resolved path captured at step 5) |
 | server: legacy `<launch>/.quotient/profiles` or `/help` present | start-up fails; every call `profile-invalid` with the migration detail |
-| profiles: nested roots | `entry` is the deepest; the first-in-order entry no longer wins the lookup base; accept/refuse unchanged |
+| profiles: nested roots | `rootsEntry` is the deepest; the first-in-order entry no longer wins the lookup base; accept/refuse unchanged |
 | childview: approvals store | a writable member that is, contains or lies inside it refuses; launch-dir layers no longer stores |
 | approvals: format | absent = empty; each malformation rejected; duplicate pair rejected |
 | approvals: writer | lock held → second writer fails naming the holder; malformed store never overwritten; publish is rename (no partial file observable) |
 | approve: report | per-capability identity, approval state, exact command; unusable form shows its detail |
-| approve: record | path and digest match → records at the record root; changed bytes → nothing written, exit 1; same bytes at a different real path (RV-006 F-3) → nothing written, exit 1; one bad pair in a batch writes nothing; unconfined or absent slot refused |
-| approve: report | shows the governing approval when it sits at a shallower root than the record root |
+| approve: record | path and digest match → records at the roots entry; changed bytes → nothing written, exit 1; same bytes at a different real path (RV-006 F-3) → nothing written, exit 1; one bad pair in a batch writes nothing; unconfined or absent slot refused |
+| approve: report | shows the governing approval when it sits at a shallower root than the roots entry; report and admission agree because both use `lookupProjectForm` |
 | approve: revoke | removes named / all capabilities of an exact stored root; after the root is removed from `roots`, and after its directory is deleted, the entry is still revocable; revoking a child root leaves a parent approval intact; an unknown root or capability exits 1 listing stored roots |
 | cli: verbs and usage | exit codes 0 / 1 / 2 |
 | help: legacy layer | `quotient help` warns and still prints |
@@ -474,6 +502,5 @@ Prose drift (research X6) is not caught by tests: the plan carries an explicit c
 - **Root-keyed identity.** Approvals are keyed by the canonical root at approval time and govern by containment. Moving a project to another real path leaves its approval behind (calls at the old path refuse `form-invalid`; calls at the new path need a fresh approval). Removing a root from the policy does not revoke its approvals.
 - **Relocation.** A `cwd` or `roots` entry spelled through a delegate-writable symlink can send a call to another directory, where that directory's selection applies (sec-2 "Residual: relocation"). Calls inside an approved root are never downgraded. The contract advises real paths.
 - **Host-wide immutability.** The outside-writable-paths rule is checked against the current policy only. A delegate still running under an older policy that exposed the target, or one under another server's policy, could rewrite a non-store target between hashing and exec. Approved forms must be immutable to every delegate on the host — an operator obligation, as for the policy file.
-- **Unusable approvals location.** With neither an absolute `XDG_CONFIG_HOME` nor `HOME`, step 5 refuses `form-unapproved` even with no project forms. Such a host already has no XDG profile layer today, so no profile loads.
 - **G5 is unverified.** The real-path rule is sound only if forms add nothing writable (form-1 G5), which quotient does not check.
 

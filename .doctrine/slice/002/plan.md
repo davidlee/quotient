@@ -15,8 +15,8 @@ brings contracts, help and the version in line.
 ```text
 PHASE-01  remove launch-dir layers      config, startup, childview, rig, release fixtures   ← ISS-001 red first
 PHASE-02  approvals store               approvals.ts, Locations.approvalsPath, step 8, approvals contract
-PHASE-03  root entry + form judgement   resolveRoot entry, forms.ts (probe, chooseForm), result-contract refusals
-PHASE-04  admission wiring              server step 5, RunPlan.formSource, spawn record   ← RV-006 F-1
+PHASE-03  root entry + form judgement   rootsEntry, selectSlot, writablePaths, forms.ts (lookup, probe, chooseForm), refusals
+PHASE-04  admission wiring              server step 5, SpawnPlan.formSource, spawn record ← RV-006 F-1
 PHASE-05  allow / revoke                approve.ts, cli.ts                                ← RV-006 F-3
 PHASE-06  contracts, help, release      policy-2, form-1, help, README, examples, 0.3.0
 ```
@@ -93,3 +93,9 @@ Compare the output against `lint-baseline.tsv`.
   the verdict.
 - There is no changelog. The release note goes in the version-bump commit
   body (precedent: 61fd1a9).
+- Design amended at run revision 30 (operator-approved architectural pass,
+  2026-10-24): one `lookupProjectForm` composition shared by admission and
+  `allow`, `writablePaths`, the `selectSlot` rename, `rootsEntry`,
+  `FormSource` in `policy.ts`, `SpawnPlan`, the extensions check before the
+  store read. PHASE-03..05 criteria carry them. Deferred: IMP-004 (admission
+  pipeline), IMP-005 (child-view store grouping).
