@@ -1,9 +1,9 @@
 id = 2
 slug = "policy-named-layers"
 title = "Project forms by root, operator-approved"
-status = "proposed"
+status = "design"
 created = "2026-10-23"
-updated = "2026-10-23"
+updated = "2026-10-24"
 tags = []
 
 [relationships]

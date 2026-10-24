@@ -201,3 +201,78 @@ X3's start-up failure for legacy launch-dir layers is kept; X5 is moot
 (`.quotient/` is no longer a protected store). Thread 1's G5 (frozen at
 start-up) is preserved for profiles/help; for forms, per-call approval
 replaces it. The slice scope document is rewritten accordingly.
+
+## Round 2 — forms pipeline and prior art (2026-10-24, design exploring)
+
+Producers: quotient `pi_agent`, profile `research` (deepseek-flash).
+Session `158003546b07bfa1c2813532c36bf410` (quotient forms pipeline, raw:
+`raw/forms-pipeline.md`); session `28adf2f220bda0a50521c36d81db4053` (satan
+forms, cwd `~/dev/satan`, raw: `raw/satan-forms.md`). ✓ = re-read by the
+orchestrating agent.
+
+### Code facts
+
+| # | fact | cite | |
+|---|---|---|---|
+| F1 | `Form` = `{confined, path, extensions}` \| `{unconfined, pi}`; `Forms = {read?, write?}` | `src/server/policy.ts:41-53` | ✓ |
+| F2 | Form validation (`readForm`) touches no filesystem: no stat, realpath or executability check | `src/server/policy.ts:154-196` | |
+| F3 | Step 5 `selectForm` indexes `policy.forms[filesystem]`; absent → `wrapper-unavailable` | `src/server/policy.ts:318-327` | ✓ |
+| F4 | One launch branch: confined → `[form.path, [sessionDir, …]]` | `src/server/spawn.ts:179-181` | ✓ |
+| F5 | The `spawn` audit record stores the policy's form text verbatim; no resolved path, no hash; `AuditRecord` is unguarded by contract/drift | `src/server/spawn.ts:278-292`, `evidence.ts:186-190` | ✓ (record) |
+| F6 | `resolveRoot` accepts the **first** matching roots entry in policy order and returns only the canonical cwd, not the entry | `src/server/profiles.ts:329, 371-375` | ✓ |
+| F7 | `roots` entries are checked only for absoluteness; they need not exist | `src/server/policy.ts:235-238` | |
+| F8 | Refusal drift guard: every `export type *Refusal* = '…'` union in `src/server/*.ts` must match the result contract's Refusals table both ways | `src/drift.test.ts:88-104` | ✓ |
+| F9 | `sha256Hex` exists | `src/server/evidence.ts:221` | ✓ |
+| F10 | CLI is a single switch (serve, `reduce`, `help`, `--version`); `help()` already builds `Locations` | `src/cli.ts:68-88, 41-48` | |
+| F11 | No atomic-write helper in `src/`; nearest is `session.ts` `O_EXCL` + `renameSync` | `src/server/session.ts:284-320` | |
+| F12 | The run gate re-reads the policy each tick only for `enabled`; resolved-once forms are consistent with that | `src/server/gate.ts:113-136` | |
+
+### Prior art (satan)
+
+| # | fact | cite | |
+|---|---|---|---|
+| S1 | `just quotient-forms` does `nix build -o <state>/forms/{read,write} .#quotient-{read,write}`: GC-rooted symlinks outside the repo; the policy names `<state>/forms/<cap>/bin/quotient-<cap>`. A rebuild silently changes what runs — no gate today beyond the explicit recipe | `~/dev/satan/justfile:72-81` | ✓ |
+| S2 | A form is a store-resident `writeShellScriptBin` whose text `exec`s the next store path by hash, so the sha256 of the resolved script pins the exec chain | `~/dev/satan/flake.nix:364-385` | |
+| S3 | The chain reads host state at run time (gateway key, jail home, hardcoded `/home/…`, `/run/user/…`); the hash does not cover it | `~/dev/satan/justfile:88-113`, `flake.nix:96-131` | |
+| S4 | A flake check (`checks.quotient-forms`) verifies the built forms' bind sets against a baseline | `~/dev/satan/flake.nix:688-810, 836` | |
+| S5 | satan's `.quotient/` holds only `profiles/{read,research,write}.md` | `~/dev/satan/.quotient/profiles/` | ✓ |
+
+### Cross-thread findings
+
+**Y1 — Exec-time race (time-of-check vs time-of-use).** Admission hashes the
+form; spawn execs it later (F4). If the resolved form lies inside a writable
+root or a read-write `exposure` path, a concurrent write delegate can swap it
+in between. Simplest closure: require a project form's real path to lie
+outside every `roots` entry and every read-write `exposure` path, so no
+delegate can write it. Nix store paths satisfy this trivially. Alternative:
+exec via a held file descriptor (`/proc/self/fd/N`) — Linux-only, more
+machinery.
+
+**Y2 — Approval stays sound without protecting `.quotient/`.** A delegate
+can plant or repoint `.quotient/` (F6–F7 give it no fence once layers go),
+but the planted target fails approval. Planting is denial of service, not
+escalation. Matches DEC-008.
+
+**Y3 — The approval store must be a protected store.** A delegate that can
+write approvals approves itself. It joins step 8's never-writable list.
+
+**Y4 — Longest-match is a new rule.** F6: today the first entry in policy
+order wins and the entry is discarded. Admission (accept/refuse) is
+unchanged by longest-match; only the `.quotient/` lookup base changes.
+`resolveRoot` must return the canonical matched entry.
+
+**Y5 — Evidence must record what ran.** F5: the audit `spawn` record should
+carry the resolved real path, the sha256 and the form's source (machine
+policy or `<root>/.quotient/`), pinned by a test since no contract guards it.
+
+**Y6 — `.quotient/` format.** S1 shows the natural producer is
+`nix build -o <root>/.quotient/forms/<cap> .#…` (a gitignored, GC-rooted
+symlink to a store package), mirroring the existing state-dir layout. The
+committed-JSON alternative names machine-specific absolute paths (S3) and
+gains nothing: re-approval churn is identical. Fixed layout
+`.quotient/forms/{read,write}/bin/quotient-{read,write}` vs a convention-free
+`.quotient/forms/{read,write}` executable: design decides.
+
+**Y7 — Hash coverage limit is real.** S3: the closure reads host state at
+run time. DEC-008 already assigns that to the operator; the contract must say
+so plainly.
