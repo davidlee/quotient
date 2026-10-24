@@ -69,7 +69,7 @@ schema do not change, and a policy still names the forms' executable paths.
   Those changes belong to other repos (Follow-Ups).
 - Changing form-1, the policy schema, or keying `forms` by root.
 - Behavioural conformance in `nix flake check` if bwrap cannot run in the build
-  sandbox. `scripts/hostile-audit` stays the behavioural probe.
+  sandbox. Behaviour is probed on the host instead (`scripts/form-probe`, `scripts/hostile-audit`).
 
 ## Affected surface
 
@@ -85,40 +85,41 @@ Revised by design (DEC-014–DEC-022):
 - `docs/nix-forms.md` (new), `README.md`, `help/setup.md` step 3,
   `docs/contract/quotient-policy-2.md` (worktree wording of the lookup base,
   meaning unchanged).
-- Possibly `src/drift.test.ts` / `src/help/help.test.ts` if shipped text pins
-  change.
+- `src/drift.test.ts` (doctrine-id scan extended to `flake.nix` and `nix/`) and
+  `src/help/help.test.ts` (setup names the builder doc).
 
 ## Risks & assumptions
 
-- **A1:** `jail.nix` alone has what `makeJailedPi` contributes that form-1
-  needs: bwrap launcher, `--die-with-parent`, raw args, a persisted pi home.
-  To verify in research.
-- **R1:** adding a flake input changes the lock for every flake consumer of
-  quotient, including those who only want the server. The input may need to
-  be lazy or caller-supplied (see OQ-1).
+- **A1 (verified in research):** `jail.nix` alone has what `makeJailedPi`
+  contributes that form-1 needs: bwrap launcher, `--die-with-parent`, raw args,
+  a persistable home.
+- **R1 (resolved, DEC-016):** no flake input is added; callers pass `jail.nix`
+  and pi, so server-only consumers' locks are unchanged.
 - **R2:** a text-only check proves the launcher's arguments, not the jail's
-  behaviour. A form built by the builder is form-1 conformant only by
-  inspection plus the hostile-audit G6 sample, as form-1 already says.
-- **R3:** `jail.nix` API drift. Pinned by the lock, and caught by the check.
+  behaviour. Behaviour is covered by the script probe (one full family, this
+  host) and the hostile-audit G6 sample (DEC-022).
+- **R3:** `jail.nix` API drift. Not pinned for consumers (DEC-016); a rendering
+  change fails the shipped check loudly. quotient's own gate pins it in the test
+  flake's lock.
+- **R4:** binds delivered by `--args` or `add-runtime` escape the text check;
+  documented as the caller's responsibility (DEC-017).
 
 ## Open questions
 
-- **OQ-1:** how `jail.nix` and pi reach the builder: a quotient flake input,
-  or arguments the caller passes (their own `jail.nix`, their own pi).
-- **OQ-2:** how a provider key reaches pi without the builder owning it (an
-  inherited FD, an env file, caller-supplied options).
-- **OQ-3:** output shape: a `lib` function, an overlay, or both; and its name.
-- **OQ-4:** DEC-116's standing here. It was decided in satan, for satan's
-  SL-031. Record a quotient decision that an optional builder in the flake is
-  the follow-up DEC-116 named, not a reversal, and update the `flake.nix`
-  comment.
-- **OQ-5:** does SL-002's project-forms mechanism close the selection gap
-  (Scope 5)?
+All resolved by the design inquiry:
+
+- OQ-1 → DEC-016 (caller passes `jail.nix` and pi).
+- OQ-2 → DEC-019 (`secretEnv`, launch-allocated descriptor).
+- OQ-3 → DEC-015 (`lib.mkFormFamily` / `lib.checkFormFamily`, taking `pkgs`).
+- OQ-4 → DEC-014 (a quotient decision following DEC-116, not a reversal).
+- OQ-5 → confirmed: project forms close the selection gap per root under one
+  policy (design inq-9); answer recorded on IMP-003 at close.
 
 ## Verification / closure intent
 
-- `nix flake check` passes, including the shipped form check over a sample
-  family, and fails on a doctored form (negative control).
+- The test flake's checks pass (`just forms-check`): the shipped form check over
+  a default and a full sample family, and one negative control per refusal.
+- `just forms-probe` passes: the full probe family meets G1–G9 behaviourally.
 - Forms built on this host pass `scripts/hostile-audit` for both capabilities
   (VH, since the probe needs a reachable model).
 - A sample family with a non-default toolchain builds, and the check still

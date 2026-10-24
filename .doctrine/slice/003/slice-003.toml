@@ -1,7 +1,7 @@
 id = 3
 slug = "jailnix-form-builder"
 title = "Optional jail.nix form builder"
-status = "design"
+status = "plan"
 created = "2026-10-24"
 updated = "2026-10-24"
 tags = []
@@ -12,7 +12,7 @@ after = []                      # slice→work soft sequence: { to, rank }
 
 [[selector]]
 selector = "flake.nix"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "flake.lock"
@@ -20,11 +20,11 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "nix/**"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "README.md"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "help/**"
@@ -36,15 +36,15 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "src/drift.test.ts"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "scripts/form-probe"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "justfile"
-intent = "scope-relevant"
+intent = "design-target"
 
 [[selector]]
 selector = "docs/**"
@@ -52,7 +52,19 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "src/help/help.test.ts"
-intent = "scope-relevant"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/nix-forms.md"
+intent = "design-target"
+
+[[selector]]
+selector = "help/setup.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/quotient-policy-2.md"
+intent = "design-target"
 
 [[relation]]
 label = "references"

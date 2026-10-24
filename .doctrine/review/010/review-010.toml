@@ -1,0 +1,474 @@
+id    = 10
+slug  = "design-review-of-sl-003"
+title = "design review of SL-003"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "design"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = 'Design review of SL-003 design.md sec-1..sec-5: pi reviewer, three rounds, 18 findings raised and all answered (14 verified; F-5, F-14, F-17, F-18 answered, unverified by the reviewer; F-5 needs jail.nix outside the reviewer jail). Concluded on the user assent "review conducted, approve design" (2026-10-24); residual checks carried to the first build per slice notes § Further review.'
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-003"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "blocker"
+title = "sec-3 (c) requires a secret fd in every family"
+detail = "(c) demands exactly one quotient_secret_fd assignment unconditionally, but sec-2 emits none when secretEnv is empty, so every secret-less family (including default-family) fails the check. exec {fd}< is a redirection, not an assignment. Source: pi review, .doctrine/slice/003/research/raw/review-design-rv010.md"
+disposition = "fix-now"
+route = "control"
+response = "Integrated: the fd clause moves out of (c) into (h): at most one exec {quotient_secret_fd}<, exactly one when SECRET_ENV_NAMES is non-empty. DEC-021 amended to match. default-family is the positive control."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "control"
+response = "Integrated: the fd clause moves out of (c) into (h): at most one exec {quotient_secret_fd}<, exactly one when SECRET_ENV_NAMES is non-empty. DEC-021 amended to match. default-family is the positive control."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "major"
+title = "State mask and protect fail the launch when the target is missing under a ro bind"
+detail = "bwrap cannot create a tmpfs mount point inside a read-only bind (verified, bwrap 0.12.0: Can't create file ... Read-only file system). A protect path, or the default quotient state dir under a policy that moved it, that is absent on the host and sits under a caller ro bind makes every launch fail. The probe pre-creates every target so cannot see it."
+disposition = "fix-now"
+route = "probe"
+response = "Integrated: the launcher builds the mask list at launch and masks only paths that exist on the host (a missing path has nothing to reveal; verified the conditional form launches). Emitted as a builder-owned array expansion in the tail, not RUNTIME_ARGS (which jail.nix appends after every static argument). Probe gains a protect path that does not exist under a ro caller bind; launch must succeed. Root and session targets always exist on the host, so the ro-ancestor case for them binds over an existing directory."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "probe"
+response = "Integrated: the launcher builds the mask list at launch and masks only paths that exist on the host (a missing path has nothing to reveal; verified the conditional form launches). Emitted as a builder-owned array expansion in the tail, not RUNTIME_ARGS (which jail.nix appends after every static argument). Probe gains a protect path that does not exist under a ro caller bind; launch must succeed. Root and session targets always exist on the host, so the ro-ancestor case for them binds over an existing directory."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "major"
+title = "Exposure inside the root is shadowed by the later root bind"
+detail = "Exposure binds sit at step 3, the root bind at step 6; a later bind at an ancestor covers the earlier child mount (verified: exposure under the root shows the root's contents). exposure = [<root>/artifacts] is silently not writable."
+disposition = "fix-now"
+route = "probe"
+response = "Integrated: exposure binds move into the tail after the root bind and before the session bind. Under read, the launcher refuses (exit 1 before bwrap) an exposure path equal to or containing the root, since binding it after the root would make the root writable (G2). Probe gains an exposure path inside the root, writable under both capabilities. Positional rule and DEC-017 amended."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "probe"
+response = "Integrated: exposure binds move into the tail after the root bind and before the session bind. Under read, the launcher refuses (exit 1 before bwrap) an exposure path equal to or containing the root, since binding it after the root would make the root writable (G2). Probe gains an exposure path inside the root, writable under both capabilities. Positional rule and DEC-017 amended."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "major"
+title = "Deferred-bind negative control contradicts the tail ordering"
+detail = "sec-2 says the builder tail follows caller defers; sec-3 lists a deferred bind over the root as a control that must fail the check. If the tail is last, that control passes the check and the neg derivation turns the gate red. Controls name no expected label."
+disposition = "fix-now"
+route = "control"
+response = "Integrated: verified the tail is the last deferred permission (jail.nix composes s.deferredPermissions in push order, lib/jail.nix:57-60), so a caller deferred bind cannot follow it. That control is replaced by a doctored launcher with a bind moved after the session bind (trips the positional rule). sec-3 now names each control's expected label in a table."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "control"
+response = "Integrated: verified the tail is the last deferred permission (jail.nix composes s.deferredPermissions in push order, lib/jail.nix:57-60), so a caller deferred bind cannot follow it. That control is replaced by a doctored launcher with a bind moved after the session bind (trips the positional rule). sec-3 now names each control's expected label in a table."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-5"
+status = "answered"
+severity = "major"
+title = "LANG/TERM defaults cannot override base fwd-env; HOME has no fallback"
+detail = 'Claimed: base emits --setenv LANG "$LANG" at step 1, a later --setenv cannot stop its expansion under set -u. HOME is load-bearing with no fallback.'
+disposition = "fix-now"
+route = "demonstrate"
+response = "Contested in part. set-env writes a map (set-env.nix: env = state.env // { name = ...; }) and jail.nix emits one --setenv per name at finalisation, so the builder's set-env replaces base's fwd-env; satan's built launcher shows a single --setenv TERM xterm-256color, its override. HOME: accepted as a precondition: the server's environment has HOME (its own XDG paths derive from it); the launcher fails closed (G9) without it. sec-2 now states that, and why the override works."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "demonstrate"
+response = "Contested in part. set-env writes a map (set-env.nix: env = state.env // { name = ...; }) and jail.nix emits one --setenv per name at finalisation, so the builder's set-env replaces base's fwd-env; satan's built launcher shows a single --setenv TERM xterm-256color, its override. HOME: accepted as a precondition: the server's environment has HOME (its own XDG paths derive from it); the launcher fails closed (G9) without it. sec-2 now states that, and why the override works."
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "major"
+title = "Verification table overclaims G7 and a vacuous /nix/store case"
+detail = "The probe has no G7 assertion (only text in (d)); /nix/store is read-only on the host regardless of the jail, so refusing it proves nothing."
+disposition = "fix-now"
+route = "control"
+response = "Contest upheld on evidence. form-1 G7 is 'the confined process dies with its parent', and the server is the form's parent. The form execs the launcher, which execs env -i, which execs bwrap, so the form process becomes bwrap, and bwrap's parent is the form's parent. Observed 2026-10-24 (bwrap 0.12.0, this host): bwrap --die-with-parent started under a sh parent; SIGKILL to that sh removed bwrap and its jailed sleep within 1 s. Killing the form itself is the server's SIGTERM/SIGKILL ladder, a different property. The G7 probe stays as designed; sec-5 now says why the parent is the right target."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "control"
+response = "Integrated: the probe gains a G7 case (SIGKILL the form's parent; the jailed sleeper must be gone within 2 s, observed via a pid file in the session dir). /nix/store dropped from G5; the ro-bound host dir already does that work. The table says G1-G9 only because every row now has a probe line."
+
+[[finding.turn]]
+act = "contest"
+role = "raiser"
+note = "Raiser (pi, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): REOPEN. The G7 case kills the form's parent, not the form; with the form alive the jailed sleeper survives, so a correct family fails. Kill the form process itself."
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "control"
+response = "Contest upheld on evidence. form-1 G7 is 'the confined process dies with its parent', and the server is the form's parent. The form execs the launcher, which execs env -i, which execs bwrap, so the form process becomes bwrap, and bwrap's parent is the form's parent. Observed 2026-10-24 (bwrap 0.12.0, this host): bwrap --die-with-parent started under a sh parent; SIGKILL to that sh removed bwrap and its jailed sleep within 1 s. Killing the form itself is the server's SIGTERM/SIGKILL ladder, a different property. The G7 probe stays as designed; sec-5 now says why the parent is the right target."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi, verify round 2, .doctrine/slice/003/research/raw/review-design-rv010-verify2.md): VERIFIED."
+
+[[finding]]
+id = "F-7"
+status = "verified"
+severity = "minor"
+title = "Baseline must share every non-tail option"
+detail = "A cold implementer may build the baseline from required arguments only; (f) relies on it sharing home, packages, options, mask and secrets."
+disposition = "fix-now"
+response = "Integrated: sec-2 states the baseline is the same mkFormFamily instantiation with only the root bind, session bind and --chdir omitted."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: sec-2 states the baseline is the same mkFormFamily instantiation with only the root bind, session bind and --chdir omitted."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-8"
+status = "verified"
+severity = "minor"
+title = "BASELINE path convention and exec resolution order unstated"
+detail = "BASELINE has no path convention; the check must resolve the form's unfolded exec path before folding hashes."
+disposition = "fix-now"
+response = "Integrated: BASELINE = family.baseline/bin/<prefix>-baseline (a launcher, no form wrapper); sec-3 step 0 resolves exec paths on the raw text before normalising."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: BASELINE = family.baseline/bin/<prefix>-baseline (a launcher, no form wrapper); sec-3 step 0 resolves exec paths on the raw text before normalising."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-9"
+status = "verified"
+severity = "minor"
+title = "(a) counts exit 64 instead of asserting the guards"
+detail = "Three exit 64 lines for any conditions pass (a)."
+disposition = "fix-now"
+response = "Integrated: (a) asserts each guard's predicate line ($# check, absolute-path case, -d test) with exit 64."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: (a) asserts each guard's predicate line ($# check, absolute-path case, -d test) with exit 64."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-10"
+status = "verified"
+severity = "minor"
+title = "(d) misses a raw --share-net"
+detail = "A raw --share-net could keep the net shared despite --unshare-net."
+disposition = "fix-now"
+response = 'Partly contested: jail.nix share-ns "net" removes --unshare-net at finalisation, which (d) already catches. Integrated: (d) also refuses a raw --share-net when NETWORK=0.'
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = 'Partly contested: jail.nix share-ns "net" removes --unshare-net at finalisation, which (d) already catches. Integrated: (d) also refuses a raw --share-net when NETWORK=0.'
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-11"
+status = "verified"
+severity = "minor"
+title = "forms-check command differs between design and DEC-022"
+detail = "Design: nix flake check -L; DEC-022: nix build -L."
+disposition = "fix-now"
+response = "Integrated: nix flake check -L is right (negative controls are checks); DEC-022 amended."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: nix flake check -L is right (negative controls are checks); DEC-022 amended."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-12"
+status = "verified"
+severity = "minor"
+title = "Doctored launchers need the form's exec repointed"
+detail = "substituteInPlace on a launcher yields a new store path; the form's exec must be repointed."
+disposition = "fix-now"
+response = "Integrated: sec-5 specifies a doctor helper in the test flake that copies a family's form and launcher, applies the edit, and repoints the copied form's exec line at the copied launcher."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: sec-5 specifies a doctor helper in the test flake that copies a family's form and launcher, applies the edit, and repoints the copied form's exec line at the copied launcher."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi review, verify round, .doctrine/slice/003/research/raw/review-design-rv010-verify.md): VERIFIED."
+
+[[finding]]
+id = "F-13"
+status = "verified"
+severity = "major"
+title = "(c) 'exactly one assignment' to quotient_mask rejects the builder's own launcher"
+detail = "The mask is built as a declaration plus one += per existing path, so 'exactly one assignment' fails full-family (it has an existing protect path) and turns forms-check red. Source: .doctrine/slice/003/research/raw/review-design-rv010-verify.md"
+disposition = "fix-now"
+route = "control"
+response = "Integrated: (c) asserts exactly one declaration quotient_mask=() and that every quotient_mask+= sits inside an existence test; sec-2's invariant matches. full-family is the positive control; DEC-021 amended."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "control"
+response = "Integrated: (c) asserts exactly one declaration quotient_mask=() and that every quotient_mask+= sits inside an existence test; sec-2's invariant matches. full-family is the positive control; DEC-021 amended."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi, verify round 2, .doctrine/slice/003/research/raw/review-design-rv010-verify2.md): VERIFIED."
+
+[[finding]]
+id = "F-14"
+status = "answered"
+severity = "major"
+title = "Exposure inside the root under read makes part of the root writable (G2)"
+detail = "The refusal covers exposure equal to or containing the root only; an exposure inside the root under read is a writable subtree of a read-only root, and the probe asserted it writable."
+disposition = "fix-now"
+route = "probe"
+response = "Revised (see F-17): G5 is a ceiling ('can write nothing except ... exposure'), not a promise that every exposure path is writable. Exposure binds now precede the root bind, so under read the root's ro bind covers any exposure inside the root and G2 holds with no refusal. Under write an exposure bind and the root bind show the same host directory. The probe asserts P/root/out is refused under read and writable under write."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "probe"
+response = "Integrated: G2 is literal ('the root is not writable under a read profile'), so under read the launcher refuses any exposure path that overlaps the root (equal, containing, or inside), before bwrap. Under write an exposure inside the root is bound at its own path and changes nothing. The probe runs its read assertions from a second root with no overlap, and asserts that a read launch from P/root, which contains P/root/out, is refused. DEC-017 and DEC-022 amended."
+
+[[finding.turn]]
+act = "amend"
+role = "responder"
+note = "Superseded by F-17: the overlap refusal is withdrawn."
+disposition = "fix-now"
+route = "probe"
+response = "Revised (see F-17): G5 is a ceiling ('can write nothing except ... exposure'), not a promise that every exposure path is writable. Exposure binds now precede the root bind, so under read the root's ro bind covers any exposure inside the root and G2 holds with no refusal. Under write an exposure bind and the root bind show the same host directory. The probe asserts P/root/out is refused under read and writable under write."
+
+[[finding]]
+id = "F-15"
+status = "verified"
+severity = "minor"
+title = "Order between builder LANG/TERM defaults and caller env unstated"
+detail = "Both are set-env pushes into one map; if the builder's push came after the caller's, the override would be lost."
+disposition = "fix-now"
+response = "Integrated: sec-2 states the builder's defaults are pushed with the base, before the caller's env, so env wins."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: sec-2 states the builder's defaults are pushed with the base, before the caller's env, so env wins."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi, verify round 2, .doctrine/slice/003/research/raw/review-design-rv010-verify2.md): VERIFIED."
+
+[[finding]]
+id = "F-16"
+status = "verified"
+severity = "minor"
+title = "Exposure-root refusal asserted inside the secrets rule"
+detail = "(h) carries a G2 rule; a failure would point at secrets."
+disposition = "fix-now"
+response = "Integrated: the refusal gets its own assertion (j), with its own negative control (the refusal removed by doctor)."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: the refusal gets its own assertion (j), with its own negative control (the refusal removed by doctor)."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Raiser (pi, verify round 2, .doctrine/slice/003/research/raw/review-design-rv010-verify2.md): VERIFIED."
+
+[[finding]]
+id = "F-17"
+status = "answered"
+severity = "major"
+title = "Read refusal of an exposure overlapping the root blocks read runs policy-wide"
+detail = "exposure is one policy-wide list, so the F-14 refusal makes every read run in a root that contains any exposure path fail at launch, invisible to the server's checks. Source: .doctrine/slice/003/research/raw/review-design-rv010-verify2.md"
+disposition = "design-wrong"
+route = "review"
+response = "Accepted; the F-3 and F-14 integrations over-corrected. exposure is policy-wide (quotient-policy-2.md:69), and G5 caps writes rather than promising them. Exposure binds go back before the root bind: under read the root's ro bind covers an exposure inside it (G2 holds; that path is simply not writable there); under write each bind maps a path onto itself, so the root bind shows the same directory. The read overlap refusal, assertion (j) and its control, and the probe's second root are removed. The F-3 concern (an exposure inside the root losing writability) holds only under read, where it is correct by G2. DEC-017, DEC-021 and DEC-022 amended."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+route = "review"
+response = "Accepted; the F-3 and F-14 integrations over-corrected. exposure is policy-wide (quotient-policy-2.md:69), and G5 caps writes rather than promising them. Exposure binds go back before the root bind: under read the root's ro bind covers an exposure inside it (G2 holds; that path is simply not writable there); under write each bind maps a path onto itself, so the root bind shows the same directory. The read overlap refusal, assertion (j) and its control, and the probe's second root are removed. The F-3 concern (an exposure inside the root losing writability) holds only under read, where it is correct by G2. DEC-017, DEC-021 and DEC-022 amended."
+
+[[finding]]
+id = "F-18"
+status = "answered"
+severity = "minor"
+title = "Mask-building shape unstated, so (c)/(i) have no fixed target"
+detail = "'every quotient_mask+= inside an existence test' is line-local with no stated emitted form; a loop could hide the test. Source: .doctrine/slice/003/research/raw/review-design-rv010-verify2.md"
+disposition = "fix-now"
+response = "Integrated: sec-2 gives the emitted shape, quotient_mask=() then one Nix-generated line per path '[ -e <p> ] && quotient_mask+=(--tmpfs <p>)' with no loop; (c) asserts that line shape."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Integrated: sec-2 gives the emitted shape, quotient_mask=() then one Nix-generated line per path '[ -e <p> ] && quotient_mask+=(--tmpfs <p>)' with no loop; (c) asserts that line shape."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.
