@@ -39,7 +39,14 @@ export type ChildViewMember = {
 /** How much exposure a protected store tolerates (design sec-3's table). */
 export type StoreTolerance = 'unreachable' | 'never-writable';
 
-export type StoreKind = 'run-evidence' | 'attempts-ledger' | 'session-home' | 'policy-file' | 'profile-layer' | 'help-layer';
+export type StoreKind =
+  | 'run-evidence'
+  | 'attempts-ledger'
+  | 'session-home'
+  | 'policy-file'
+  | 'approvals-store'
+  | 'profile-layer'
+  | 'help-layer';
 
 export type ProtectedStore = {
   kind: StoreKind;
@@ -67,6 +74,9 @@ export type ChildViewInput = {
   /** `QUOTIENT_RUN_DIR`. */
   runDir: string;
   policyPath: string;
+  /** The approvals store (`Locations.approvalsPath`), whether or not it exists;
+   *  `null` when the location is unusable, which names no path to protect. */
+  approvalsPath: string | null;
   /** The profile layers (`Locations.profileLayers`), whether or not they exist. */
   profileLayers: readonly string[];
   /** The help layers (`Locations.helpLayers`), whether or not they exist. */
@@ -110,6 +120,9 @@ export function protectedStores(input: ChildViewInput): ProtectedStore[] {
       except: canonicalPath(input.sessionDir),
     },
     { kind: 'policy-file', path: canonicalPath(input.policyPath), tolerance: 'never-writable' },
+    // The approvals store is never writable by a delegate, whether or not it exists:
+    // creating it would let the delegate record an identity of its own.
+    ...optionalStore('approvals-store', input.approvalsPath),
     // The XDG layers are protected whether or not they exist: a write delegate
     // must not be able to create one and plant text for the next restart.
     ...layerStores('profile-layer', input.profileLayers),
@@ -119,6 +132,10 @@ export function protectedStores(input: ChildViewInput): ProtectedStore[] {
 
 const layerStores = (kind: StoreKind, layers: readonly string[]): ProtectedStore[] =>
   layers.map((layer) => ({ kind, path: canonicalPath(layer), tolerance: 'never-writable' }));
+
+/** A never-writable store at a location that may be unusable: `null` names no path. */
+const optionalStore = (kind: StoreKind, path: string | null): ProtectedStore[] =>
+  path === null ? [] : [{ kind, path: canonicalPath(path), tolerance: 'never-writable' }];
 
 /**
  * Step 8. Members are checked in a stable order (the root first, then the
@@ -180,6 +197,7 @@ const STORE_LABEL: Record<StoreKind, string> = {
   'attempts-ledger': 'attempts ledger',
   'session-home': 'session home',
   'policy-file': 'policy file',
+  'approvals-store': 'approvals store',
   'profile-layer': 'profile layer',
   'help-layer': 'help layer',
 };

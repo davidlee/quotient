@@ -105,6 +105,37 @@ test('legacyLayers names the two launch-dir layers earlier versions read', () =>
   assert.deepEqual(relative, ['project/.quotient/profiles', 'project/.quotient/help']);
 });
 
+test('approvalsPath is <xdgConfig>/quotient/approvals.json, and no variable moves it', () => {
+  assert.equal(
+    path(resolveLocations({ HOME, XDG_CONFIG_HOME: '/xdg/config' }).approvalsPath),
+    '/xdg/config/quotient/approvals.json',
+  );
+  assert.equal(path(resolveLocations({ HOME }).approvalsPath), `${HOME}/.config/quotient/approvals.json`);
+  assert.equal(
+    path(resolveLocations({ HOME, XDG_CONFIG_HOME: 'relative' }).approvalsPath),
+    `${HOME}/.config/quotient/approvals.json`,
+    'a relative XDG base is ignored, per the XDG spec',
+  );
+
+  // The store is authority, like the policy: every launch variable set, and it
+  // still resolves under the XDG config base. There is no QUOTIENT_APPROVALS.
+  const everywhere = resolveLocations({
+    HOME,
+    XDG_CONFIG_HOME: '/xdg/config',
+    QUOTIENT_POLICY: '/etc/quotient/policy.json',
+    QUOTIENT_RUN_DIR: '/var/quotient/runs',
+    QUOTIENT_SESSION_HOME: '/var/quotient/sessions',
+    QUOTIENT_APPROVALS: '/tmp/mine.json',
+  });
+  assert.equal(path(everywhere.approvalsPath), '/xdg/config/quotient/approvals.json');
+});
+
+test('with no absolute XDG base or HOME the approvals path is unusable', () => {
+  for (const env of [{}, { HOME: '' }, { HOME: 'relative', XDG_CONFIG_HOME: 'x' }]) {
+    assert.match(refusal(resolveLocations(env).approvalsPath), /neither XDG_CONFIG_HOME nor HOME/);
+  }
+});
+
 test('QUOTIENT_LAUNCHER names the launcher only when absolute; it never refuses', () => {
   assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/bin/quotient' }).launcher, '/opt/q/bin/quotient');
   assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/./bin/quotient' }).launcher, '/opt/q/bin/quotient', 'normalised');

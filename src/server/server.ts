@@ -352,6 +352,7 @@ async function callTool(
       sessionHome: admission.sessionHome,
       runDir: admission.runDir,
       policyPath: admission.policyPath,
+      approvalsPath: usable(context.locations.approvalsPath),
       profileLayers: context.locations.profileLayers,
       helpLayers: context.locations.helpLayers,
     });

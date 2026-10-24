@@ -146,3 +146,14 @@ runs from this checkout. Workers have no git; the orchestrator commits and runs
   `help/setup.md:17,52-53` still teach the launch-dir layer; `help.ts:226`
   renders "`cwd` is the launch dir: where `./.quotient` is found", and the
   `help.test.ts` guard only catches the absolute `<launch>/.quotient` form.
+
+### PHASE-02 — done
+
+- `src/server/approvals.ts`: closed-world reader, `governingApproval`, locked
+  atomic writer; contract `docs/contract/quotient-approvals-1.md`.
+- Review hardening beyond the design's letter: roots and paths must be
+  canonical absolute (`resolve(x) === x`, refused not normalised) so duplicate
+  detection and longest-match cannot depend on file order; the temp file is
+  unlinked then created `wx`/0600 and removed on failure; a change's result is
+  re-parsed before publishing; the lock is released only while it still carries
+  this pid.

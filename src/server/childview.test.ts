@@ -12,7 +12,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { resolveLocations } from '../config.ts';
+import { resolveLocations, usable } from '../config.ts';
 import { checkChildView, protectedStores, type ChildViewInput } from './childview.ts';
 import { canonicalPath, within } from './paths.ts';
 import { RUN_EVIDENCE_FILES, attemptsPath, evidenceStores, runLayout } from './evidence.ts';
@@ -37,6 +37,8 @@ type Tree = {
   launch: string;
   /** `XDG_CONFIG_HOME`; its `quotient/` is not created. */
   xdgConfig: string;
+  /** `Locations.approvalsPath`: the operator's store, not created. */
+  approvalsPath: string;
   /** The two XDG layers `config.ts` derives; the launch dir contributes none. */
   layers: Pick<ChildViewInput, 'profileLayers' | 'helpLayers'>;
 };
@@ -52,11 +54,12 @@ function tree(): Tree {
   const launch = join(state, 'launch');
   const xdgConfig = join(state, 'config');
   mkdirSync(launch);
-  const { profileLayers, helpLayers } = resolveLocations({ XDG_CONFIG_HOME: xdgConfig });
+  const { profileLayers, helpLayers, approvalsPath } = resolveLocations({ XDG_CONFIG_HOME: xdgConfig });
   return {
     state,
     launch,
     xdgConfig,
+    approvalsPath: usable(approvalsPath) ?? '',
     layers: { profileLayers, helpLayers },
     runDir,
     sessionHome,
@@ -77,6 +80,7 @@ function view(t: Tree, overrides: Partial<ChildViewInput> = {}): ChildViewInput 
     sessionHome: t.sessionHome,
     runDir: t.runDir,
     policyPath: t.policyPath,
+    approvalsPath: t.approvalsPath,
     ...t.layers,
     ...overrides,
   };
@@ -160,7 +164,7 @@ test('the protected stores come from the evidence layout: the run evidence and t
   const stores = protectedStores(view(t));
   assert.deepEqual(
     stores.map((store) => store.kind),
-    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'profile-layer', 'help-layer'],
+    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'approvals-store', 'profile-layer', 'help-layer'],
   );
   const byKind = new Map(stores.map((store) => [store.kind, store]));
   assert.equal(byKind.get('run-evidence')?.path, realpathSync(t.runDir));
@@ -172,9 +176,12 @@ test('the protected stores come from the evidence layout: the run evidence and t
   assert.equal(byKind.get('session-home')?.except, join(realpathSync(t.sessionHome), 'sess-a'));
   assert.equal(byKind.get('policy-file')?.path, realpathSync(t.policyPath));
   assert.equal(byKind.get('policy-file')?.tolerance, 'never-writable');
+  // The approvals store, never-writable, protected whether or not it exists.
+  assert.equal(byKind.get('approvals-store')?.path, join(realpathSync(t.state), 'config', 'quotient', 'approvals.json'));
+  assert.equal(byKind.get('approvals-store')?.tolerance, 'never-writable');
   // Then the two XDG layers, never-writable, whether or not they exist.
   assert.deepEqual(
-    stores.slice(4).map((store) => [store.kind, store.path, store.tolerance]),
+    stores.slice(5).map((store) => [store.kind, store.path, store.tolerance]),
     [
       ['profile-layer', join(realpathSync(t.state), 'config', 'quotient', 'profiles'), 'never-writable'],
       ['help-layer', join(realpathSync(t.state), 'config', 'quotient', 'help'), 'never-writable'],
@@ -196,6 +203,7 @@ test('the session home minus the active session directory, and the lock/binding 
     sessionHome: home,
     runDir: t.runDir,
     policyPath: t.policyPath,
+    approvalsPath: t.approvalsPath,
     ...t.layers,
   };
   const rootDetail = refusal(checkChildView({ ...aside, root: childRoot, capability: 'read', exposure: [] }));
@@ -237,6 +245,7 @@ test('the policy file is never writable: a write root containing it refuses, a r
     sessionHome: t.sessionHome,
     runDir: t.runDir,
     policyPath,
+    approvalsPath: t.approvalsPath,
     ...t.layers,
   };
 
@@ -272,14 +281,49 @@ test('a write root at the launch directory is admitted: the launch dir holds no 
   assert.deepEqual(checkChildView(view(t, { exposure: [join(t.launch, '.quotient', 'help')] })), { ok: true });
 });
 
-test('a writable exposure path that is, contains or lies inside a layer refuses; the XDG and help layers are covered too', () => {
-  const t = tree();
+test('a writable exposure path that is, contains or lies inside a layer refuses; the XDG and help layers are covered too', () => {  const t = tree();
   const xdgProfiles = xdgProfileLayer(t.state);
   for (const member of [t.xdgConfig, xdgProfiles, join(xdgProfiles, 'sub')]) {
     refusal(checkChildView(view(t, { exposure: [member] })));
   }
   const help = refusal(checkChildView(view(t, { exposure: [join(t.xdgConfig, 'quotient', 'help')] })));
   assert.match(help, /help layer/);
+});
+
+// ── The approvals store (SL-002 PHASE-02 EX-5) ─────────────────────────────
+
+test('the approvals store is protected whether or not it exists: a writable member that is or contains it refuses, and reading it is tolerated', () => {
+  const t = tree();
+  // Its own directory, so the overlap is about this store and not the XDG layers.
+  const authority = join(t.state, 'approval-authority');
+  const approvalsPath = join(authority, 'approvals.json');
+  const request = (overrides: Partial<ChildViewInput> = {}): ChildViewInput => view(t, { approvalsPath, ...overrides });
+
+  for (const planted of [false, true]) {
+    if (planted) {
+      mkdirSync(authority, { recursive: true });
+      writeFileSync(approvalsPath, JSON.stringify({ schema: 'quotient-approvals/1', approvals: [] }));
+    }
+    // The store itself, and the directory that contains it.
+    for (const member of [approvalsPath, authority]) {
+      const detail = refusal(checkChildView(request({ exposure: [member] })));
+      assert.match(detail, /approvals store/, detail);
+      assert.ok(detail.includes(JSON.stringify(canonicalPath(member))), detail);
+    }
+  }
+
+  // Never-writable tolerates reading, as for the policy file: a read root there is
+  // admitted, a write root is not.
+  assert.deepEqual(checkChildView(request({ root: authority, capability: 'read' })), { ok: true });
+  assert.match(refusal(checkChildView(request({ root: authority, capability: 'write' }))), /approvals store/);
+});
+
+test('an unusable approvals location contributes no store: a read-only member inside the XDG config is still protected by the layers', () => {
+  const t = tree();
+  assert.deepEqual(
+    protectedStores(view(t, { approvalsPath: null })).map((store) => store.kind),
+    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'profile-layer', 'help-layer'],
+  );
 });
 
 test('a sibling-repo write root, beside the launch dir, is admitted', () => {

@@ -16,9 +16,11 @@
 // answer the server writes goes through.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { reduce } from './reduce/reduce.ts';
+import { readApprovals } from './server/approvals.ts';
 import {
   CAUSE_STATE,
   failedResult,
@@ -45,6 +47,7 @@ const RESULT_CONTRACT = 'docs/contract/pi-agent-result-2.md';
 const POLICY_CONTRACT = 'docs/contract/quotient-policy-2.md';
 const HISTORICAL_RESULT_CONTRACT = 'docs/contract/pi-agent-result-1.md';
 const HISTORICAL_POLICY_CONTRACT = 'docs/contract/quotient-policy-1.md';
+const APPROVALS_CONTRACT = 'docs/contract/quotient-approvals-1.md';
 
 // ── Reading the documents ──────────────────────────────────────────────────
 
@@ -263,6 +266,23 @@ function policyViolations(contract: string): string[] {
   ];
 }
 
+/** Every ```json block in TEXT, verbatim. */
+function jsonBlocks(text: string): string[] {
+  return [...text.matchAll(/```json\n([\s\S]*?)```/g)].map(([, block]) => block);
+}
+
+/** Every ```json block in TEXT that `readApprovals` refuses. The reader takes a
+ *  path, so each block is written to a temp file and read by the real reader. */
+function malformedApprovalsBlocks(text: string, label: string): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'quotient-approvals-contract-'));
+  return jsonBlocks(text).flatMap((block, index) => {
+    const path = join(dir, `approvals-${String(index + 1)}.json`);
+    writeFileSync(path, block);
+    const read = readApprovals(path);
+    return read.ok ? [] : [`${label} json block ${String(index + 1)}: ${read.detail}`];
+  });
+}
+
 /** Validate policy-shaped JSON examples embedded in general guidance text. */
 function embeddedPolicyViolations(text: string, label: string): { found: number; violations: string[] } {
   const policies: unknown[] = [];
@@ -331,8 +351,13 @@ test('policy: every key validatePolicy accepts and every env var config.ts reads
   assert.deepEqual(readmePolicies.violations, []);
 });
 
-test('active contracts migrate explicitly while historical /1 references remain available', () => {
-  const result = read(RESULT_CONTRACT);
+test('approvals contract: every json block is a store readApprovals admits, and a doctored one is reported', () => {
+  const contract = read(APPROVALS_CONTRACT);
+  assert.ok(jsonBlocks(contract).length > 0, 'the contract carries a store example');
+  assert.deepEqual(malformedApprovalsBlocks(contract, 'contract'), []);
+});
+
+test('active contracts migrate explicitly while historical /1 references remain available', () => {  const result = read(RESULT_CONTRACT);
   const policy = read(POLICY_CONTRACT);
   assert.ok(result.includes('`pi-agent-result/2`'));
   assert.ok(result.includes('`pi-run-status/3`'));
@@ -364,6 +389,16 @@ test('no doctrine ids: nothing under docs/, examples/, help/ or the README cites
 });
 
 // ── Negative controls: each check fails on a doctored contract ─────────────
+
+test('negative control: an approvals block doctored with an unknown key fails the approvals contract check', () => {
+  const doctored = doctor(
+    read(APPROVALS_CONTRACT),
+    '"capability": "write"',
+    '"capability": "write",\n      "comment": "mine"',
+  );
+  const violations = malformedApprovalsBlocks(doctored, 'contract');
+  assert.ok(violations.some((line) => line.includes('unknown key "comment"')), violations.join('\n'));
+});
 
 test('negative control: a Fields row that lost its nullable cell fails result keys and types', () => {
   const doctored = doctor(read(RESULT_CONTRACT), '| `status.model` | string | yes |', '| `status.model` | string |');

@@ -15,6 +15,9 @@ export type Resolved = { ok: true; path: string } | { ok: false; detail: string 
 
 export type Locations = {
   policyPath: Resolved;
+  /** `<xdgConfig>/quotient/approvals.json`: the store `quotient allow` writes. No
+   *  variable reaches it, so no delegate environment can move it. */
+  approvalsPath: Resolved;
   runDir: Resolved;
   sessionHome: Resolved;
   /** [<xdgConfig>/quotient/profiles]; empty when the XDG config base is unusable. */
@@ -66,6 +69,10 @@ const launcherPath = (env: Env): string | null => {
 const xdgLayer = (config: Resolved, kind: string): string[] =>
   config.ok ? [join(config.path, 'quotient', kind)] : [];
 
+/** A file under the XDG config base's `quotient/` directory: unusable when the base is. */
+const underConfig = (config: Resolved, name: string): Resolved =>
+  config.ok ? { ok: true, path: join(config.path, 'quotient', name) } : config;
+
 /**
  * The launch-dir layers earlier versions read, highest first. Their presence
  * fails start-up with migration guidance (DEC-011): the paths are derived, not
@@ -80,6 +87,7 @@ export function resolveLocations(env: Env): Locations {
   const state = xdgBase(env, 'XDG_STATE_HOME', '.local/state');
   return {
     policyPath: located(env, POLICY_VAR, config, 'quotient/policy.json'),
+    approvalsPath: underConfig(config, 'approvals.json'),
     runDir: located(env, RUN_DIR_VAR, state, 'quotient/runs'),
     sessionHome: located(env, SESSION_HOME_VAR, state, 'quotient/sessions'),
     profileLayers: xdgLayer(config, 'profiles'),
