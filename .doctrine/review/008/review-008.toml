@@ -24,12 +24,22 @@ A1's admission default base remains governing?.root ?? rootsEntry, so no direct 
 
 A6 checked against current config resolver, loadProfiles/resolveProfile and server step order: a read-only Node probe with an actual valid absolute examples/policy.json override and absolute run/session overrides, but absent/relative/empty HOME/XDG_CONFIG_HOME, derived the intended PHASE-01 XDG-only layer list [], called the real loadProfiles([]), and confirmed every allowed profile resolves profile-unknown. Absolute HOME restored an XDG layer as a positive control. Thus after launch-layer removal there are no built-in profiles to bypass step 3; an absolute policy override does not make step 5 reachable. This is bounded component evidence plus source reasoning about the planned resolver, not execution of the unimplemented SL-002 server. No full tests, builds, confinement runs, paid calls or non-ledger writes. Pass concluded after the last raise."""
 
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Codex rechecked RV-008 F-1/F-2 dispositions and git diff 36d5281 7cfccfb -- .doctrine/slice/002, including neighbouring lookup/report/store text and PHASE-03..05 criteria. F-1 contested only for a new report-verification contradiction: the two-lookup architecture repairs the original gap, but 'candidate changes only the suggested command' must allow the required candidate identity/usability display to change while governing status/revoke advice stays fixed. F-2 verified: flowchart and qualified read rule now agree with extensions-before-store order and plan. Source/artifact inspection only, no runtime/build checks, and only ledger verbs wrote. Follow-up pass concluded; F-1 awaits responder."
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Codex completed the narrowed F-1 recheck against the current wording diff in design sec-4 approve: report and PHASE-05/VT-3, together with the accepted two-lookup and report-content criteria. Verified the repair: candidate identity lines and command may change independently of governing status. F-2 remains verified; no new findings raised. Artifact inspection only; only ledger verbs wrote. Pass concluded."
+
 [target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
 ref   = "SL-002"
 
 [[finding]]
 id = "F-1"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "The roots-entry lookup does not supply the governing-link state required by the pure allow report"
 detail = """
@@ -42,7 +52,7 @@ Concrete inferred information gap: roots are /work/A and /work/A/B, write approv
 Repair: explicitly supply both observations when the governing root differs from rootsEntry: the candidate at rootsEntry for the approval command, and the form at governing.root for the current-admission status/revoke advice. Extend the lookup/report inputs or explicitly prescribe a second use of the same lookup composition; do not introduce another independently assembled store/governing/base/probe algorithm. Add report tests varying A's link while B stays fixed, and vice versa. Keep admission's omitted-base behavior and record's fresh path+digest check inside updateApprovals unchanged. This closes a contradiction introduced by making the previously filesystem-capable report a renderer over the new single-probe result."""
 disposition = "fix-now"
 route = "review"
-response = "Verified: with base = rootsEntry the lookup never observes the governing root's link, so a pure renderer cannot report its state. Repair keeps one composition: allow calls lookupProjectForm without base (what admission sees: governing status, revoke advice) and, only when governing.root differs from rootsEntry, again with base = rootsEntry (the candidate for the record command). design sec-2 'The selection module', sec-3 allow/report paragraphs, sec-4 approve: report row; plan PHASE-05/EX-1 and VT-3 (vary the governing link with the candidate fixed, and vice versa). Admission's omitted-base path and record's in-lock path+digest check unchanged."
+response = "Contest accepted: a changed candidate also changes its identity lines. design sec-4 approve: report row and plan PHASE-05/VT-3 now say: varying the candidate changes its identity lines and the suggested command but not the governing status; varying the governing link changes the governing status and adds revoke advice. Two-lookup repair otherwise unchanged."
 
 [[finding.turn]]
 act = "raise"
@@ -55,9 +65,31 @@ disposition = "fix-now"
 route = "review"
 response = "Verified: with base = rootsEntry the lookup never observes the governing root's link, so a pure renderer cannot report its state. Repair keeps one composition: allow calls lookupProjectForm without base (what admission sees: governing status, revoke advice) and, only when governing.root differs from rootsEntry, again with base = rootsEntry (the candidate for the record command). design sec-2 'The selection module', sec-3 allow/report paragraphs, sec-4 approve: report row; plan PHASE-05/EX-1 and VT-3 (vary the governing link with the candidate fixed, and vice versa). Admission's omitted-base path and record's in-lock path+digest check unchanged."
 
+[[finding.turn]]
+act = "contest"
+role = "raiser"
+note = """
+CONTEST on a new contradiction in the repair's verification wording; the two-lookup architecture itself is accepted. Codex rechecked commit 7cfccfb: design.md:191/:319 and PHASE-05/EX-1 now supply the governing-link observation without base and the candidate observation at rootsEntry, which repairs the original information gap while preserving one composition. Admission's default base and record's locked full-identity comparison remain unchanged.
+
+However, the new design sec-4 report row (design.md:487) and PHASE-05/VT-3 (plan.toml:152) require that varying the candidate with the governing link fixed 'changes only the suggested command'. The report must also display the candidate's observed real path and sha256 (design.md:325-327, :485; PHASE-05/EX-2 at plan.toml:142). Inferred counterexample: repoint only B's usable candidate from path P/digest H to Q/digest J while its governing A link stays fixed. A correct report must change its resolves/sha256 lines AND the command. Leaving those identity fields unchanged to satisfy 'only the suggested command' would instead present stale reviewed identity. No implementation failure is asserted.
+
+Please narrow both criteria to say candidate identity/usability display and suggested command change, while governing status and revoke advice remain unchanged. This preserves the intended independence test without contradicting the required report contents. No further architectural repair is requested."""
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Contest accepted: a changed candidate also changes its identity lines. design sec-4 approve: report row and plan PHASE-05/VT-3 now say: varying the candidate changes its identity lines and the suggested command but not the governing status; varying the governing link changes the governing status and adds revoke advice. Two-lookup repair otherwise unchanged."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED by codex at design/plan level. Re-read the working diff: design.md:487 and PHASE-05/VT-3 (plan.toml:152) now allow candidate identity lines and the suggested command to change while governing status remains fixed, resolving the contested contradiction with the per-capability identity display. The accepted two-lookup repair remains intact in design.md:191/:319 and PHASE-05/EX-1, and the converse governing-link variation still requires governing-status/revoke advice changes. No new contradiction found in this narrowed recheck. No implementation/runtime claim."
+
 [[finding]]
 id = "F-2"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "A5's extensions-before-store order contradicts the retained unconditional store-read rule"
 detail = """
@@ -80,6 +112,11 @@ act = "dispose"
 role = "responder"
 disposition = "fix-now"
 response = "Verified (design.md store-read rule and step-5 flowchart omitted the A5 branch). Read rule now applies to calls that pass the slot lookup and extensions check; flowchart gains the extensions node (profile-invalid) between slot and store. Sweep: the other step-5 order statements agree."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "VERIFIED by codex at design/plan level against 7cfccfb. design.md:91-96 now branches from a present slot through the extensions check, with profile-invalid before the store-readable decision; :228 limits the store-read rule to calls that passed both slot and extensions checks. These agree with the neighbouring sec-2 order statement, the sec-4 verification case (:477), and PHASE-04/EX-1 and VT-3 (plan.toml:113/:125). The repair preserves the intended first-failure order and introduces no new contradiction found in that scope. No runtime/build verification was performed."
 
 # Findings are append-only `[[finding]]` tables, added by `review raise`.
 # Empty here at creation — a fresh review is Active, awaiting the raiser.

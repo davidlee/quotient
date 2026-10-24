@@ -484,7 +484,7 @@ Red first for each; the ISS-001 case is the first red.
 | approvals: writer | lock held → second writer fails naming the holder; malformed store never overwritten; publish is rename (no partial file observable) |
 | approve: report | per-capability identity, approval state, exact command; unusable form shows its detail |
 | approve: record | path and digest match → records at the roots entry; changed bytes → nothing written, exit 1; same bytes at a different real path (RV-006 F-3) → nothing written, exit 1; one bad pair in a batch writes nothing; unconfined or absent slot refused |
-| approve: report | shows the governing approval when it sits at a shallower root than the roots entry; with the candidate fixed, a changed or deleted governing link changes the governing status and adds revoke advice, and with the governing link fixed, a changed candidate changes only the suggested command (RV-008 F-1) |
+| approve: report | shows the governing approval when it sits at a shallower root than the roots entry; with the candidate fixed, a changed or deleted governing link changes the governing status and adds revoke advice, and with the governing link fixed, a changed candidate changes the candidate's identity lines and the suggested command but not the governing status (RV-008 F-1) |
 | approve: revoke | removes named / all capabilities of an exact stored root; after the root is removed from `roots`, and after its directory is deleted, the entry is still revocable; revoking a child root leaves a parent approval intact; an unknown root or capability exits 1 listing stored roots |
 | cli: verbs and usage | exit codes 0 / 1 / 2 |
 | help: legacy layer | `quotient help` warns and still prints |
