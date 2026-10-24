@@ -16,7 +16,7 @@
 // answer the server writes goes through.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { reduce } from './reduce/reduce.ts';
@@ -42,6 +42,9 @@ import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD, workspace } from '.
 
 const repo = (path: string): string => new URL(`../${path}`, import.meta.url).pathname;
 const read = (path: string): string => readFileSync(repo(path), 'utf8');
+
+/** The message of a thrown value, without a type assertion. */
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const RESULT_CONTRACT = 'docs/contract/pi-agent-result-2.md';
 const POLICY_CONTRACT = 'docs/contract/quotient-policy-2.md';
@@ -117,7 +120,7 @@ const JSON_TYPES = ['string', 'number', 'boolean', 'object', 'array'];
  *  vocabulary would otherwise be misread silently. */
 function malformedFieldRows(contract: string): string[] {
   return table(contract, 'Fields').flatMap((row) => {
-    if (row.length !== 4) {return [`Fields row \`${row[0]}\` has ${row.length} cells, not 4`];}
+    if (row.length !== 4) {return [`Fields row \`${row[0]}\` has ${String(row.length)} cells, not 4`];}
     const problems: string[] = [];
     if (!JSON_TYPES.includes(row[1])) {problems.push(`Fields row \`${row[0]}\`: type ${row[1]} is not a JSON type`);}
     if (row[2] !== 'yes' && row[2] !== 'no') {problems.push(`Fields row \`${row[0]}\`: nullable is ${row[2]}, not yes or no`);}
@@ -131,7 +134,10 @@ function fields(contract: string): Map<string, Field> {
   return new Map(table(contract, 'Fields').map((row) => [row[0], { type: row[1], nullable: row[2] === 'yes' }]));
 }
 
-const jsonType = (value: unknown): string => (Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value);
+const jsonType = (value: unknown): string => {
+  if (Array.isArray(value)) {return 'array';}
+  return value === null ? 'null' : typeof value;
+};
 
 /** The documented children of PATH: `''` is the document itself. */
 function childrenOf(table: Map<string, Field>, path: string): string[] {
@@ -148,30 +154,42 @@ function childrenOf(table: Map<string, Field>, path: string): string[] {
  */
 function shapeViolations(doc: AgentResult, documented: Map<string, Field>, label: string, nulls: Set<string>): string[] {
   const violations: string[] = [];
-  const walk = (value: unknown, path: string): void => {
-    if (path !== '') {
-      const field = documented.get(path);
-      if (field === undefined) {
-        violations.push(`${label}: \`${path}\` is not in the Fields table`);
-        return;
-      }
-      if (value === null) {
-        nulls.add(path);
-        if (!field.nullable) {violations.push(`${label}: \`${path}\` is null, and the Fields table says non-nullable`);}
-        return;
-      }
-      if (jsonType(value) !== field.type) {
-        violations.push(`${label}: \`${path}\` is ${jsonType(value)}, and the Fields table says ${field.type}`);
-        return;
-      }
+
+  /** Check one documented value; false where it cannot have documented children
+   *  (undocumented, null, or the wrong JSON type). */
+  function checkField(value: unknown, path: string): boolean {
+    const field = documented.get(path);
+    if (field === undefined) {
+      violations.push(`${label}: \`${path}\` is not in the Fields table`);
+      return false;
     }
+    if (value === null) {
+      nulls.add(path);
+      if (!field.nullable) {violations.push(`${label}: \`${path}\` is null, and the Fields table says non-nullable`);}
+      return false;
+    }
+    if (jsonType(value) !== field.type) {
+      violations.push(`${label}: \`${path}\` is ${jsonType(value)}, and the Fields table says ${field.type}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** An object's documented children: key-set parity both ways, then each member. */
+  function walkMembers(value: object, path: string): void {
+    violations.push(...bothWays(`${label}: keys of \`${path === '' ? '(document)' : path}\``, Object.keys(value), childrenOf(documented, path)));
+    for (const [key, member] of Object.entries(value)) {walk(member, path === '' ? key : `${path}.${key}`);}
+  }
+
+  function walk(value: unknown, path: string): void {
+    if (path !== '' && !checkField(value, path)) {return;}
     if (Array.isArray(value)) {
       for (const element of value) {walk(element, `${path}[]`);}
     } else if (typeof value === 'object' && value !== null) {
-      violations.push(...bothWays(`${label}: keys of \`${path || '(document)'}\``, Object.keys(value), childrenOf(documented, path)));
-      for (const [key, member] of Object.entries(value)) {walk(member, path === '' ? key : `${path}.${key}`);}
+      walkMembers(value, path);
     }
-  };
+  }
+
   walk(doc, '');
   return violations;
 }
@@ -251,10 +269,10 @@ function inadmissibleBlocks(text: string, label: string): string[] {
     try {
       parsed = JSON.parse(block);
     } catch (error) {
-      return [`${label} json block ${index + 1} is not JSON: ${(error as Error).message}`];
+      return [`${label} json block ${String(index + 1)} is not JSON: ${errorMessage(error)}`];
     }
     const loaded = readPolicy(workspace(parsed).policyPath);
-    return loaded.ok ? [] : [`${label} json block ${index + 1}: ${loaded.reason}: ${loaded.detail}`];
+    return loaded.ok ? [] : [`${label} json block ${String(index + 1)}: ${loaded.reason}: ${loaded.detail}`];
   });
 }
 
@@ -291,7 +309,7 @@ function embeddedPolicyViolations(text: string, label: string): { found: number;
     try {
       parsed = JSON.parse(block);
     } catch (error) {
-      return { found: policies.length, violations: [`${label} has invalid JSON: ${(error as Error).message}`] };
+      return { found: policies.length, violations: [`${label} has invalid JSON: ${errorMessage(error)}`] };
     }
     if (typeof parsed === 'object' && parsed !== null && 'schema' in parsed && String(parsed.schema).startsWith('quotient-policy/')) {
       policies.push(parsed);
@@ -300,7 +318,7 @@ function embeddedPolicyViolations(text: string, label: string): { found: number;
   return {
     found: policies.length,
     violations: policies.flatMap((policy, index) =>
-      inadmissibleBlocks(`\`\`\`json\n${JSON.stringify(policy)}\n\`\`\``, `${label} policy ${index + 1}`),
+      inadmissibleBlocks(`\`\`\`json\n${JSON.stringify(policy)}\n\`\`\``, `${label} policy ${String(index + 1)}`),
     ),
   };
 }
@@ -315,8 +333,9 @@ function filesUnder(path: string): string[] {
   return readdirSync(path).flatMap((name) => filesUnder(join(path, name)));
 }
 
-/** The shipped text: what a reader of the package sees. */
-const SHIPPED_TEXT = ['docs', 'examples', 'help', 'README.md'];
+/** The shipped text: what a reader of the package sees, plus the flake's own
+ *  text, which ships through the flake rather than `npm pack`. */
+const SHIPPED_TEXT = ['docs', 'examples', 'help', 'README.md', 'flake.nix', 'nix'];
 
 function doctrineIdViolations(files: readonly string[]): string[] {
   return files.flatMap((file) => [...readFileSync(file, 'utf8').matchAll(DOCTRINE_ID)].map((m) => `${file}: cites ${m[0]}`));
@@ -334,7 +353,8 @@ test('result keys and types: every fixture matches the Fields table at every lev
   const results = fixtures();
   for (const [label, doc] of Object.entries(results)) {assert.equal(doc.state, label.split(' ')[0], `the ${label} fixture`);}
   assert.deepEqual(new Set(Object.values(results).map((doc) => doc.state)), new Set(RESULT_STATES), 'a fixture for every state');
-  assert.ok(results.completed.status && (results.completed.status.alerts as unknown[]).length > 0, 'an alert element is checked');
+  const { status } = results.completed;
+  assert.ok(status !== null && Array.isArray(status.alerts) && status.alerts.length > 0, 'an alert element is checked');
   assert.deepEqual(keysAndTypesViolations(read(RESULT_CONTRACT), results), []);
 });
 
@@ -381,10 +401,13 @@ test('result contract defines the two unmeasured populations and their non-addit
   }
 });
 
-test('no doctrine ids: nothing under docs/, examples/, help/ or the README cites one', () => {
-  const files = SHIPPED_TEXT.flatMap((path) => filesUnder(repo(path)));
+test('no doctrine ids: nothing under docs/, examples/, help/, the README, flake.nix or nix/ cites one', () => {
+  // A shipped path that does not exist yet (nix/, until the builder lands) has
+  // no text to scan, so it is skipped rather than failing on ENOENT.
+  const files = SHIPPED_TEXT.filter((path) => existsSync(repo(path))).flatMap((path) => filesUnder(repo(path)));
   assert.ok(files.some((file) => file.endsWith('design.md')), 'the scan reaches docs/');
   assert.ok(files.some((file) => file.endsWith('help/agent.md')), 'the scan reaches help/');
+  assert.ok(files.some((file) => file.endsWith('flake.nix')), 'the scan reaches flake.nix');
   assert.deepEqual(doctrineIdViolations(files), []);
 });
 

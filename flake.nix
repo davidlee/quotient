@@ -13,9 +13,8 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       packageJson = builtins.fromJSON (builtins.readFile ./package.json);
 
-      # quotient exports no forms (DEC-116). A form is the operator's choice and
-      # is named by the policy; this flake builds the server and nothing that
-      # runs a delegate.
+      # `packages` is the server only; quotient ships no forms. A form is the
+      # operator's choice and is named by the policy.
     in
     {
       packages = forAllSystems (

@@ -1,4 +1,4 @@
-gate: test typecheck build hostile-audit pack-check
+gate: test typecheck build nix-build hostile-audit pack-check
 
 # Not yet in `gate` (IMP-002): typescript-eslint strict, zero warnings, and shellcheck.
 lint:
@@ -13,6 +13,9 @@ test:
 
 build:
     npm run build
+
+nix-build:
+    nix build .#default --no-link -L
 
 hostile-audit:
     bash -n scripts/hostile-audit
