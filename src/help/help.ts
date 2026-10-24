@@ -2,9 +2,11 @@
 // (`quotient help`) and the model (the MCP `initialize` instructions and the
 // `pi_agent` tool description).
 //
-// Each overridable section resolves per section: the launch dir's
-// `.quotient/help/<section>.md`, then `<xdgConfig>/quotient/help/<section>.md`,
-// then the built-in. Contract sections skip both layers: they print
+// Each overridable section resolves per section from the XDG layer,
+// `<xdgConfig>/quotient/help/<section>.md`, then the built-in; a launch-dir
+// `.quotient/help` is a legacy install that fails start-up (`config.ts`
+// `legacyLayers`). The loader still takes a list, highest first, and production
+// supplies the one XDG layer. Contract sections skip the layer: they print
 // `docs/contract` verbatim, because an override would let help misstate the
 // normative text. Only an absent file falls through, as for profiles: an
 // unreadable layer or section file, shadowed or not, refuses start-up.
@@ -153,7 +155,7 @@ export type RenderContext = {
   policy: PolicyView;
   /** The absolute path of the running bin. */
   bin: string;
-  /** Where the server is launched: where `./.quotient` is found. */
+  /** Where the server is launched: the `cwd` the client snippets carry. */
   launchDir: string;
 };
 

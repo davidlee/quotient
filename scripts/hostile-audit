@@ -14,9 +14,10 @@
 # docs/contract/form-1.md lists each guarantee quotient does not verify.
 #
 # The fixture writes a temporary `quotient-policy/2` policy and a temporary
-# launch directory holding `.quotient/profiles/probe.md`, then runs the server
+# `XDG_CONFIG_HOME` holding `quotient/profiles/probe.md`, then runs the server
 # from this package (`src/cli.ts`, i.e. packageRoot) with the launch directory as
-# its working directory. The form itself must confine the child; a stub launcher
+# its working directory. The launch dir holds no `.quotient` layer: a legacy one
+# would fail start-up. The form itself must confine the child; a stub launcher
 # cannot stand in for it, because without a jail there is nothing to prove.
 #
 # PASS (exit 0): the audit parses, still carries its records and is not
@@ -154,8 +155,8 @@ launch=$work/launch
 policy=$work/policy.json
 call=$work/call.json
 reply=$work/reply.json
-profile=$launch/.quotient/profiles/probe.md
-mkdir -p "$launch/.quotient/profiles"
+profile=$work/xdg/quotient/profiles/probe.md
+mkdir -p "$launch" "$work/xdg/quotient/profiles"
 
 # The probe profile is the only profile this fixture offers: the policy pins it
 # to the capability under test, and the header grammar is the one

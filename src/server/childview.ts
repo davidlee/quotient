@@ -110,8 +110,8 @@ export function protectedStores(input: ChildViewInput): ProtectedStore[] {
       except: canonicalPath(input.sessionDir),
     },
     { kind: 'policy-file', path: canonicalPath(input.policyPath), tolerance: 'never-writable' },
-    // The layers are protected whether or not they exist: a write delegate must
-    // not be able to create `.quotient/` and plant text for the next restart.
+    // The XDG layers are protected whether or not they exist: a write delegate
+    // must not be able to create one and plant text for the next restart.
     ...layerStores('profile-layer', input.profileLayers),
     ...layerStores('help-layer', input.helpLayers),
   ];

@@ -1,8 +1,9 @@
-// Where everything is (design sec-3). One pure resolver over the environment and
-// the launch dir, so the policy, profile and help layers share one idea of XDG.
+// Where everything is (design sec-3). One pure resolver over the environment, so
+// the policy, profile and help layers share one idea of XDG.
 //
 // Split by authority: the policy is never looked up in the project tree;
-// profiles and help layer the launch dir over XDG; state defaults to XDG.
+// profiles and help come from XDG only (a launch-dir layer is a legacy install
+// that fails start-up, named by `legacyLayers`); state defaults to XDG.
 // Only an unset QUOTIENT_* variable falls through — a set but empty or relative
 // value is unusable, so a typo never silently moves the policy. An unusable
 // location is the caller's `policy-unavailable`.
@@ -16,9 +17,9 @@ export type Locations = {
   policyPath: Resolved;
   runDir: Resolved;
   sessionHome: Resolved;
-  /** [<launch>/.quotient/profiles, <xdgConfig>/quotient/profiles], highest first. */
+  /** [<xdgConfig>/quotient/profiles]; empty when the XDG config base is unusable. */
   profileLayers: string[];
-  /** [<launch>/.quotient/help, <xdgConfig>/quotient/help], highest first. */
+  /** [<xdgConfig>/quotient/help]; empty when the XDG config base is unusable. */
   helpLayers: string[];
   /** The path a wrapper was run as, for the client snippets; null when unset or
    *  not absolute. A hint, not a location the server reads, so it never refuses. */
@@ -61,19 +62,28 @@ const launcherPath = (env: Env): string | null => {
   return value === null ? null : normalize(value);
 };
 
-export function resolveLocations(env: Env, launchDir: string): Locations {
+/** The one layer of each kind: the XDG config home's, when it resolves. */
+const xdgLayer = (config: Resolved, kind: string): string[] =>
+  config.ok ? [join(config.path, 'quotient', kind)] : [];
+
+/**
+ * The launch-dir layers earlier versions read, highest first. Their presence
+ * fails start-up with migration guidance (DEC-011): the paths are derived, not
+ * looked up, and whether they exist is the start-up check's question.
+ */
+export function legacyLayers(launchDir: string): string[] {
+  return ['profiles', 'help'].map((kind) => join(launchDir, '.quotient', kind));
+}
+
+export function resolveLocations(env: Env): Locations {
   const config = xdgBase(env, 'XDG_CONFIG_HOME', '.config');
   const state = xdgBase(env, 'XDG_STATE_HOME', '.local/state');
-  const layers = (kind: string): string[] => [
-    join(launchDir, '.quotient', kind),
-    ...(config.ok ? [join(config.path, 'quotient', kind)] : []),
-  ];
   return {
     policyPath: located(env, POLICY_VAR, config, 'quotient/policy.json'),
     runDir: located(env, RUN_DIR_VAR, state, 'quotient/runs'),
     sessionHome: located(env, SESSION_HOME_VAR, state, 'quotient/sessions'),
-    profileLayers: layers('profiles'),
-    helpLayers: layers('help'),
+    profileLayers: xdgLayer(config, 'profiles'),
+    helpLayers: xdgLayer(config, 'help'),
     launcher: launcherPath(env),
   };
 }

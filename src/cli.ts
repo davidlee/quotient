@@ -7,7 +7,7 @@
 //   quotient help [SECTION]  one section, or the list (exit 2 for an unknown section,
 //                            1 for an unreadable help layer)
 //   quotient --version       the package version
-import { serve } from './server/server.ts';
+import { serve, legacyLayerFailure } from './server/server.ts';
 import { main as reduce } from './reduce/cli.ts';
 import { packageVersion } from './root.ts';
 import { resolveLocations, type Env } from './config.ts';
@@ -22,9 +22,9 @@ const USAGE = `usage: quotient                 serve MCP on stdio
 /**
  * One help section, or the list. It reads the same layers a server launched
  * here would, so it prints what that server would say. An unreadable help layer
- * is the server's start-up refusal and exits 1; a profile snapshot that does
- * not load is only warned about, so `quotient help profiles` still works while
- * an operator fixes one.
+ * is the server's start-up refusal and exits 1; a legacy launch-dir layer and a
+ * profile snapshot that does not load are only warned about, so `quotient help
+ * profiles` still explains the fix while an operator makes it.
  */
 function help(section: string | undefined, env: Env, launchDir: string): number {
   if (section === undefined) {
@@ -37,7 +37,13 @@ function help(section: string | undefined, env: Env, launchDir: string): number 
     process.stderr.write(`quotient: no help section "${section}"\n`);
     return 2;
   }
-  const locations = resolveLocations(env, launchDir);
+  const locations = resolveLocations(env);
+  /** A start-up failure only warned about: the path to fix, and what it stops. */
+  const warn = (what: string, failure: { path: string; detail: string }): void => {
+    process.stderr.write(`quotient: ${what}: ${failure.path}: ${failure.detail}\n`);
+  };
+  const legacy = legacyLayerFailure(locations, launchDir);
+  if (legacy !== null) {warn('a server started here refuses every call', legacy);}
   const loaded = loadHelp(locations.helpLayers);
   if (!loaded.ok) {
     process.stderr.write(`quotient: ${loaded.path}: ${loaded.detail}\n`);
@@ -45,7 +51,7 @@ function help(section: string | undefined, env: Env, launchDir: string): number 
   }
   const profiles = loadProfiles(locations.profileLayers);
   if (!profiles.ok) {
-    process.stderr.write(`quotient: the profile snapshot did not load, so a server started here refuses every call: ${profiles.path}: ${profiles.detail}\n`);
+    warn('the profile snapshot did not load, so a server started here refuses every call', profiles);
   }
   const text = sectionText(loaded.snapshot, name, renderContext(locations, profiles.ok ? [...profiles.snapshot.profiles.values()] : [], launchDir));
   process.stdout.write(text.endsWith('\n') ? text : `${text}\n`);

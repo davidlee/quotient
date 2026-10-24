@@ -125,3 +125,24 @@ A further design pass would probe, in order of value:
 
 Otherwise no further design pass is needed: remaining risk is implementation
 fidelity, which plan VT criteria and `/audit` cover.
+
+## Execution log
+
+Orchestrated via quotient `pi_agent` workers in the doctrine fork
+`.worktrees/sl-002` (branch `sl-002`): a write agent rooted at the repo root is
+refused `view-overlaps-protected` (ISS-001 itself) while the quotient MCP server
+runs from this checkout. Workers have no git; the orchestrator commits and runs
+`just gate` (pack-check needs git).
+
+### PHASE-01 — done
+
+- `resolveLocations` and test-rig `admit` lost the dead `launchDir` parameter.
+- `scripts/hostile-audit` and `scripts/pack-check` now `mkdir -p "$launch"`
+  explicitly (the old `.quotient` mkdir created it as a side effect).
+- Legacy-layer start-up failure distinguishes a non-directory entry ("remove or
+  replace it") from a layer of documents ("move these documents"), and names
+  both layers in one line when both are present.
+- Deferred to PHASE-06 (review of PHASE-01): `help/profiles.md:10,14` and
+  `help/setup.md:17,52-53` still teach the launch-dir layer; `help.ts:226`
+  renders "`cwd` is the launch dir: where `./.quotient` is found", and the
+  `help.test.ts` guard only catches the absolute `<launch>/.quotient` form.

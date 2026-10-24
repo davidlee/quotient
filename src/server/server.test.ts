@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packageVersion } from '../root.ts';
@@ -25,11 +25,13 @@ import {
   markerPids,
   newRig,
   onlyRunDir,
+  SETTLED,
   serveRig,
   serverCommand,
   validPolicy,
   waitForPath,
   workspace,
+  xdgHelpLayer,
   xdgProfileLayer, type Env, type Rig 
 } from './test-rig.ts';
 
@@ -334,6 +336,163 @@ test('a launch form that cannot be executed reports failed with termination spaw
   assert.equal(audit[1].code, null);
   assert.equal(audit[1].spawn_failed, true);
   assert.equal(attempts(runDir).length, 0);
+});
+
+// ── The launch directory is not a layer (SL-002 PHASE-01, ISS-001) ─────────
+
+/** A form that records that it ran, then settles and exits 0. */
+const MARKED = ['printf \'%s\\n\' $$ > "@MARKER@/pid"', SETTLED, 'exit 0'].join('\n');
+
+// The normal case: an MCP client launched inside the project it works on, with
+// that project also the policy's root. It was refused `view-overlaps-protected`
+// because the launch dir supplied profile and help layers that step 8 protected.
+// The layers are XDG-only, so there is nothing in the root to overlap.
+test('a write call rooted at the launch directory is admitted (ISS-001)', async (t) => {
+  const rig = newRig(t, { write: MARKED });
+  const server = serveRig(rig, { launchDir: rig.root });
+  server.write(callLine(71, { prompt: 'work', profile: 'write', cwd: rig.root }));
+  // The write form runs only past step 8: the root that contains the launch dir
+  // is admitted, and no refusal named the child view.
+  await waitForPath(join(rig.markerDir, 'pid'), 'the write form');
+  server.end();
+  await server.done;
+  for (const reply of server.replies()) {
+    const { doc } = payload(reply);
+    assert.equal(field(doc, 'refusal'), null, `the call was admitted, not refused: ${JSON.stringify(reply)}`);
+  }
+});
+
+// ── Legacy launch-dir layers fail start-up (DEC-011) ─────────────────────
+
+/** One field of a parsed JSON value; a test failure when it is not an object. */
+function field(value: unknown, name: string): unknown {
+  if (typeof value !== 'object' || value === null) {assert.fail(`no ${name}: not an object (${JSON.stringify(value)})`);}
+  return Reflect.get(value, name);
+}
+
+/** One element of a parsed JSON array; a test failure when it is not one. */
+function element(value: unknown, index: number): unknown {
+  if (!Array.isArray(value)) {assert.fail(`no element ${String(index)}: not an array`);}
+  return value[index];
+}
+
+/** Plant one legacy launch-dir layer under the rig's launch dir; its path. */
+function plantLegacy(rig: Rig, kind: 'profiles' | 'help'): string {
+  const layer = join(rig.launchDir, '.quotient', kind);
+  mkdirSync(layer, { recursive: true });
+  if (kind === 'profiles') {writeFileSync(join(layer, 'probe.md'), '# a document from an older install\n');}
+  return layer;
+}
+
+/** One start-up refusal: its stderr line, the two rendered descriptions, and
+ *  the refusal every call inherits. */
+async function startUpRefusal(rig: Rig): Promise<{
+  instructions: string;
+  description: string;
+  refusal: { reason: string; detail: string };
+  stderr: string;
+}> {
+  const { replies, stderr } = await converse(
+    [
+      line({ id: 1, method: 'initialize' }),
+      line({ id: 2, method: 'tools/list' }),
+      callLine(3, { prompt: 'hi', profile: 'read', cwd: rig.root }),
+    ],
+    rig.env,
+    { launchDir: rig.launchDir },
+  );
+  assert.equal(replies.length, 3);
+  const doc: unknown = payload(replies[2]).doc;
+  assert.equal(field(doc, 'state'), 'refused');
+  const refusal = field(doc, 'refusal');
+  return {
+    instructions: String(field(field(replies[0], 'result'), 'instructions')),
+    description: String(field(element(field(field(replies[1], 'result'), 'tools'), 0), 'description')),
+    refusal: { reason: String(field(refusal, 'reason')), detail: String(field(refusal, 'detail')) },
+    stderr,
+  };
+}
+
+test('a legacy launch-dir profile layer fails start-up, naming the path and the XDG destination (DEC-011)', async (t) => {
+  const rig = newRig(t);
+  const layer = plantLegacy(rig, 'profiles');
+  const destination = xdgProfileLayer(rig.dir);
+  const failure = await startUpRefusal(rig);
+
+  // One stderr line, which is the whole start-up refusal (design sec-2).
+  assert.deepEqual(
+    failure.stderr.split('\n').filter((text) => text.length > 0),
+    [
+      `quotient: start-up did not complete: ${layer}: quotient no longer reads profiles from the launch directory; ` +
+        `move these documents to ${destination}/ and restart`,
+    ],
+  );
+  for (const text of [failure.instructions, failure.description]) {assert.ok(text.includes(layer), text);}
+  assert.match(failure.instructions, /refused start-up/);
+  assert.equal(failure.refusal.reason, 'profile-invalid');
+  assert.ok(failure.refusal.detail.includes(layer), failure.refusal.detail);
+  assert.match(failure.refusal.detail, /quotient no longer reads profiles from the launch directory/);
+  assert.match(failure.refusal.detail, /and restart$/);
+  assert.deepEqual(readdirSync(rig.markerDir), [], 'no launcher ran');
+});
+
+test('a legacy launch-dir help layer fails start-up too, naming the help destination', async (t) => {
+  const rig = newRig(t);
+  const layer = plantLegacy(rig, 'help');
+  const failure = await startUpRefusal(rig);
+  assert.match(
+    failure.stderr,
+    new RegExp(`start-up did not complete: ${layer}: quotient no longer reads help from the launch directory`),
+  );
+  assert.ok(failure.stderr.includes(`${xdgHelpLayer(rig.dir)}/ and restart`), failure.stderr);
+  assert.equal(failure.refusal.reason, 'profile-invalid');
+  assert.ok(failure.refusal.detail.includes(layer), failure.refusal.detail);
+});
+
+test('a legacy layer that is a dangling symlink is present, not absent: start-up still fails', async (t) => {
+  const rig = newRig(t);
+  mkdirSync(join(rig.launchDir, '.quotient'), { recursive: true });
+  symlinkSync(join(tmpdir(), 'quotient-no-such-target'), join(rig.launchDir, '.quotient', 'profiles'));
+  const failure = await startUpRefusal(rig);
+  assert.match(failure.stderr, /no longer reads profiles from the launch directory/);
+  assert.equal(failure.refusal.reason, 'profile-invalid');
+});
+
+test('a `.quotient/forms` entry alone is not a legacy layer: start-up completes', async (t) => {
+  const rig = newRig(t);
+  const forms = join(rig.launchDir, '.quotient', 'forms');
+  mkdirSync(forms, { recursive: true });
+  writeFileSync(join(forms, 'read'), '#!/bin/sh\nexit 0\n');
+  const { replies, stderr } = await converse(
+    [line({ id: 1, method: 'initialize' }), callLine(2, { prompt: 'hi', profile: 'read', cwd: rig.root })],
+    rig.env,
+    { launchDir: rig.launchDir },
+  );
+  assert.doesNotMatch(stderr, /start-up did not complete/);
+  const instructions = String(field(field(replies[0], 'result'), 'instructions'));
+  assert.doesNotMatch(instructions, /refused start-up/);
+  assert.equal(payload(replies[1]).doc.refusal, null, 'the call ran: no start-up refusal');
+});
+
+test('a legacy layer that is a file is named as something to remove, not documents to move', async (t) => {
+  const rig = newRig(t);
+  mkdirSync(join(rig.launchDir, '.quotient'), { recursive: true });
+  writeFileSync(join(rig.launchDir, '.quotient', 'profiles'), 'not a layer\n');
+  const failure = await startUpRefusal(rig);
+  assert.match(failure.refusal.detail, /that entry is not a layer directory: remove or replace it and restart$/);
+  assert.doesNotMatch(failure.refusal.detail, /move these documents/);
+});
+
+test('both legacy layers present are named together, in the one start-up line', async (t) => {
+  const rig = newRig(t);
+  const profiles = plantLegacy(rig, 'profiles');
+  const help = plantLegacy(rig, 'help');
+  const failure = await startUpRefusal(rig);
+  const lines = failure.stderr.split('\n').filter((text) => text.length > 0);
+  assert.equal(lines.length, 1, 'one line, in C7\'s shape');
+  assert.ok(lines[0].includes(`${profiles}, ${help}`), lines[0]);
+  assert.match(lines[0], /no longer reads profiles from the launch directory; move these documents to .*; quotient no longer reads help/);
+  assert.ok(failure.refusal.detail.includes(help));
 });
 
 // ── A policy refusal is a tool result too (EX-3, EX-5) ─────────────────────

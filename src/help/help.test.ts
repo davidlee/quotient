@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { packageRoot } from '../root.ts';
 import { resolveLocations } from '../config.ts';
 import { PROFILE_NAME, THINKING_LEVELS, loadProfiles } from '../server/profiles.ts';
@@ -23,16 +23,19 @@ import {
   validPolicy,
   workspace,
   writeProfiles,
-  xdgHelpLayer, type Env 
+  xdgHelpLayer,
+  xdgProfileLayer,
+  type Env,
 } from '../server/test-rig.ts';
 import { HELP_SECTIONS, clientsSnippets, loadHelp, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type RenderContext } from './help.ts';
 
-/** Two empty override layers, launch dir first, as `config.ts` orders them. */
-function layers(): { launch: string; xdg: string; all: string[] } {
+/** Two empty override layers, higher first: the loader still takes a list, though
+ *  production supplies only the XDG one. */
+function layers(): { over: string; under: string; all: string[] } {
   const dir = mkdtempSync(join(tmpdir(), 'quotient-help-'));
-  const launch = join(dir, 'launch', '.quotient', 'help');
-  const xdg = join(dir, 'config', 'quotient', 'help');
-  return { launch, xdg, all: [launch, xdg] };
+  const over = join(dir, 'over');
+  const under = join(dir, 'under');
+  return { over, under, all: [over, under] };
 }
 
 function write(layer: string, section: string, text: string): string {
@@ -75,10 +78,10 @@ test('help: with no override each section is its built-in source', () => {
 });
 
 test('help: contract sections print docs/contract verbatim and ignore an override', () => {
-  const { launch, xdg, all } = layers();
+  const { over, under, all } = layers();
   for (const section of ['result', 'policy', 'form']) {
-    write(launch, section, 'launch override\n');
-    write(xdg, section, 'xdg override\n');
+    write(over, section, 'higher override\n');
+    write(under, section, 'lower override\n');
   }
   const snapshot = loaded(all);
   assert.equal(sectionText(snapshot, 'result', CONTEXT), builtin('docs/contract/pi-agent-result-2.md'));
@@ -86,39 +89,39 @@ test('help: contract sections print docs/contract verbatim and ignore an overrid
   assert.equal(sectionText(snapshot, 'form', CONTEXT), builtin('docs/contract/form-1.md'));
 });
 
-test('help: a file override wins for agent, launch dir over XDG; an absent override falls through', () => {
-  const { launch, xdg, all } = layers();
-  write(xdg, 'agent', 'xdg agent\n');
-  write(xdg, 'tool', 'xdg tool\n');
-  write(launch, 'tool', 'launch tool\n');
+test('help: a file override wins for agent, the higher layer over the lower; an absent override falls through', () => {
+  const { over, under, all } = layers();
+  write(under, 'agent', 'lower agent\n');
+  write(under, 'tool', 'lower tool\n');
+  write(over, 'tool', 'higher tool\n');
   const snapshot = loaded(all);
-  assert.ok(sectionText(snapshot, 'agent', CONTEXT).startsWith('xdg agent\n'), 'the XDG override wins over the built-in');
-  assert.equal(sectionText(snapshot, 'tool', CONTEXT), 'launch tool\n', 'the launch layer wins over XDG');
+  assert.ok(sectionText(snapshot, 'agent', CONTEXT).startsWith('lower agent\n'), 'the override wins over the built-in');
+  assert.equal(sectionText(snapshot, 'tool', CONTEXT), 'higher tool\n', 'the higher layer wins');
   assert.equal(sectionText(snapshot, 'setup', CONTEXT), builtin('help/setup.md'), 'absent everywhere falls through');
-  assert.equal(snapshot.sources.get('tool'), join(launch, 'tool.md'));
+  assert.equal(snapshot.sources.get('tool'), join(over, 'tool.md'));
 });
 
 test('help: an override replaces a rendered section verbatim', () => {
-  const { launch, all } = layers();
-  write(launch, 'clients', 'our own snippets\n');
+  const { over, all } = layers();
+  write(over, 'clients', 'our own snippets\n');
   assert.equal(sectionText(loaded(all), 'clients', CONTEXT), 'our own snippets\n');
 });
 
 test('help: an unreadable layer or section file, shadowed or not, refuses start-up', () => {
-  const { launch, xdg, all } = layers();
+  const { over, all } = layers();
   // A layer that is not a directory.
-  mkdirSync(join(launch, '..'), { recursive: true });
-  writeFileSync(launch, 'not a directory');
+  mkdirSync(join(over, '..'), { recursive: true });
+  writeFileSync(over, 'not a directory');
   const notDir = loadHelp(all);
   if (notDir.ok) {assert.fail('a layer that is not a readable directory must refuse');}
-  assert.equal(notDir.path, launch);
+  assert.equal(notDir.path, over);
 
   // A section file in the lower layer that does not resolve, shadowed by a
   // readable one above: still a broken deployment.
   const fresh = layers();
-  write(fresh.launch, 'agent', 'launch agent\n');
-  mkdirSync(fresh.xdg, { recursive: true });
-  const dangling = join(fresh.xdg, 'agent.md');
+  write(fresh.over, 'agent', 'higher agent\n');
+  mkdirSync(fresh.under, { recursive: true });
+  const dangling = join(fresh.under, 'agent.md');
   symlinkSync(join(tmpdir(), 'quotient-no-such-target'), dangling);
   const shadowed = loadHelp(fresh.all);
   if (shadowed.ok) {assert.fail('an unreadable shadowed section file must refuse');}
@@ -127,23 +130,22 @@ test('help: an unreadable layer or section file, shadowed or not, refuses start-
 
   // A dangling layer symlink is unreadable, not absent.
   const third = layers();
-  mkdirSync(join(third.xdg, '..'), { recursive: true });
-  symlinkSync(join(tmpdir(), 'quotient-no-such-target'), third.xdg);
+  mkdirSync(join(third.under, '..'), { recursive: true });
+  symlinkSync(join(tmpdir(), 'quotient-no-such-target'), third.under);
   const unresolved = loadHelp(third.all);
   if (unresolved.ok) {assert.fail('a layer entry that does not resolve is unreadable, not absent');}
-  assert.equal(unresolved.path, third.xdg);
-  xdg;
+  assert.equal(unresolved.path, third.under);
 });
 
 test('help: help_digest is stable, and moves with a section, its source or its bytes', () => {
-  const { launch, all } = layers();
+  const { over, all } = layers();
   const base = loaded(all).digest;
   assert.match(base, /^[0-9a-f]{64}$/);
   assert.equal(loaded(all).digest, base, 'the same layers give the same digest');
-  write(launch, 'setup', 'local setup\n');
+  write(over, 'setup', 'local setup\n');
   const overridden = loaded(all).digest;
   assert.notEqual(overridden, base);
-  write(launch, 'setup', 'local setup, edited\n');
+  write(over, 'setup', 'local setup, edited\n');
   assert.notEqual(loaded(all).digest, overridden);
 });
 
@@ -213,7 +215,7 @@ test('policyView: a readable policy gives its pins and wall clock; otherwise why
 /** The agent and tool sections a server launched with ENV in LAUNCH would
  *  assemble, computed by the same loaders and renderer. */
 function expected(env: Env, launchDir: string): { agent: string; tool: string; digest: string } {
-  const locations = resolveLocations(env, launchDir);
+  const locations = resolveLocations(env);
   const profiles = loadProfiles(locations.profileLayers);
   if (!profiles.ok) {assert.fail(profiles.detail);}
   const snapshot = loaded(locations.helpLayers);
@@ -241,14 +243,31 @@ test('server: initialize instructions equals the assembled agent section; the to
   assert.match(instructions, /\| `read` \| .* \| read \|/, 'the table pins read as the policy reads');
 });
 
-test('server: an override wins for agent and tool, as read at start-up', async () => {
+test('server: an XDG override wins for agent and tool, as read at start-up', async () => {
   const { env, dir } = workspace();
   const launchDir = join(dir, 'launch');
   write(xdgHelpLayer(dir), 'agent', 'operator agent text\n');
-  write(join(launchDir, '.quotient', 'help'), 'tool', 'project tool text\n');
   const { instructions, description } = await selfDescription(env, launchDir);
   assert.ok(instructions.startsWith('operator agent text\n'));
-  assert.equal(description, 'project tool text\n');
+  assert.equal(description, builtin('help/tool.md'), 'tool falls through to the built-in');
+  // The rendered agent section carries the profile table, whose source column
+  // is the only layer path it can name: it is the XDG one (EX-4).
+  assert.ok(instructions.includes(xdgProfileLayer(dir)), instructions);
+  for (const text of [instructions, description]) {
+    assert.equal(text.includes(join(launchDir, '.quotient')), false, 'no rendered text names a launch-dir path');
+  }
+});
+
+test('server: a launch-dir help layer fails start-up instead of overriding', async () => {
+  const { env, dir } = workspace();
+  const launchDir = join(dir, 'launch');
+  const legacy = write(join(launchDir, '.quotient', 'help'), 'agent', 'project agent text\n');
+  const { instructions, description, stderr } = await selfDescription(env, launchDir);
+  assert.match(instructions, /refused start-up/);
+  assert.ok(instructions.includes(dirname(legacy)), instructions);
+  assert.ok(description.includes(dirname(legacy)), description);
+  assert.equal(instructions.includes('project agent text'), false, 'the legacy override is never read');
+  assert.ok(stderr.includes(dirname(legacy)), stderr);
 });
 
 test('server: an unreadable policy at initialize reads unknown, and the server still starts', async () => {

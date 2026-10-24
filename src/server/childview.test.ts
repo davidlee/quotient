@@ -37,7 +37,7 @@ type Tree = {
   launch: string;
   /** `XDG_CONFIG_HOME`; its `quotient/` is not created. */
   xdgConfig: string;
-  /** The four layers `config.ts` derives from those two, highest first. */
+  /** The two XDG layers `config.ts` derives; the launch dir contributes none. */
   layers: Pick<ChildViewInput, 'profileLayers' | 'helpLayers'>;
 };
 
@@ -52,7 +52,7 @@ function tree(): Tree {
   const launch = join(state, 'launch');
   const xdgConfig = join(state, 'config');
   mkdirSync(launch);
-  const { profileLayers, helpLayers } = resolveLocations({ XDG_CONFIG_HOME: xdgConfig }, launch);
+  const { profileLayers, helpLayers } = resolveLocations({ XDG_CONFIG_HOME: xdgConfig });
   return {
     state,
     launch,
@@ -160,7 +160,7 @@ test('the protected stores come from the evidence layout: the run evidence and t
   const stores = protectedStores(view(t));
   assert.deepEqual(
     stores.map((store) => store.kind),
-    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'profile-layer', 'profile-layer', 'help-layer', 'help-layer'],
+    ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'profile-layer', 'help-layer'],
   );
   const byKind = new Map(stores.map((store) => [store.kind, store]));
   assert.equal(byKind.get('run-evidence')?.path, realpathSync(t.runDir));
@@ -172,13 +172,11 @@ test('the protected stores come from the evidence layout: the run evidence and t
   assert.equal(byKind.get('session-home')?.except, join(realpathSync(t.sessionHome), 'sess-a'));
   assert.equal(byKind.get('policy-file')?.path, realpathSync(t.policyPath));
   assert.equal(byKind.get('policy-file')?.tolerance, 'never-writable');
-  // Then the four layers, never-writable, whether or not they exist.
+  // Then the two XDG layers, never-writable, whether or not they exist.
   assert.deepEqual(
     stores.slice(4).map((store) => [store.kind, store.path, store.tolerance]),
     [
-      ['profile-layer', join(realpathSync(t.launch), '.quotient', 'profiles'), 'never-writable'],
       ['profile-layer', join(realpathSync(t.state), 'config', 'quotient', 'profiles'), 'never-writable'],
-      ['help-layer', join(realpathSync(t.launch), '.quotient', 'help'), 'never-writable'],
       ['help-layer', join(realpathSync(t.state), 'config', 'quotient', 'help'), 'never-writable'],
     ],
   );
@@ -259,25 +257,25 @@ test('the policy file is never writable: a write root containing it refuses, a r
 
 // ── The profile and help layers (SL-031 PHASE-05 EX-5) ────────────────────
 
-test('a write root containing the launch-dir .quotient/ refuses view-overlaps-protected, existing or not; a read root is admitted', () => {
+test('a write root at the launch directory is admitted: the launch dir holds no layer (SL-002 PHASE-01, ISS-001)', () => {
   const t = tree();
-  const layer = join(realpathSync(t.launch), '.quotient', 'profiles');
-  assert.equal(existsSync(join(t.launch, '.quotient')), false, 'absent: a delegate must not be able to create it');
-  const absent = refusal(checkChildView(view(t, { root: t.launch, capability: 'write' })));
-  assert.ok(absent.includes(JSON.stringify(layer)), absent);
+  assert.equal(existsSync(join(t.launch, '.quotient')), false, 'the tree plants nothing under the launch dir');
+  assert.deepEqual(checkChildView(view(t, { root: t.launch, capability: 'write' })), { ok: true });
 
+  // A `.quotient/` a delegate plants is ordinary project content now: it is not
+  // a store, so the write root that contains it is admitted.
   writeProfiles(join(t.launch, '.quotient', 'profiles'), RIG_PROFILES);
-  for (const root of [t.launch, join(t.launch, '.quotient'), layer]) {
-    const detail = refusal(checkChildView(view(t, { root, capability: 'write' })));
-    assert.ok(detail.includes(JSON.stringify(layer)), detail);
-  }
-  assert.deepEqual(checkChildView(view(t, { root: t.launch, capability: 'read' })), { ok: true });
+  writeProfiles(join(t.launch, '.quotient', 'help'), {});
+  assert.deepEqual(checkChildView(view(t, { root: t.launch, capability: 'write' })), { ok: true });
+  // The removal is a store-list fact, not a blanket refusal of `.quotient`: an
+  // exposure at the old launch-dir help layer is admitted (EX-8, inverted).
+  assert.deepEqual(checkChildView(view(t, { exposure: [join(t.launch, '.quotient', 'help')] })), { ok: true });
 });
 
 test('a writable exposure path that is, contains or lies inside a layer refuses; the XDG and help layers are covered too', () => {
   const t = tree();
   const xdgProfiles = xdgProfileLayer(t.state);
-  for (const member of [t.xdgConfig, xdgProfiles, join(xdgProfiles, 'sub'), join(t.launch, '.quotient', 'help')]) {
+  for (const member of [t.xdgConfig, xdgProfiles, join(xdgProfiles, 'sub')]) {
     refusal(checkChildView(view(t, { exposure: [member] })));
   }
   const help = refusal(checkChildView(view(t, { exposure: [join(t.xdgConfig, 'quotient', 'help')] })));

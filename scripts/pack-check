@@ -152,7 +152,7 @@ run=$deploy/run
 sessions=$deploy/sessions
 config=$deploy/config
 out=$tmp/out
-mkdir -p "$root" "$run" "$sessions" "$launch/.quotient/profiles" "$config" "$deploy/libexec" "$out"
+mkdir -p "$root" "$run" "$sessions" "$launch" "$config/quotient/profiles" "$deploy/libexec" "$out"
 
 # (1) One successful turn, as pi --mode json frames it: LF-terminated JSON
 # records, a usage-bearing terminal assistant message, then agent_settled. The
@@ -224,10 +224,10 @@ SH
 } >"$form"
 chmod 755 "$form"
 
-# The one profile the call names. It must sit in one of the server's layers; the
-# launch dir's `.quotient/profiles` is the highest, and XDG_CONFIG_HOME is pointed
-# at an empty temp dir so no ambient profile layer is read.
-cat >"$launch/.quotient/profiles/write.md" <<'MD'
+# The one profile the call names. It must sit in the server's one layer, the
+# fixture XDG profile layer; the launch dir stays free of `.quotient` layers, a
+# legacy one fails start-up.
+cat >"$config/quotient/profiles/write.md" <<'MD'
 <!-- quotient-profile
 filesystem: write
 model: pack-check/stub

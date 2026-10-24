@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packageRoot, packageVersion } from './root.ts';
-import { validPolicy, workspace, xdgHelpLayer, type Env } from './server/test-rig.ts';
+import { validPolicy, workspace, xdgHelpLayer, xdgProfileLayer, type Env } from './server/test-rig.ts';
 
 const CLI = new URL('./cli.ts', import.meta.url).pathname;
 
@@ -69,6 +69,7 @@ test('help lists the sections; an unknown section exits 2', () => {
 
 test('help prints a contract section verbatim; refusals is result', () => {
   const policy = quotient(['help', 'policy']);
+  assert.equal(policy.stderr, '', 'a clean launch dir warns about nothing');
   assert.equal(policy.stdout, readFileSync(join(packageRoot, 'docs/contract/quotient-policy-2.md'), 'utf8'));
   const result = quotient(['help', 'result']);
   assert.equal(result.stdout, readFileSync(join(packageRoot, 'docs/contract/pi-agent-result-2.md'), 'utf8'));
@@ -119,11 +120,25 @@ test('help with an unreadable help layer exits 1 and names it', () => {
 
 test('help still prints when the profile snapshot does not load, and says so', () => {
   const { env, dir } = workspace();
-  const profiles = join(dir, 'launch', '.quotient', 'profiles');
-  mkdirSync(profiles, { recursive: true });
+  const profiles = xdgProfileLayer(dir);
   writeFileSync(join(profiles, 'bad.md'), 'no header\n');
-  const { status, stdout, stderr } = quotient(['help', 'profiles'], '', { env: { ...env, PATH: process.env.PATH }, cwd: join(dir, 'launch') });
+  const { status, stdout, stderr } = quotient(['help', 'profiles'], '', { env: { ...env, PATH: process.env.PATH }, cwd: dir });
   assert.equal(status, 0);
   assert.equal(stdout, readFileSync(join(packageRoot, 'help/profiles.md'), 'utf8'));
   assert.ok(stderr.includes(join(profiles, 'bad.md')), 'the broken document is named');
+});
+
+test('help warns that a legacy launch-dir layer is refused, and still prints the section', () => {
+  for (const kind of ['profiles', 'help'] as const) {
+    const { env, dir } = workspace();
+    const cwd = join(dir, 'launch');
+    const legacy = join(cwd, '.quotient', kind);
+    mkdirSync(legacy, { recursive: true });
+    const { status, stdout, stderr } = quotient(['help', 'profiles'], '', { env: { ...env, PATH: process.env.PATH }, cwd });
+    assert.equal(status, 0, `help still prints with a legacy ${kind} layer`);
+    assert.equal(stdout, readFileSync(join(packageRoot, 'help/profiles.md'), 'utf8'), kind);
+    assert.ok(stderr.includes(legacy), stderr);
+    assert.match(stderr, new RegExp(`quotient no longer reads ${kind} from the launch directory`));
+    assert.ok(stderr.includes(`quotient/${kind}/ and restart`), `the destination is named: ${stderr}`);
+  }
 });

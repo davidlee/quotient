@@ -25,9 +25,9 @@ import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunF
 
 export type Env = Record<string, string | undefined>;
 
-/** Steps 1-2 for an environment, as the server resolves it from a launch dir. */
-export const admit = (env: Env, callId: CallId, launchDir = '/launch'): Admission =>
-  admitCall(resolveLocations(env, launchDir), callId);
+/** Steps 1-2 for an environment, as the server resolves it. */
+export const admit = (env: Env, callId: CallId): Admission =>
+  admitCall(resolveLocations(env), callId);
 
 /** The server as a real process: the bare bin, which serves MCP on stdio. */
 export const serverCommand: [string, string[]] = [process.execPath, [new URL('../cli.ts', import.meta.url).pathname]];
@@ -150,8 +150,8 @@ export type Rig = {
   sessionHome: string;
   root: string;
   policyPath: string;
-  /** The server's launch dir: its `.quotient/` is the highest layer, and it is
-   *  not the root, so a write call is not refused for containing it. */
+  /** The server's launch dir: it defaults a call's `cwd` and resolves a relative
+   *  one, and it holds no layer (`.quotient/` there is ordinary project content). */
   launchDir: string;
   /** The XDG profile layer, seeded with RIG_PROFILES. */
   profilesDir: string;
@@ -207,6 +207,8 @@ export function newRig(
   const sessionHome = join(dir, 'sessions');
   const launchDir = join(dir, 'launch');
   mkdirSync(launchDir);
+  // The rig plants nothing under the launch dir: the XDG profile layer is the
+  // one layer a server launched here reads.
   const profilesDir = writeProfiles(xdgProfileLayer(dir), RIG_PROFILES);
   const readLauncher = stubLauncher(dir, 'pi-mcp-read', options.read ?? QUIET, markerDir);
   const writeLauncher = stubLauncher(dir, 'pi-mcp-write', options.write ?? QUIET, markerDir);

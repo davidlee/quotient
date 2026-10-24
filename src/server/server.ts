@@ -12,15 +12,16 @@
 // never `readline` (it also splits on Unicode separators). The reader is
 // incremental and ends at stdin EOF — no timer, no poll, no child.
 import { StringDecoder } from 'node:string_decoder';
-import { writeFileSync } from 'node:fs';
+import { lstatSync, statSync, writeFileSync } from 'node:fs';
 import { addAbortSignal, type Readable, type Writable } from 'node:stream';
 import { reduce, type Reduced } from '../reduce/reduce.ts';
-import { resolveLocations, usable, type Locations } from '../config.ts';
+import { legacyLayers, resolveLocations, usable, type Locations } from '../config.ts';
 import { loadHelp, renderContext, sectionText, type HelpSnapshot, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
 import { createLatch, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
 import { admitCall, clampCeilings, formExtensions, selectForm, transcriptBudget } from './policy.ts';
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot, type Snapshot } from './profiles.ts';
+import { absent } from './paths.ts';
 import { acquireSession } from './session.ts';
 import { checkChildView } from './childview.ts';
 import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe, type CallId, type RunLayout } from './evidence.ts';
@@ -100,8 +101,8 @@ type Context = {
   startup: Startup;
   /** What an absent `cwd` resolves to, through the same allowlist as any root. */
   launchDir: string;
-  /** Where the policy, evidence and sessions are: resolved once, from the launch
-   *  environment and launch dir, which are fixed for the process lifetime. */
+  /** Where the policy, evidence and sessions are: resolved once, from the
+   *  environment, which is fixed for the process lifetime. */
   locations: Locations;
   /** `tools/call` is the only method that overlaps the reader (design sec-4); a
    *  cancellation names one of these by its request id. The id is the client's to
@@ -560,9 +561,55 @@ async function handleLine(line: string, context: Context): Promise<void> {
 
 /** What the server reads once at start-up: the profiles, then the help. The
  *  first that does not load puts the server in the start-up-refused state. */
-type Startup = { ok: true; profiles: Snapshot; help: HelpSnapshot } | { ok: false; path: string; detail: string };
+type Startup = { ok: true; profiles: Snapshot; help: HelpSnapshot } | StartupFailure;
 
-function loadStartup(locations: Locations): Startup {
+/** A start-up refusal: the path to fix and why, said in one line. */
+type StartupFailure = { ok: false; path: string; detail: string };
+
+/**
+ * The legacy launch-dir layers earlier versions read (DEC-011). One present —
+ * anything but an absent entry, by the rule the layers themselves use — fails
+ * start-up, so every call refuses `profile-invalid` and an operator learns what
+ * stopped working and where the documents belong. Two present entries are named
+ * together, in the one line C7 writes. Only a readable directory takes the
+ * "move these documents" advice; a file, or an entry that cannot be read as a
+ * directory, is named as something to remove. Pure apart from the checks.
+ */
+export function legacyLayerFailure(locations: Locations, launchDir: string): StartupFailure | null {
+  const [profiles, help] = legacyLayers(launchDir);
+  const layers = [
+    { layer: profiles, kind: 'profiles', destinations: locations.profileLayers },
+    { layer: help, kind: 'help', destinations: locations.helpLayers },
+  ];
+  const present = layers.flatMap(({ layer, kind, destinations }) => {
+    const entry = legacyEntry(layer);
+    return entry === 'absent' ? [] : [{ layer, advice: legacyAdvice(kind, destinations, entry) }];
+  });
+  if (present.length === 0) {return null;}
+  return {
+    ok: false,
+    path: present.map(({ layer }) => layer).join(', '),
+    detail: `${present.map(({ advice }) => advice).join('; ')} and restart`,
+  };
+}
+
+/** How a legacy entry is present: only a readable directory takes the move advice. */
+function legacyEntry(layer: string): 'absent' | 'directory' | 'other' {
+  try {lstatSync(layer);} catch (error) {return absent(layer, error) ? 'absent' : 'other';}
+  try {return statSync(layer).isDirectory() ? 'directory' : 'other';} catch {return 'other';}
+}
+
+/** The migration sentence for one present legacy layer, before "and restart". */
+function legacyAdvice(kind: string, destinations: readonly string[], entry: 'directory' | 'other'): string {
+  const introduction = `quotient no longer reads ${kind} from the launch directory`;
+  if (entry === 'other') {return `${introduction}; that entry is not a layer directory: remove or replace it`;}
+  const to = destinations.at(0) ?? `$XDG_CONFIG_HOME/quotient/${kind}`;
+  return `${introduction}; move these documents to ${to}/`;
+}
+
+function loadStartup(locations: Locations, launchDir: string): Startup {
+  const legacy = legacyLayerFailure(locations, launchDir);
+  if (legacy !== null) {return legacy;}
   const profiles = loadProfiles(locations.profileLayers);
   if (!profiles.ok) {return profiles;}
   const help = loadHelp(locations.helpLayers);
@@ -651,8 +698,8 @@ export async function serve(
   options: ServeOptions = {},
 ): Promise<void> {
   const launchDir = options.launchDir ?? process.cwd();
-  const locations = resolveLocations(env, launchDir);
-  const startup = loadStartup(locations);
+  const locations = resolveLocations(env);
+  const startup = loadStartup(locations, launchDir);
   // One line, naming the path: the server refuses from here on, and an operator
   // needs to know which file to fix.
   if (!startup.ok) {diagnostics.write(`quotient: ${startupFailure(startup)}\n`);}

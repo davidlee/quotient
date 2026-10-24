@@ -2,17 +2,18 @@
 // authority"), the call's root allowlist (sec-2 step 4) and the call's `tools`
 // narrowing (DEC-103).
 //
-// Profiles live in two layers, the launch dir's `.quotient/profiles` over
-// `<xdgConfig>/quotient/profiles` (`config.ts`); per name, the higher layer
-// wins. There is no built-in layer: `examples/profiles/` are copies to start
-// from. Both layers are read ONCE, at start-up, into a snapshot the server holds
+// Profiles come from one layer, `<xdgConfig>/quotient/profiles` (`config.ts`);
+// the loader still takes a list and the higher layer wins per name, so a
+// snapshot's source is the winning document. There is no built-in layer:
+// `examples/profiles/` are copies to start from. The layer is read ONCE, at
+// start-up, into a snapshot the server holds
 // for its whole lifetime, so an edit on disk is inert until a restart. Nothing
 // here reads a layer per call, and nothing joins the caller's `profile` string
 // into a path — the name is a snapshot key, never a path component.
 //
 // A document cannot raise its own capability: the policy's `profiles` map pins
 // each name to `read` or `write`, and step 3 refuses a document that declares
-// otherwise. That, and step 8 keeping both layers unwritable by any delegate,
+// otherwise. That, and step 8 keeping the layer unwritable by any delegate,
 // is what closes RV-046 F-5's elevation path under local-first lookup.
 //
 // Document format: `help/profiles.md` (`quotient help profiles`) specifies the

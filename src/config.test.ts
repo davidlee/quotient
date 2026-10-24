@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveLocations, type Resolved } from './config.ts';
+import { legacyLayers, resolveLocations, type Resolved } from './config.ts';
 
 const LAUNCH = '/work/project';
 const HOME = '/home/someone';
@@ -30,7 +30,6 @@ test('QUOTIENT_* variables win over the XDG defaults', () => {
       QUOTIENT_RUN_DIR: '/var/quotient/runs',
       QUOTIENT_SESSION_HOME: '/var/quotient/sessions',
     },
-    LAUNCH,
   );
   assert.equal(path(locations.policyPath), '/etc/quotient/policy.json');
   assert.equal(path(locations.runDir), '/var/quotient/runs');
@@ -38,12 +37,12 @@ test('QUOTIENT_* variables win over the XDG defaults', () => {
 });
 
 test('an unset QUOTIENT_* variable falls through to XDG, then to HOME', () => {
-  const xdg = resolveLocations({ HOME, XDG_CONFIG_HOME: '/xdg/config', XDG_STATE_HOME: '/xdg/state' }, LAUNCH);
+  const xdg = resolveLocations({ HOME, XDG_CONFIG_HOME: '/xdg/config', XDG_STATE_HOME: '/xdg/state' });
   assert.equal(path(xdg.policyPath), '/xdg/config/quotient/policy.json');
   assert.equal(path(xdg.runDir), '/xdg/state/quotient/runs');
   assert.equal(path(xdg.sessionHome), '/xdg/state/quotient/sessions');
 
-  const home = resolveLocations({ HOME }, LAUNCH);
+  const home = resolveLocations({ HOME });
   assert.equal(path(home.policyPath), `${HOME}/.config/quotient/policy.json`);
   assert.equal(path(home.runDir), `${HOME}/.local/state/quotient/runs`);
   assert.equal(path(home.sessionHome), `${HOME}/.local/state/quotient/sessions`);
@@ -52,7 +51,7 @@ test('an unset QUOTIENT_* variable falls through to XDG, then to HOME', () => {
 test('a set but empty or relative QUOTIENT_* variable is unusable, never a fall-through', () => {
   for (const name of ['QUOTIENT_POLICY', 'QUOTIENT_RUN_DIR', 'QUOTIENT_SESSION_HOME'] as const) {
     for (const [value, why] of [['', 'empty'], ['relative/path', 'not an absolute path']]) {
-      const locations = resolveLocations({ HOME, [name]: value }, LAUNCH);
+      const locations = resolveLocations({ HOME, [name]: value });
       const item = { QUOTIENT_POLICY: locations.policyPath, QUOTIENT_RUN_DIR: locations.runDir, QUOTIENT_SESSION_HOME: locations.sessionHome }[name];
       assert.equal(refusal(item), `${name} is set but ${why}`);
     }
@@ -60,45 +59,57 @@ test('a set but empty or relative QUOTIENT_* variable is unusable, never a fall-
 });
 
 test('a relative XDG_* is ignored, per the XDG spec', () => {
-  const locations = resolveLocations({ HOME, XDG_CONFIG_HOME: 'config', XDG_STATE_HOME: 'state' }, LAUNCH);
+  const locations = resolveLocations({ HOME, XDG_CONFIG_HOME: 'config', XDG_STATE_HOME: 'state' });
   assert.equal(path(locations.policyPath), `${HOME}/.config/quotient/policy.json`);
   assert.equal(path(locations.runDir), `${HOME}/.local/state/quotient/runs`);
-  assert.deepEqual(locations.profileLayers, [`${LAUNCH}/.quotient/profiles`, `${HOME}/.config/quotient/profiles`]);
+  assert.deepEqual(locations.profileLayers, [`${HOME}/.config/quotient/profiles`]);
 });
 
 test('no usable HOME or XDG gives policy-unavailable for every defaulted location', () => {
   for (const env of [{}, { HOME: '' }, { HOME: 'relative', XDG_CONFIG_HOME: 'x', XDG_STATE_HOME: 'y' }]) {
-    const locations = resolveLocations(env, LAUNCH);
+    const locations = resolveLocations(env);
     // Each is the caller's policy-unavailable; the detail names what was missing.
     assert.match(refusal(locations.policyPath), /QUOTIENT_POLICY is unset and neither XDG_CONFIG_HOME nor HOME/);
     assert.match(refusal(locations.runDir), /QUOTIENT_RUN_DIR is unset and neither XDG_STATE_HOME nor HOME/);
     assert.match(refusal(locations.sessionHome), /QUOTIENT_SESSION_HOME is unset and neither XDG_STATE_HOME nor HOME/);
-    // The launch layers do not depend on HOME; the XDG layers are absent.
-    assert.deepEqual(locations.profileLayers, [`${LAUNCH}/.quotient/profiles`]);
-    assert.deepEqual(locations.helpLayers, [`${LAUNCH}/.quotient/help`]);
+    // The layers follow the config base, so neither exists here.
+    assert.deepEqual(locations.profileLayers, []);
+    assert.deepEqual(locations.helpLayers, []);
   }
 });
 
-test('profiles and help layer launch dir over XDG; the policy is never read from the launch dir', () => {
-  // A real tree with .quotient/policy.json present: resolution must not see it.
+test('profiles and help come from XDG only; the launch dir supplies no layer', () => {
+  // A real tree holding both a policy and both layers: resolution must see none.
   const launch = mkdtempSync(join(tmpdir(), 'quotient-config-'));
-  mkdirSync(join(launch, '.quotient'));
+  for (const kind of ['profiles', 'help']) {mkdirSync(join(launch, '.quotient', kind), { recursive: true });}
   writeFileSync(join(launch, '.quotient', 'policy.json'), '{}');
+  writeFileSync(join(launch, '.quotient', 'profiles', 'write.md'), 'not a profile\n');
 
-  const locations = resolveLocations({ XDG_CONFIG_HOME: '/xdg/config', XDG_STATE_HOME: '/xdg/state' }, launch);
+  const locations = resolveLocations({ XDG_CONFIG_HOME: '/xdg/config', XDG_STATE_HOME: '/xdg/state' });
   assert.equal(path(locations.policyPath), '/xdg/config/quotient/policy.json');
-  assert.deepEqual(locations.profileLayers, [join(launch, '.quotient/profiles'), '/xdg/config/quotient/profiles']);
-  assert.deepEqual(locations.helpLayers, [join(launch, '.quotient/help'), '/xdg/config/quotient/help']);
+  assert.deepEqual(locations.profileLayers, ['/xdg/config/quotient/profiles']);
+  assert.deepEqual(locations.helpLayers, ['/xdg/config/quotient/help']);
 
-  const noXdg = resolveLocations({}, launch);
+  const noXdg = resolveLocations({});
   assert.ok(!noXdg.policyPath.ok, 'with no XDG base the policy is unavailable, not found in the launch dir');
+  assert.deepEqual(noXdg.profileLayers, [], 'and no layer is found there either');
+  assert.deepEqual(noXdg.helpLayers, []);
+});
+
+test('legacyLayers names the two launch-dir layers earlier versions read', () => {
+  // Pure: the paths are derived, not looked up; whether they exist is the
+  // start-up check's question, not this function's.
+  assert.deepEqual(legacyLayers(LAUNCH), [`${LAUNCH}/.quotient/profiles`, `${LAUNCH}/.quotient/help`]);
+  assert.deepEqual(legacyLayers('/work/project/'), ['/work/project/.quotient/profiles', '/work/project/.quotient/help']);
+  const relative = legacyLayers('project');
+  assert.deepEqual(relative, ['project/.quotient/profiles', 'project/.quotient/help']);
 });
 
 test('QUOTIENT_LAUNCHER names the launcher only when absolute; it never refuses', () => {
-  assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/bin/quotient' }, LAUNCH).launcher, '/opt/q/bin/quotient');
-  assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/./bin/quotient' }, LAUNCH).launcher, '/opt/q/bin/quotient', 'normalised');
+  assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/bin/quotient' }).launcher, '/opt/q/bin/quotient');
+  assert.equal(resolveLocations({ HOME, QUOTIENT_LAUNCHER: '/opt/q/./bin/quotient' }).launcher, '/opt/q/bin/quotient', 'normalised');
   for (const value of [undefined, '', 'bin/quotient']) {
-    const locations = resolveLocations({ HOME, QUOTIENT_LAUNCHER: value }, LAUNCH);
+    const locations = resolveLocations({ HOME, QUOTIENT_LAUNCHER: value });
     assert.equal(locations.launcher, null);
     assert.ok(locations.policyPath.ok, 'an unusable launcher does not touch the policy');
   }
