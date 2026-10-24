@@ -1,0 +1,141 @@
+# Implementation plan for SL-003 — the authored, durable phase plan.
+#
+# Single source of each phase's objective, criteria, verification and links.
+# Runtime status lives under .doctrine/state/ — never record progress here.
+# Ids (PHASE-NN, EN-/EX-/VT-/VA-/VH-n) are immutable: edits append, never renumber.
+schema  = "doctrine.plan.overview"
+version = 1
+slice   = "SL-003"
+
+[specs]
+primary       = []
+collaborators = []
+
+[requirements]
+targets      = []
+dependencies = []
+
+[[phase]]
+id        = "PHASE-01"
+name      = "Shipped-text scan and the Nix server build"
+objective = "The doctrine-id scan covers flake.nix and nix/, the flake comment no longer cites DEC-116, and `just gate` builds the Nix server package (IMP-007). No builder yet."
+entrance_criteria = [
+  { id = "EN-1", text = "Plan approved by the operator. Read design sec-4 (opening paragraph, 'Other text' flake.nix row) and sec-5 'Verification alignment'; IMP-007; DEC-022." },
+  { id = "EN-2", text = "Baseline: `just gate` green on the commit this phase starts from." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: src/drift.test.ts's SHIPPED_TEXT gains flake.nix and nix/, and the no-doctrine-ids test fails on flake.nix's DEC-116 citation. An absent nix/ is skipped, not an error." },
+  { id = "EX-2", text = "flake.nix comment above `in` reworded without a doctrine id: `packages` is the server only and quotient ships no forms. The `lib` clause lands with `lib` in PHASE-02. packages, apps, devShells and flake.lock unchanged." },
+  { id = "EX-3", text = "justfile: `nix-build` recipe runs `nix build .#default --no-link -L`; `gate` includes it." },
+  { id = "EX-4", text = "`just gate` green. `shellcheck scripts/*` and `npx eslint src/drift.test.ts --max-warnings 0` clean." },
+]
+verification = [
+  { id = "VT-1", expects = "The no-doctrine-ids scan covers flake.nix and nix/ and passes.", test_file = "src/drift.test.ts", keywords = ["'flake.nix'", "'nix'"], waived = false },
+  { id = "VT-2", expects = "The gate builds the Nix server package.", test_file = "justfile", keywords = ["nix-build", "nix build .#default --no-link -L"], waived = false },
+  { id = "VA-1", expects = "IMP-007's failure mode is caught: with npmDepsHash altered locally, `just nix-build` fails; restored, it passes. Record both outcomes in the phase sheet; nothing altered is committed." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-02"
+name      = "Core form family and behavioural probe"
+objective = "nix/form-family.nix builds a family from the required arguments (pkgs, jail-nix, pi, prefix): the read and write forms, the baseline, and the empty-environment bwrap, with the builder's deferred tail. flake.nix exposes lib.mkFormFamily. The test flake nix/checks pins nixpkgs and jail-nix and exposes the probe family. scripts/form-probe proves the core guarantees behaviourally, and `just gate` runs it."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-01 exits hold. Read design sec-2 (Interface, Anatomy of a form, Argument order, Environment and secrets, Invariants) and sec-5 (Module boundaries, The test flake, scripts/form-probe); DEC-015, DEC-016, DEC-017, DEC-020, DEC-022. Read satan's quotientFormFamily (~/dev/satan/flake.nix:325-393) and jail.nix lib/jail.nix, lib/combinators/base.nix, set-env.nix in the store copy the test flake pins." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: scripts/form-probe exists and fails (exit 1, not 77) against the probe family before the builder's tail is in place. Record the output in the phase sheet." },
+  { id = "EX-2", text = "mkFormFamily takes pkgs, jail-nix, pi and prefix (default \"quotient\"); the other sec-2 arguments land in PHASE-03, and none is accepted and ignored. It asserts pkgs.stdenv.hostPlatform.isLinux with a message naming bubblewrap; accepts `jail-nix.lib or jail-nix`; and instantiates jail.nix with `extend { inherit pkgs; bubblewrapPackage = emptyEnvBwrap; }`. emptyEnvBwrap is `exec env -i bwrap \"$@\"`." },
+  { id = "EX-3", text = "The form script is sec-2's text with only the prefix and launcher path varying, and execs the launcher directly. The launcher's tail is one jail.nix `defer`: quotient_root=$(pwd -P) assigned once; quotient_mask=() declared once and extended only behind `[ -e … ] &&` for the default state dir; then \"${quotient_mask[@]}\", the root bind (--ro-bind for read, --bind for write), the session bind, and --chdir \"$quotient_root\"." },
+  { id = "EX-4", text = "LANG (`${LANG:-C.UTF-8}`) and TERM (`dumb`) are set-env entries pushed after base. RV-010 F-5 (demonstrate): the built write launcher shows exactly one --setenv LANG and one --setenv TERM; the probe launches with LANG and TERM unset; with HOME unset the form exits non-zero and the probe pi never runs." },
+  { id = "EX-5", text = "baseline is the same instantiation with only the root bind, session bind and --chdir omitted; its launcher is family.baseline/bin/<prefix>-baseline, with no form wrapper. The family returns read, write, baseline, prefix and bwrap." },
+  { id = "EX-6", text = "Rendering check (slice notes, Further review): the default family's built write launcher's bwrap line is copied into the phase sheet, with the positions of \"${quotient_mask[@]}\", the root bind, the session bind, --chdir, --die-with-parent and \"${RUNTIME_ARGS[@]}\". Any departure from sec-2's argument order, or a launcher that does not `exec` bwrap, stops the phase for /consult before the order is relied on." },
+  { id = "EX-7", text = "nix/checks/flake.nix has inputs nixpkgs, jail-nix and quotient, and its own committed flake.lock. It exposes packages.${system}.probe-{read,write}: a family whose pi is the probe script, with its build-time paths under /tmp/quotient-form-probe/. Recipes pass `--override-input quotient path:$PWD`. All new files are git-added." },
+  { id = "EX-8", text = "scripts/form-probe [--keep] builds the probe family, creates P fresh, runs each form as the server does (cwd = root, argv = session dir + pi argv, stdin closed), and removes P unless --keep. Rows, both capabilities, per sec-5: G1; G2 (read refused, write succeeds); G3; G4 (/tmp writable, marker absent on host afterwards); G6 for sessions/other and runs/r under XDG_STATE_HOME=P/world/state; canary absent from /proc/1/environ and pi's environment. Host side: G7, RV-010 F-6 (control) — SIGKILL to the form's parent shell leaves no jailed process within 2 s; G8 — missing, relative and non-directory session dirs exit 64 and leave no marker. Exit 0 all passed, 1 any failed, 77 prerequisite missing." },
+  { id = "EX-9", text = "justfile: `forms-probe` runs scripts/form-probe and treats 77 as failure; `gate` includes it." },
+  { id = "EX-10", text = "flake.nix: `lib.mkFormFamily = import ./nix/form-family.nix`; the comment gains the lib clause (sec-4 flake.nix row). `just gate` green; shellcheck clean on scripts/*." },
+]
+verification = [
+  { id = "VT-1", expects = "form-probe asserts the core rows and the host-side G7 and G8 cases, both capabilities.", test_file = "scripts/form-probe", keywords = ["G1", "G2", "G3", "G4", "G6", "G7", "G8", "/proc/1/environ", "exit 77"], waived = false },
+  { id = "VT-2", expects = "The builder fixes the tail, the empty-environment bwrap and the Linux assertion.", test_file = "nix/form-family.nix", keywords = ["quotient_root=$(pwd -P)", "quotient_mask=()", "emptyEnvBwrap", "isLinux", "bubblewrapPackage", "--die-with-parent"], waived = false },
+  { id = "VT-3", expects = "The gate runs the probe.", test_file = "justfile", keywords = ["forms-probe", "scripts/form-probe"], waived = false },
+  { id = "VT-4", expects = "The flake exposes the builder.", test_file = "flake.nix", keywords = ["mkFormFamily", "./nix/form-family.nix"], waived = false },
+  { id = "VA-1", expects = "EX-4's F-5 evidence and EX-6's rendered bwrap line are recorded in the phase sheet, and the rendered order matches sec-2." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-03"
+name      = "Caller arguments"
+objective = "mkFormFamily accepts every sec-2 argument (packages, options, env, secretEnv, exposure, protect, piFiles, persistHome, network) at its place in the argument order, and the family returns exposure, secretEnvNames and network. The probe family becomes the full family, and form-probe covers sec-5's whole table."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-02 exits hold, including the recorded rendering. Read design sec-2 (Argument order with the mask paragraph, Home and pi configuration, Environment and secrets, Network, Invariants) and sec-5 scripts/form-probe; DEC-017, DEC-018, DEC-019." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: each new form-probe row fails against PHASE-02's builder before its argument lands. Record the reds in the phase sheet." },
+  { id = "EX-2", text = "Order per sec-2: persistHome (mkdir -p, --bind onto ~) at step 2; packages (add-pkg-deps), options c, env (set-env) and exposure (--bind p p) at step 3; piFiles (--ro-bind store path ~/.pi/agent/<path>) at step 4; then the deferred tail. The tail stays the last deferred permission (lib/jail.nix:57-60), so a caller's deferred options precede it." },
+  { id = "EX-3", text = "protect paths join the mask as one line each behind `[ -e <p> ] &&`, emitted by Nix with no loop." },
+  { id = "EX-4", text = "secretEnv: per name, the caller's expression assigned to quotient_secret_<NAME>, an empty value exits 1 naming the variable, one `exec {quotient_secret_fd}<` carrying NUL-separated --setenv pairs, and `--args \"$quotient_secret_fd\"` in the tail after --chdir. With secretEnv = { } none of it is emitted. A name in both env and secretEnv is not rejected by the builder; PHASE-04's check refuses it." },
+  { id = "EX-5", text = "network = true adds jail.nix's `network` combinator; false leaves --unshare-net. family.exposure = exposure ++ [ persistHome ] when set; secretEnvNames and network are returned." },
+  { id = "EX-6", text = "The probe family uses every argument with sec-5's P layout: P/world bound read-only by options; P/root/out and P/exposure in exposure; P/home as persistHome; protect = P/world/protect and P/world/protect-missing; a piFiles file; env with a canary-free literal; secretEnv with a known value; network = false." },
+  { id = "EX-7", text = "form-probe rows added, both capabilities: G5 (P/exposure writable; the piFiles file and P/world/ro refused); RV-010 F-3/F-14 (probe) — P/root/out refused under read, writable under write; RV-010 F-2 (probe) — the launch succeeds although P/world/protect-missing is absent under the read-only caller bind; G6 for sessions/other, runs/r and P/world/protect under that bind; the secret absent from /proc/1/cmdline and present in pi's environment. Host side: G9 — an empty secretEnv value exits non-zero before the probe pi runs." },
+  { id = "EX-8", text = "The full family's built launcher meets sec-2's Invariants by inspection (one quotient_root assignment, one quotient_mask=(), every quotient_mask+= behind an existence test, one secret fd, no no-die-with-parent, one --chdir). Recorded in the phase sheet; PHASE-04 makes these assertions." },
+  { id = "EX-9", text = "`just gate` green; shellcheck clean." },
+]
+verification = [
+  { id = "VT-1", expects = "form-probe covers G5, G9, the exposure-inside-root case, the missing protect path and the secret's delivery.", test_file = "scripts/form-probe", keywords = ["G5", "G9", "root/out", "protect-missing", "/proc/1/cmdline"], waived = false },
+  { id = "VT-2", expects = "The builder handles every caller argument.", test_file = "nix/form-family.nix", keywords = ["secretEnv", "quotient_secret_fd", "persistHome", "piFiles", "exposure", "protect", "network", "secretEnvNames"], waived = false },
+  { id = "VA-1", expects = "EX-8's inspection of the full family's launcher is recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-04"
+name      = "The check: checkFormFamily"
+objective = "nix/check.sh asserts (a)–(i) over a family's launcher text, nix/check-family.nix wraps it as a runCommand, and flake.nix exposes lib.checkFormFamily. The test flake's checks run it over default-family and full-family and over one negative control per sec-3 refusal. `just gate` runs forms-check."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-03 exits hold. Read design sec-3 in full and sec-5 'The test flake'; DEC-021. Read satan's quotientFormsCheck (~/dev/satan/flake.nix:691-) for bind_words and the normalisation." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Red first, per rule: each negative control's check derivation is added before the rule that catches it, and fails then; the positive checks are added before check.sh's assertions and fail on a stub that exits 1. Record the order in the phase sheet." },
+  { id = "EX-2", text = "check-family.nix passes FORM_READ, FORM_WRITE, BASELINE, PREFIX, BWRAP, EXPOSURE, SECRET_ENV_NAMES and NETWORK per sec-3's table. check.sh has no Nix knowledge: it resolves each form's exec line to its launcher (one level), strips double quotes, folds store hashes, and extracts the `exec <BWRAP>` line as an ordered token list; bind_words is lifted from satan." },
+  { id = "EX-3", text = "Assertions (a)–(i) as sec-3's table and order rules state, each failure labelled with its rule. On failure: every failed assertion, both residues and a summary line, then exit 1. On success: the report, including the unseeable residues (sec-3), is written to $out." },
+  { id = "EX-4", text = "Positive controls: `default-family` (required arguments, stub pi) passes with no secret fd, RV-010 F-1 (control); `full-family` (every argument, a non-default packages toolchain) passes with its mask declaration and protect lines, RV-010 F-13 (control)." },
+  { id = "EX-5", text = "One `neg-<control>` check per row of sec-3's negative-controls table (14 rows), each passing only if check.sh exits 1 and its output names that row's label. They include a doctored launcher with a caller bind moved after the session bind, caught by (c), RV-010 F-4 (control). `doctor { family, form, launcher }` copies the pair, applies the edits and repoints the copied form's exec at the copied launcher." },
+  { id = "EX-6", text = "flake.nix: `lib.checkFormFamily = import ./nix/check-family.nix`. justfile: `forms-check` runs `nix flake check -L ./nix/checks --override-input quotient path:$PWD`; `gate` includes it; `lint` shellchecks nix/check.sh." },
+  { id = "EX-7", text = "`just gate` green; shellcheck clean on scripts/* and nix/check.sh." },
+]
+verification = [
+  { id = "VT-1", expects = "check.sh implements every labelled assertion and the normalisation.", test_file = "nix/check.sh", keywords = ["(a)", "(b)", "(c)", "(d)", "(e)", "(f)", "(g)", "(h)", "(i)", "bind_words", "RUNTIME_ARGS"], waived = false },
+  { id = "VT-2", expects = "The test flake carries both positive controls, the doctor helper and the negative controls.", test_file = "nix/checks/flake.nix", keywords = ["default-family", "full-family", "doctor", "neg-"], waived = false },
+  { id = "VT-3", expects = "The gate runs forms-check; lint covers check.sh.", test_file = "justfile", keywords = ["forms-check", "nix flake check -L ./nix/checks", "nix/check.sh"], waived = false },
+  { id = "VT-4", expects = "The flake exposes the check.", test_file = "flake.nix", keywords = ["checkFormFamily", "./nix/check-family.nix"], waived = false },
+  { id = "VA-1", expects = "The count of neg- checks equals the rows of sec-3's negative-controls table, and each names the label its row expects." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-05"
+name      = "Operator documentation and the real-pi audit"
+objective = "docs/nix-forms.md, README, help/setup.md and the policy contract say what sec-4 says. A builder family with a real pi passes scripts/hostile-audit for both capabilities."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-04 exits hold. Read design sec-4 in full and sec-2's guarantees; DEC-014, DEC-018, DEC-019." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: src/help/help.test.ts asserts the setup section names docs/nix-forms.md, and fails." },
+  { id = "EX-2", text = "docs/nix-forms.md has sec-4's eight parts, in order, with the minimal consumer flake and the nix build -o install line." },
+  { id = "EX-3", text = "README forms bullet, help/setup.md step 3 and docs/contract/quotient-policy-2.md's lookup-base sentence changed as sec-4's table says; the policy sentence is sec-4's replacement verbatim. form-1.md unchanged." },
+  { id = "EX-4", text = "No shipped text cites a doctrine id (drift test green over the new doc). npm pack contents change only by docs/nix-forms.md (pack-check)." },
+  { id = "EX-5", text = "`just gate` green; `npx eslint src/help/help.test.ts --max-warnings 0` clean." },
+]
+verification = [
+  { id = "VT-1", expects = "The setup help names the builder's doc.", test_file = "src/help/help.test.ts", keywords = ["nix-forms.md"], waived = false },
+  { id = "VA-1", expects = "Checklist, one line per sec-4 row and per docs/nix-forms.md part, recorded in the phase sheet: persisted home as a channel and its empty .local/state/quotient; the /tmp refusal and the TMPDIR-in-exposure pattern; --args and add-runtime binds unchecked; protect for a moved session home or run directory; every rebuild is a new identity to approve." },
+  { id = "VH-1", expects = "The operator runs scripts/hostile-audit --form <family>/bin/<prefix>-<cap> --capability <cap> --model <model> for read and write against a builder family with a real pi and a reachable model; both pass. Outcome recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
