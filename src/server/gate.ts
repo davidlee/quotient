@@ -25,10 +25,9 @@
 // it crossed. The gate keeps no usage of its own, so the numbers it judges and
 // the numbers the result reports are the same accumulator's, and it never accounts
 // anything itself.
-import { readPolicy } from './policy.ts';
-import type { Maxima } from './policy.ts';
 import { createTally } from '../reduce/reduce.ts';
 import type { Tally } from '../reduce/reduce.ts';
+import { readPolicy, type Maxima } from './policy.ts';
 
 /** The causes the gate aborts with: a subset of the spawn's `AbortCause`, so the
  *  ladder accepts one through the same signal as every other trigger. */
@@ -91,21 +90,21 @@ export function createGate(config: GateConfig): Gate {
 
   const stop = (): void => {
     stopped = true;
-    if (timer !== null) clearInterval(timer);
+    if (timer !== null) {clearInterval(timer);}
     timer = null;
   };
 
   /** A crossing is a value strictly above its bound: a value equal to the
    *  ceiling is within it. An absent bound leaves the unit unjudged. */
   const ceiling = (unit: GateUnit, observed: number | null, limit: number | undefined): GateTrigger | null => {
-    if (limit === undefined || observed === null || observed <= limit) return null;
+    if (limit === undefined || observed === null || observed <= limit) {return null;}
     return { cause: 'ceiling', unit, observed, limit };
   };
 
   /** The hard backstop. Seconds since the run started, against `wall_clock_s`. */
   const wallClock = (): GateTrigger | null => {
     const limit = config.ceilings.wall_clock_s;
-    if (limit === undefined) return null;
+    if (limit === undefined) {return null;}
     const observed = (Date.now() - startedAt) / 1000;
     return observed > limit ? { cause: 'timeout', unit: 'wall_clock_s', observed, limit } : null;
   };
@@ -124,7 +123,7 @@ export function createGate(config: GateConfig): Gate {
   /** Usage sanity: the accumulator marks itself `unknown` when a usage-bearing
    *  record carried absent, non-finite or negative usage — never silently zero. */
   const usageSanity = (tally: Tally): GateTrigger | null => {
-    if (tally.accounting !== 'unknown') return null;
+    if (tally.accounting !== 'unknown') {return null;}
     return { cause: 'accounting', unit: 'accounting', observed: null, limit: null };
   };
 
@@ -136,7 +135,7 @@ export function createGate(config: GateConfig): Gate {
 
   /** Design sec-4's order: ceilings, wall clock, switch, usage sanity. */
   const judge = (tally: Tally): void => {
-    if (stopped) return;
+    if (stopped) {return;}
     const ceilings = config.ceilings;
     const trigger =
       ceiling('requests', tally.requests, ceilings.requests) ??
@@ -145,11 +144,11 @@ export function createGate(config: GateConfig): Gate {
       wallClock() ??
       policySwitch() ??
       usageSanity(tally);
-    if (trigger !== null) fire(trigger);
+    if (trigger !== null) {fire(trigger);}
   };
 
   const tick = (tally: Tally): void => {
-    if (stopped) return;
+    if (stopped) {return;}
     last = tally;
     judge(tally);
   };

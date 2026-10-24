@@ -12,13 +12,12 @@ import { PassThrough, Writable } from 'node:stream';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { checkChildView, protectedStores } from './childview.ts';
+import { resolveLocations } from '../config.ts';
+import { checkChildView, protectedStores, type ChildViewInput } from './childview.ts';
 import { canonicalPath, within } from './paths.ts';
-import type { ChildViewInput } from './childview.ts';
 import { RUN_EVIDENCE_FILES, attemptsPath, evidenceStores, runLayout } from './evidence.ts';
 import { serve } from './server.ts';
 import { RIG_PROFILES, validPolicy, writeProfiles, xdgProfileLayer } from './test-rig.ts';
-import { resolveLocations } from '../config.ts';
 
 type Tree = {
   /** The operator's state directory: the run dir, the session home and the policy. */
@@ -48,7 +47,7 @@ function tree(): Tree {
   const sessionHome = join(state, 'sessions');
   const policyPath = join(state, 'policy.json');
   const work = join(state, 'work');
-  for (const dir of [runDir, sessionHome, work]) mkdirSync(dir, { recursive: true });
+  for (const dir of [runDir, sessionHome, work]) {mkdirSync(dir, { recursive: true });}
   writeFileSync(policyPath, JSON.stringify({ mode: 'per-call' }));
   const launch = join(state, 'launch');
   const xdgConfig = join(state, 'config');
@@ -86,7 +85,7 @@ function view(t: Tree, overrides: Partial<ChildViewInput> = {}): ChildViewInput 
 /** The refusal's detail, for a check that must fail. */
 function refusal(check: ReturnType<typeof checkChildView>): string {
   assert.equal(check.ok, false, 'the view must be refused');
-  if (check.ok) throw new Error('unreachable');
+  if (check.ok) {throw new Error('unreachable');}
   assert.equal(check.reason, 'view-overlaps-protected');
   return check.detail;
 }
@@ -411,7 +410,7 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
     // reader) and stdin EOF is DEC-103's abort trigger, so the channel stays open
     // until this call has answered.
     const input = new PassThrough();
-    const serving = serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => done() }), {
+    const serving = serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => { done(); } }), {
       launchDir: t.launch,
     });
     input.write(

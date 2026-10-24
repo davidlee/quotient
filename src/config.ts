@@ -39,9 +39,9 @@ const absolute = (value: string | undefined): string | null =>
 /** An XDG base: `$<name>` when absolute (a relative one is ignored), else `$HOME/<fallback>`. */
 function xdgBase(env: Env, name: string, fallback: string): Resolved {
   const set = absolute(env[name]);
-  if (set !== null) return { ok: true, path: set };
+  if (set !== null) {return { ok: true, path: set };}
   const home = absolute(env.HOME);
-  if (home !== null) return { ok: true, path: join(home, fallback) };
+  if (home !== null) {return { ok: true, path: join(home, fallback) };}
   return { ok: false, detail: `neither ${name} nor HOME is an absolute path` };
 }
 
@@ -49,10 +49,10 @@ function xdgBase(env: Env, name: string, fallback: string): Resolved {
 function located(env: Env, name: string, base: Resolved, under: string): Resolved {
   const value = env[name];
   if (value !== undefined) {
-    if (value.length === 0) return { ok: false, detail: `${name} is set but empty` };
+    if (value.length === 0) {return { ok: false, detail: `${name} is set but empty` };}
     return isAbsolute(value) ? { ok: true, path: value } : { ok: false, detail: `${name} is set but not an absolute path` };
   }
-  if (!base.ok) return { ok: false, detail: `${name} is unset and ${base.detail}` };
+  if (!base.ok) {return { ok: false, detail: `${name} is unset and ${base.detail}` };}
   return { ok: true, path: join(base.path, under) };
 }
 

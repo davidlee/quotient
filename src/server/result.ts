@@ -163,8 +163,8 @@ export function createLatch(): Latch {
   let committed: LatchCause[] | null = null;
   return {
     record(cause: LatchCause): void {
-      if (committed !== null) return;
-      if (!causes.includes(cause)) causes.push(cause);
+      if (committed !== null) {return;}
+      if (!causes.includes(cause)) {causes.push(cause);}
     },
     commit(): LatchCause[] {
       committed ??= [...causes];
@@ -228,12 +228,12 @@ function succeeded(reduced: Reduced, outcome: RunFacts): boolean {
  * what a `pending` message, a reason pi adds later, and an unsettled stream leave.
  */
 function derivedCause(reduced: Reduced, outcome: RunFacts): Termination {
-  if (outcome.spawnFailed) return 'spawn';
-  if (succeeded(reduced, outcome)) return reduced.terminalReason as Termination;
-  if (outcome.exitCode !== 0) return 'exit';
-  if (reduced.accounting !== 'known') return 'accounting';
+  if (outcome.spawnFailed) {return 'spawn';}
+  if (succeeded(reduced, outcome)) {return reduced.terminalReason as Termination;}
+  if (outcome.exitCode !== 0) {return 'exit';}
+  if (reduced.accounting !== 'known') {return 'accounting';}
   const reason = reduced.terminalReason;
-  if (reason === 'error' || reason === 'aborted' || reason === 'toolUse' || reason === 'deferred') return reason;
+  if (reason === 'error' || reason === 'aborted' || reason === 'toolUse' || reason === 'deferred') {return reason;}
   return 'eof';
 }
 
@@ -358,49 +358,49 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * catches here rather than a reader discovering on the wire.
  */
 export function validateAgentResult(doc: unknown): Validation {
-  if (!isRecord(doc)) return invalid('the result must be an object');
-  if (doc.schema !== RESULT_SCHEMA) return invalid(`schema must be ${RESULT_SCHEMA}`);
-  if (!RESULT_STATES.includes(doc.state as ResultState)) return invalid(`state is not a member of the state enum: ${String(doc.state)}`);
+  if (!isRecord(doc)) {return invalid('the result must be an object');}
+  if (doc.schema !== RESULT_SCHEMA) {return invalid(`schema must be ${RESULT_SCHEMA}`);}
+  if (!RESULT_STATES.includes(doc.state as ResultState)) {return invalid(`state is not a member of the state enum: ${String(doc.state)}`);}
   if (!TERMINATIONS.includes(doc.termination as Termination)) {
     return invalid(`termination is not a cause token: ${String(doc.termination)}`);
   }
   const causes = doc.causes;
-  if (!Array.isArray(causes) || causes.length === 0) return invalid('causes must be a non-empty list');
+  if (!Array.isArray(causes) || causes.length === 0) {return invalid('causes must be a non-empty list');}
   for (const cause of causes) {
-    if (!TERMINATIONS.includes(cause as Termination)) return invalid(`a cause is not a cause token: ${String(cause)}`);
+    if (!TERMINATIONS.includes(cause as Termination)) {return invalid(`a cause is not a cause token: ${String(cause)}`);}
   }
   const state = doc.state as ResultState;
   const termination = doc.termination as Termination;
-  if (causes[0] !== termination) return invalid('causes[0] must be the reported termination');
-  if (CAUSE_STATE[termination] !== state) return invalid(`state ${state} is not the row of cause ${termination}`);
-  if (typeof doc.final !== 'boolean') return invalid('final must be a boolean');
-  if (typeof doc.truncated !== 'boolean') return invalid('truncated must be a boolean');
-  if (typeof doc.transcript !== 'string') return invalid('transcript must be a string');
-  if (doc.result !== null && typeof doc.result !== 'string') return invalid('result must be a string or null');
+  if (causes[0] !== termination) {return invalid('causes[0] must be the reported termination');}
+  if (CAUSE_STATE[termination] !== state) {return invalid(`state ${state} is not the row of cause ${termination}`);}
+  if (typeof doc.final !== 'boolean') {return invalid('final must be a boolean');}
+  if (typeof doc.truncated !== 'boolean') {return invalid('truncated must be a boolean');}
+  if (typeof doc.transcript !== 'string') {return invalid('transcript must be a string');}
+  if (doc.result !== null && typeof doc.result !== 'string') {return invalid('result must be a string or null');}
 
   if (state === 'refused') {
-    if (doc.session !== null) return invalid('a refusal minted no session');
-    if (doc.status !== null) return invalid('a refusal has no status: nothing ran');
-    if (doc.artifacts !== null) return invalid('a refusal has no artifacts: nothing ran');
-    if (doc.result !== null) return invalid('a refusal carries no result');
+    if (doc.session !== null) {return invalid('a refusal minted no session');}
+    if (doc.status !== null) {return invalid('a refusal has no status: nothing ran');}
+    if (doc.artifacts !== null) {return invalid('a refusal has no artifacts: nothing ran');}
+    if (doc.result !== null) {return invalid('a refusal carries no result');}
     const refusal = doc.refusal;
-    if (!isRecord(refusal)) return invalid('a refusal must carry refusal { reason, detail }');
-    if (typeof refusal.reason !== 'string' || refusal.reason.length === 0) return invalid('refusal.reason must name the refusal');
-    if (typeof refusal.detail !== 'string') return invalid('refusal.detail must be a string');
+    if (!isRecord(refusal)) {return invalid('a refusal must carry refusal { reason, detail }');}
+    if (typeof refusal.reason !== 'string' || refusal.reason.length === 0) {return invalid('refusal.reason must name the refusal');}
+    if (typeof refusal.detail !== 'string') {return invalid('refusal.detail must be a string');}
     return { ok: true };
   }
 
-  if (doc.refusal !== null) return invalid('only a refusal carries refusal');
-  if (typeof doc.session !== 'string' || doc.session.length === 0) return invalid('a spawned run carries its session');
-  if (!isRecord(doc.status)) return invalid('a spawned run carries its status');
-  if (!isRecord(doc.artifacts)) return invalid('a spawned run carries its artifacts');
+  if (doc.refusal !== null) {return invalid('only a refusal carries refusal');}
+  if (typeof doc.session !== 'string' || doc.session.length === 0) {return invalid('a spawned run carries its session');}
+  if (!isRecord(doc.status)) {return invalid('a spawned run carries its status');}
+  if (!isRecord(doc.artifacts)) {return invalid('a spawned run carries its artifacts');}
   for (const field of ['dir', 'events', 'transcript', 'status', 'audit'] as const) {
-    if (typeof doc.artifacts[field] !== 'string') return invalid(`artifacts.${field} must be a path`);
+    if (typeof doc.artifacts[field] !== 'string') {return invalid(`artifacts.${field} must be a path`);}
   }
   // DEC-093 withdraws exactly `result` and `final` on a non-completed run.
-  if (state === 'completed' && doc.final !== true) return invalid('a completed run is final');
-  if (state !== 'completed' && doc.final !== false) return invalid('only a completed run is final');
-  if (state !== 'completed' && doc.result !== null) return invalid('only a completed run carries a result');
+  if (state === 'completed' && !doc.final) {return invalid('a completed run is final');}
+  if (state !== 'completed' && doc.final) {return invalid('only a completed run is final');}
+  if (state !== 'completed' && doc.result !== null) {return invalid('only a completed run carries a result');}
   return { ok: true };
 }
 

@@ -23,11 +23,9 @@ import {
   validPolicy,
   workspace,
   writeProfiles,
-  xdgHelpLayer,
+  xdgHelpLayer, type Env 
 } from '../server/test-rig.ts';
-import type { Env } from '../server/test-rig.ts';
-import { HELP_SECTIONS, clientsSnippets, loadHelp, policyView, profileTable, sectionName, sectionText } from './help.ts';
-import type { HelpSnapshot, RenderContext } from './help.ts';
+import { HELP_SECTIONS, clientsSnippets, loadHelp, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type RenderContext } from './help.ts';
 
 /** Two empty override layers, launch dir first, as `config.ts` orders them. */
 function layers(): { launch: string; xdg: string; all: string[] } {
@@ -46,7 +44,7 @@ function write(layer: string, section: string, text: string): string {
 
 function loaded(all: readonly string[]): HelpSnapshot {
   const help = loadHelp(all);
-  if (!help.ok) assert.fail(`expected the help to load, got ${help.path}: ${help.detail}`);
+  if (!help.ok) {assert.fail(`expected the help to load, got ${help.path}: ${help.detail}`);}
   return help.snapshot;
 }
 
@@ -65,7 +63,7 @@ test('help: every section resolves; refusals is an alias of result; an unknown n
   assert.equal(sectionName('policy'), 'policy');
   assert.equal(sectionName('nope'), null);
   const snapshot = loaded(layers().all);
-  for (const section of HELP_SECTIONS) assert.ok(sectionText(snapshot, section, CONTEXT).trim().length > 0, section);
+  for (const section of HELP_SECTIONS) {assert.ok(sectionText(snapshot, section, CONTEXT).trim().length > 0, section);}
 });
 
 test('help: with no override each section is its built-in source', () => {
@@ -112,7 +110,7 @@ test('help: an unreadable layer or section file, shadowed or not, refuses start-
   mkdirSync(join(launch, '..'), { recursive: true });
   writeFileSync(launch, 'not a directory');
   const notDir = loadHelp(all);
-  if (notDir.ok) assert.fail('a layer that is not a readable directory must refuse');
+  if (notDir.ok) {assert.fail('a layer that is not a readable directory must refuse');}
   assert.equal(notDir.path, launch);
 
   // A section file in the lower layer that does not resolve, shadowed by a
@@ -123,7 +121,7 @@ test('help: an unreadable layer or section file, shadowed or not, refuses start-
   const dangling = join(fresh.xdg, 'agent.md');
   symlinkSync(join(tmpdir(), 'quotient-no-such-target'), dangling);
   const shadowed = loadHelp(fresh.all);
-  if (shadowed.ok) assert.fail('an unreadable shadowed section file must refuse');
+  if (shadowed.ok) {assert.fail('an unreadable shadowed section file must refuse');}
   assert.equal(shadowed.path, dangling);
   assert.match(shadowed.detail, /could not be read/);
 
@@ -132,9 +130,9 @@ test('help: an unreadable layer or section file, shadowed or not, refuses start-
   mkdirSync(join(third.xdg, '..'), { recursive: true });
   symlinkSync(join(tmpdir(), 'quotient-no-such-target'), third.xdg);
   const unresolved = loadHelp(third.all);
-  if (unresolved.ok) assert.fail('a layer entry that does not resolve is unreadable, not absent');
+  if (unresolved.ok) {assert.fail('a layer entry that does not resolve is unreadable, not absent');}
   assert.equal(unresolved.path, third.xdg);
-  void xdg;
+  xdg;
 });
 
 test('help: help_digest is stable, and moves with a section, its source or its bytes', () => {
@@ -152,8 +150,8 @@ test('help: help_digest is stable, and moves with a section, its source or its b
 test('help: the profiles section states the grammar the loader parses', () => {
   const profiles = builtin('help/profiles.md');
   assert.ok(profiles.includes(`\`${PROFILE_NAME.source}\``), 'the name pattern');
-  for (const level of THINKING_LEVELS) assert.ok(profiles.includes(`\`${level}\``), `thinking level ${level}`);
-  for (const field of ['filesystem', 'model', 'tools', 'thinking']) assert.ok(profiles.includes(`\`${field}\``), field);
+  for (const level of THINKING_LEVELS) {assert.ok(profiles.includes(`\`${level}\``), `thinking level ${level}`);}
+  for (const field of ['filesystem', 'model', 'tools', 'thinking']) {assert.ok(profiles.includes(`\`${field}\``), field);}
 });
 
 test('help: the agent section carries the delegation guidance', () => {
@@ -171,7 +169,7 @@ test('help: the profile table renders each profile with its pinned capability, o
     write: profileDocument({ filesystem: 'write' }),
   });
   const snapshot = loadProfiles([layer]);
-  if (!snapshot.ok) assert.fail(snapshot.detail);
+  if (!snapshot.ok) {assert.fail(snapshot.detail);}
   const profiles = [...snapshot.snapshot.profiles.values()];
 
   const pinned = profileTable(profiles, { ok: true, profiles: { read: 'read' }, wallClockS: 300 });
@@ -187,7 +185,7 @@ test('help: the profile table renders each profile with its pinned capability, o
 
 test('clients: both snippets carry the absolute bin path; tool_timeout_sec is wall_clock_s + 60', () => {
   const text = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, wallClockS: 300 } });
-  const json = text.match(/```json\n([\s\S]*?)```/);
+  const json = /```json\n([\s\S]*?)```/.exec(text);
   assert.ok(json, 'a json block');
   assert.deepEqual(JSON.parse(json[1]), { mcpServers: { quotient: { command: '/abs/bin/quotient' } } });
   assert.ok(text.includes('[mcp_servers.quotient]'), 'the Codex table');
@@ -205,7 +203,7 @@ test('policyView: a readable policy gives its pins and wall clock; otherwise why
   const { dir, policyPath } = workspace();
   assert.deepEqual(policyView({ ok: true, path: policyPath }), { ok: true, profiles: { read: 'read', write: 'write' }, wallClockS: 600 });
   const missing = policyView({ ok: true, path: join(dir, 'absent.json') });
-  if (missing.ok) assert.fail('an absent policy has no view');
+  if (missing.ok) {assert.fail('an absent policy has no view');}
   assert.match(missing.detail, /ENOENT/);
   assert.equal(policyView({ ok: false, detail: 'QUOTIENT_POLICY is set but empty' }).ok, false);
 });
@@ -217,7 +215,7 @@ test('policyView: a readable policy gives its pins and wall clock; otherwise why
 function expected(env: Env, launchDir: string): { agent: string; tool: string; digest: string } {
   const locations = resolveLocations(env, launchDir);
   const profiles = loadProfiles(locations.profileLayers);
-  if (!profiles.ok) assert.fail(profiles.detail);
+  if (!profiles.ok) {assert.fail(profiles.detail);}
   const snapshot = loaded(locations.helpLayers);
   const context: RenderContext = {
     profiles: [...profiles.snapshot.profiles.values()],

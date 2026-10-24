@@ -20,8 +20,7 @@
 // regular expression parse it, so the loader needs no YAML or markdown
 // dependency; everything after the header is prose and is not parsed.
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import type { Dirent } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { absent, canonicalPath, errorCode, within } from './paths.ts';
 
@@ -137,7 +136,7 @@ function parseDocument(
     fields.set(key, value);
   }
   for (const key of REQUIRED_HEADER_FIELDS) {
-    if (!fields.has(key)) return { ok: false, detail: `${path}: the header is missing "${key}"` };
+    if (!fields.has(key)) {return { ok: false, detail: `${path}: the header is missing "${key}"` };}
   }
 
   const filesystem = fields.get('filesystem');
@@ -145,7 +144,7 @@ function parseDocument(
     return { ok: false, detail: `${path}: filesystem must be "read" or "write", not "${filesystem}"` };
   }
   const model = fields.get('model') ?? '';
-  if (!MODEL.test(model)) return { ok: false, detail: `${path}: model must be one non-empty token` };
+  if (!MODEL.test(model)) {return { ok: false, detail: `${path}: model must be one non-empty token` };}
   const suffix = model.slice(model.lastIndexOf(':') + 1);
   if (model.includes(':') && isThinkingLevel(suffix)) {
     return {
@@ -170,7 +169,7 @@ function parseDocument(
     if (!TOOL_NAME.test(tool)) {
       return { ok: false, detail: `${path}: "${tool}" is not a tool name (${TOOL_NAME.source})` };
     }
-    if (tools.includes(tool)) return { ok: false, detail: `${path}: the tool "${tool}" is listed twice` };
+    if (tools.includes(tool)) {return { ok: false, detail: `${path}: the tool "${tool}" is listed twice` };}
     tools.push(tool);
   }
 
@@ -193,11 +192,11 @@ type Loaded = { profile: Profile; bytes: Buffer };
 
 /** One layer's documents, in name order; a missing layer is empty. */
 function readLayer(layer: string): { ok: true; documents: string[] } | { ok: false; path: string; detail: string } {
-  let entries: Dirent<string>[];
+  let entries: Dirent[];
   try {
     entries = readdirSync(layer, { withFileTypes: true });
   } catch (error) {
-    if (absent(layer, error)) return { ok: true, documents: [] };
+    if (absent(layer, error)) {return { ok: true, documents: [] };}
     return { ok: false, path: layer, detail: `${layer} could not be read (${errorCode(error)})` };
   }
   const documents = entries
@@ -219,7 +218,7 @@ function readDocument(path: string, document: string): { ok: true; loaded: Loade
     return { ok: false, path, detail: `${path}: "${name}" is not a profile name (${PROFILE_NAME.source})` };
   }
   const parsed = parseDocument(name, path, bytes.toString('utf8'));
-  if (!parsed.ok) return { ok: false, path, detail: parsed.detail };
+  if (!parsed.ok) {return { ok: false, path, detail: parsed.detail };}
   return { ok: true, loaded: { profile: parsed.profile, bytes } };
 }
 
@@ -234,18 +233,18 @@ export function loadProfiles(layers: readonly string[]): SnapshotLoad {
   const winners = new Map<string, Loaded>();
   for (const layer of layers) {
     const listed = readLayer(layer);
-    if (!listed.ok) return listed;
+    if (!listed.ok) {return listed;}
     for (const document of listed.documents) {
       const read = readDocument(join(layer, document), document);
-      if (!read.ok) return read;
-      if (!winners.has(read.loaded.profile.name)) winners.set(read.loaded.profile.name, read.loaded);
+      if (!read.ok) {return read;}
+      if (!winners.has(read.loaded.profile.name)) {winners.set(read.loaded.profile.name, read.loaded);}
     }
   }
 
   const profiles = new Map<string, Profile>();
   const digest = createHash('sha256');
   for (const name of [...winners.keys()].sort()) {
-    const { profile, bytes } = winners.get(name) as Loaded;
+    const { profile, bytes } = winners.get(name)!;
     for (const part of [name, profile.source, bytes]) {
       digest.update(part);
       digest.update('\0');
@@ -392,7 +391,7 @@ export type ToolsResolution = { ok: true; tools: string[] } | { ok: false; reaso
  * because a caller that asked for authority it does not have should be told.
  */
 export function effectiveTools(profile: Profile, requested: readonly string[] | undefined): ToolsResolution {
-  if (requested === undefined) return { ok: true, tools: [...profile.tools] };
+  if (requested === undefined) {return { ok: true, tools: [...profile.tools] };}
   const granted = new Set(profile.tools);
   for (const tool of requested) {
     if (!granted.has(tool)) {
@@ -427,8 +426,8 @@ export type ExtensionResolution = { ok: true } | { ok: false; reason: 'profile-i
  * declared extensions are what it is compared against.
  */
 export function checkProfileExtensions(profile: Profile, extensions: readonly string[]): ExtensionResolution {
-  if (!profile.tools.some((tool) => tool.startsWith(MCP_TOOL_PREFIX))) return { ok: true };
-  if (extensions.includes(MCP_EXTENSION)) return { ok: true };
+  if (!profile.tools.some((tool) => tool.startsWith(MCP_TOOL_PREFIX))) {return { ok: true };}
+  if (extensions.includes(MCP_EXTENSION)) {return { ok: true };}
   return {
     ok: false,
     reason: 'profile-invalid',

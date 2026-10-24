@@ -148,7 +148,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
   const add = (entry: Entry): number => {
     entries.push(entry);
     for (const { pattern, re } of patterns) {
-      if (alerts.length >= MAX_ALERTS) break;
+      if (alerts.length >= MAX_ALERTS) {break;}
       if (re.test(entry.text)) {
         alerts.push({ pattern, text: alertText(entry.text, re) });
       }
@@ -157,7 +157,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
   };
 
   for (const raw of lines) {
-    if (!raw.trim()) continue;
+    if (!raw.trim()) {continue;}
     let event: any;
     try {
       event = JSON.parse(raw);
@@ -177,20 +177,20 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
       case 'message_start': {
         // A message that has begun invalidates the earlier candidate: the answer
         // is only known once the stream has no assistant message after it.
-        if (event.message?.role === 'assistant') candidate = null;
+        if (event.message?.role === 'assistant') {candidate = null;}
         break;
       }
 
       case 'message_end': {
         const message = event.message ?? {};
-        if (message.role !== 'assistant') break; // context echo: system + user replays
+        if (message.role !== 'assistant') {break;} // context echo: system + user replays
         turns += 1;
         stopReason = typeof message.stopReason === 'string' ? message.stopReason : stopReason;
         model = typeof message.model === 'string' ? message.model : model;
         const texts: string[] = [];
         const entryIndices: number[] = [];
         for (const block of message.content ?? []) {
-          if (block?.type !== 'text' || !block.text?.trim()) continue; // thinking and toolCalls render elsewhere
+          if (block?.type !== 'text' || !block.text?.trim()) {continue;} // thinking and toolCalls render elsewhere
           texts.push(block.text.trimEnd());
           entryIndices.push(add({ kind: 'prose', line: block.text.trimEnd(), text: block.text }));
         }
@@ -225,7 +225,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
         // `messages` replays what `message_end` already delivered: usage here would
         // double-count the run, so only the model is taken from it.
         const last = Array.isArray(event.messages) ? event.messages.at(-1) : undefined;
-        if (typeof last?.model === 'string') model = last.model;
+        if (typeof last?.model === 'string') {model = last.model;}
         break;
       }
 
@@ -245,7 +245,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
     result = terminal.texts.join('\n\n');
     // Rendered once, in `## Result`: splice the terminal message's prose out of
     // the body, descending so the earlier indices stay valid.
-    for (const index of [...terminal.entryIndices].sort((a, b) => b - a)) entries.splice(index, 1);
+    for (const index of [...terminal.entryIndices].sort((a, b) => b - a)) {entries.splice(index, 1);}
   }
 
   // The stream's verdict, in the reducer's three-way vocabulary. Precedence among
@@ -334,7 +334,7 @@ function fit(entries: Entry[], budget: number): { blocks: string; elided: number
   let previous: string | null = null;
   let repeats = 0;
   const flush = (unit: Unit | null): void => {
-    if (!unit) return;
+    if (!unit) {return;}
     const [first, ...rest] = unit.lines;
     const head = repeats > 1 ? `${first} ×${repeats}` : first;
     // Prose keeps a blank line after it so the transcript stays readable; tool
@@ -358,7 +358,7 @@ function fit(entries: Entry[], budget: number): { blocks: string; elided: number
 
   const sizes = rendered.map((block) => Buffer.byteLength(block));
   let total = sizes.reduce((sum, n) => sum + n, 0);
-  if (budget <= 0 || total <= budget) return { blocks: rendered.join(''), elided: 0 };
+  if (budget <= 0 || total <= budget) {return { blocks: rendered.join(''), elided: 0 };}
 
   // Middle-out: drop inward from the centre so the first and last entries survive.
   const keep = rendered.map(() => true);
@@ -366,21 +366,21 @@ function fit(entries: Entry[], budget: number): { blocks: string; elided: number
   const middle = Math.floor(rendered.length / 2);
   for (let step = 0; step < rendered.length; step++) {
     const before = middle - step;
-    if (before > 0) order.push(before);
+    if (before > 0) {order.push(before);}
     const after = middle + step;
-    if (step > 0 && after < rendered.length - 1) order.push(after);
+    if (step > 0 && after < rendered.length - 1) {order.push(after);}
   }
 
   let elided = 0;
   for (const index of order) {
-    if (total + marker(elided + 1).length <= budget) break;
+    if (total + marker(elided + 1).length <= budget) {break;}
     total -= sizes[index];
     keep[index] = false;
     elided += 1;
   }
 
   const kept = rendered.filter((_, index) => keep[index]);
-  if (elided > 0) kept.splice(Math.floor(kept.length / 2), 0, marker(elided));
+  if (elided > 0) {kept.splice(Math.floor(kept.length / 2), 0, marker(elided));}
   const blocks = kept.join('');
   return { blocks, elided };
 }
@@ -394,7 +394,7 @@ function describeCall(name: unknown, args: unknown): string {
   const record = args && typeof args === 'object' ? (args as Record<string, unknown>) : {};
   const preferred = ['command', 'path', 'file', 'query', 'pattern'];
   let value: unknown = preferred.map((key) => record[key]).find((v) => typeof v === 'string');
-  if (value === undefined) value = Object.values(record).find((v) => typeof v === 'string');
+  if (value === undefined) {value = Object.values(record).find((v) => typeof v === 'string');}
   const text = typeof value === 'string' ? value : Object.keys(record).length ? JSON.stringify(record) : '';
   return `${tool}(${clip(oneLine(text), CALL_ARG_CHARS)})`;
 }
@@ -403,9 +403,9 @@ function resultText(result: any): string {
   const content = result?.content;
   if (Array.isArray(content)) {
     const parts = content.map((part: any) => (typeof part?.text === 'string' ? part.text : '')).filter(Boolean);
-    if (parts.length) return parts.join('\n');
+    if (parts.length) {return parts.join('\n');}
   }
-  if (typeof result?.structuredContent?.output === 'string') return result.structuredContent.output;
+  if (typeof result?.structuredContent?.output === 'string') {return result.structuredContent.output;}
   return '';
 }
 
@@ -423,8 +423,8 @@ const ANSWER_STOP_REASONS = new Set(['stop', 'length']);
 function terminalMessage(
   candidate: { stopReason: string | null; texts: string[]; entryIndices: number[] } | null,
 ): { texts: string[]; entryIndices: number[] } | null {
-  if (!candidate || candidate.stopReason === null) return null;
-  if (candidate.stopReason === 'pending') return null;
+  if (!candidate || candidate.stopReason === null) {return null;}
+  if (candidate.stopReason === 'pending') {return null;}
   return ANSWER_STOP_REASONS.has(candidate.stopReason) ? candidate : null;
 }
 
@@ -443,7 +443,7 @@ export function countRecord(event: any, tally: Tally): void {
   switch (event.type) {
     case 'message_end': {
       const message = event.message ?? {};
-      if (message.role !== 'assistant') return; // context echo, not a send
+      if (message.role !== 'assistant') {return;} // context echo, not a send
       tally.requests += 1;
       const failedSend = NO_TOKEN_STOP_REASONS.has(message.stopReason);
       observeContext(message.usage, tally, failedSend);
@@ -456,7 +456,7 @@ export function countRecord(event: any, tally: Tally): void {
     }
 
     case 'compaction_end': {
-      if (!event.result || typeof event.result !== 'object') return;
+      if (!event.result || typeof event.result !== 'object') {return;}
       tally.requests += 1;
       observeContext(event.result.usage, tally);
       accrue(event.result.usage, tally);
@@ -546,7 +546,7 @@ function readTokens(usage: any): ObservedTokens | null {
   const output = nonNegative(usage?.output);
   const cached = nonNegative(usage?.cacheRead);
   const cache_write = nonNegative(usage?.cacheWrite);
-  if (input === null || output === null || cached === null || cache_write === null) return null;
+  if (input === null || output === null || cached === null || cache_write === null) {return null;}
   return { input, output, cached, cache_write };
 }
 
@@ -554,7 +554,7 @@ function readTokens(usage: any): ObservedTokens | null {
  *  spend would understate; reading it as an accounting failure would make every
  *  provider error and every retry fatal. */
 function isEmptyUsage(usage: any): boolean {
-  if (!usage || typeof usage !== 'object') return true;
+  if (!usage || typeof usage !== 'object') {return true;}
   const components = [usage.input, usage.output, usage.cacheRead, usage.cacheWrite, usage.totalTokens, usage.cost?.total];
   return components.every((value) => value === undefined || value === null || value === 0);
 }
@@ -572,7 +572,7 @@ function nonNegative(value: unknown): number | null {
 function alertText(text: string, re: RegExp): string {
   const flat = oneLine(text);
   const match = re.exec(flat);
-  if (!match) return clip(flat, ALERT_TEXT_CHARS);
+  if (!match) {return clip(flat, ALERT_TEXT_CHARS);}
   const start = Math.max(0, match.index - 40);
   const end = Math.min(flat.length, match.index + match[0].length + 40);
   const head = start > 0 ? '…' : '';

@@ -7,8 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { countRecord, createTally, reduce } from './reduce.ts';
-import type { Reduced } from './reduce.ts';
+import { countRecord, createTally, reduce, type Reduced } from './reduce.ts';
 
 const cli = new URL('../cli.ts', import.meta.url).pathname;
 
@@ -208,7 +207,7 @@ const assistantRecord = (usage: unknown, stopReason = 'stop') => ({
 
 const countRecords = (...records: any[]) => {
   const tally = createTally();
-  for (const record of records) countRecord(record, tally);
+  for (const record of records) {countRecord(record, tally);}
   return tally;
 };
 

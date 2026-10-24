@@ -130,8 +130,8 @@ export function checkChildView(input: ChildViewInput): ChildViewCheck {
   for (const member of childViewMembers(input)) {
     for (const store of stores) {
       const overlap = relationTo(member.path, store.path);
-      if (overlap === null || isExempt(member, store)) continue;
-      if (!refuses(member.exposure, store.tolerance)) continue;
+      if (overlap === null || isExempt(member, store)) {continue;}
+      if (!refuses(member.exposure, store.tolerance)) {continue;}
       return {
         ok: false,
         reason: 'view-overlaps-protected',
@@ -146,16 +146,16 @@ export function checkChildView(input: ChildViewInput): ChildViewCheck {
 type Overlap = 'is' | 'contains' | 'inside';
 
 function relationTo(member: string, store: string): Overlap | null {
-  if (member === store) return 'is';
-  if (within(member, store)) return 'contains';
-  if (within(store, member)) return 'inside';
+  if (member === store) {return 'is';}
+  if (within(member, store)) {return 'contains';}
+  if (within(store, member)) {return 'inside';}
   return null;
 }
 
 /** The active session directory, and nothing else inside the home, is exempt. */
 function isExempt(member: ChildViewMember, store: ProtectedStore): boolean {
-  if (store.except === undefined) return false;
-  if (!within(store.path, store.except)) return false;
+  if (store.except === undefined) {return false;}
+  if (!within(store.path, store.except)) {return false;}
   return within(store.except, member.path);
 }
 
@@ -199,6 +199,6 @@ function overlapDetail(member: ChildViewMember, store: ProtectedStore, overlap: 
   return (
     `the ${member.exposure} ${ROLE_LABEL[member.role]} ${JSON.stringify(member.path)} ` +
     `${OVERLAP_PHRASE[overlap]} the protected ${STORE_LABEL[store.kind]} ${JSON.stringify(store.path)}; ` +
-    `${TOLERANCE_WHY[store.tolerance]}`
+    TOLERANCE_WHY[store.tolerance]
   );
 }

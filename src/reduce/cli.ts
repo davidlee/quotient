@@ -14,8 +14,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { reduce } from './reduce.ts';
-import type { Status } from './reduce.ts';
+import { reduce, type Status } from './reduce.ts';
 
 type Args = {
   file: string;
@@ -40,21 +39,21 @@ export function parseArgs(argv: string[]): Args {
     const arg = argv[i];
     const value = (): string => {
       const next = argv[++i];
-      if (next === undefined) throw new Error(`${arg} needs a value`);
+      if (next === undefined) {throw new Error(`${arg} needs a value`);}
       return next;
     };
-    if (arg === '-v' || arg === '--verbose') args.verbose = true;
-    else if (arg === '-q' || arg === '--quiet') args.quiet = true;
-    else if (arg === '--full') args.budget = 0;
-    else if (arg === '--out') args.out = value();
-    else if (arg === '--alert') args.alerts.push(value());
+    if (arg === '-v' || arg === '--verbose') {args.verbose = true;}
+    else if (arg === '-q' || arg === '--quiet') {args.quiet = true;}
+    else if (arg === '--full') {args.budget = 0;}
+    else if (arg === '--out') {args.out = value();}
+    else if (arg === '--alert') {args.alerts.push(value());}
     else if (arg === '--budget-bytes') {
       const raw = value();
-      if (!/^\d+$/.test(raw)) throw new Error('--budget-bytes needs a non-negative integer');
+      if (!/^\d+$/.test(raw)) {throw new Error('--budget-bytes needs a non-negative integer');}
       args.budget = Number(raw);
-    } else if (arg.startsWith('-') && arg !== '-') throw new Error(`unknown flag: ${arg}`);
-    else if (args.file === '-') args.file = arg;
-    else throw new Error(`unexpected argument: ${arg}`);
+    } else if (arg.startsWith('-') && arg !== '-') {throw new Error(`unknown flag: ${arg}`);}
+    else if (args.file === '-') {args.file = arg;}
+    else {throw new Error(`unexpected argument: ${arg}`);}
   }
   return args;
 }
@@ -104,7 +103,7 @@ export function main(argv: string[]): number {
   }
 
   const outDir = args.out ?? (args.file === '-' ? process.cwd() : dirname(resolve(args.file)));
-  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+  if (!existsSync(outDir)) {mkdirSync(outDir, { recursive: true });}
   const transcriptPath = join(outDir, 'transcript.md');
   writeFileSync(transcriptPath, reduced.transcript);
   writeFileSync(join(outDir, 'status.json'), `${JSON.stringify(reduced.status, null, 2)}\n`);
@@ -112,7 +111,7 @@ export function main(argv: string[]): number {
   for (const alert of reduced.status.alerts) {
     process.stderr.write(`alert ${alert.pattern} :: ${alert.text}\n`);
   }
-  if (args.verbose) process.stdout.write(reduced.transcript);
+  if (args.verbose) {process.stdout.write(reduced.transcript);}
   if (!args.quiet) {
     const stream = args.verbose ? process.stderr : process.stdout;
     stream.write(`${statusLine(reduced.status, transcriptPath)}\n`);

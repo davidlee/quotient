@@ -16,17 +16,12 @@ import { PassThrough, Writable } from 'node:stream';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { serve } from './server.ts';
-import type { ServeOptions } from './server.ts';
-import { attemptsPath } from './evidence.ts';
-import { admitCall } from './policy.ts';
-import type { Admission } from './policy.ts';
-import type { CallId } from './evidence.ts';
 import { resolveLocations } from '../config.ts';
-import { reduce } from '../reduce/reduce.ts';
-import type { Reduced } from '../reduce/reduce.ts';
-import { resultFor } from './result.ts';
-import type { AgentResult, Artifacts, LatchCause, RunFacts } from './result.ts';
+import { reduce, type Reduced } from '../reduce/reduce.ts';
+import { serve, type ServeOptions } from './server.ts';
+import { attemptsPath, type CallId } from './evidence.ts';
+import { admitCall, type Admission } from './policy.ts';
+import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
 export type Env = Record<string, string | undefined>;
 
@@ -110,7 +105,7 @@ export function profileDocument(
 /** Write one `<name>.md` per entry into LAYER, creating it; the layer path. */
 export function writeProfiles(layer: string, documents: Record<string, string>): string {
   mkdirSync(layer, { recursive: true });
-  for (const [name, text] of Object.entries(documents)) writeFileSync(join(layer, `${name}.md`), text);
+  for (const [name, text] of Object.entries(documents)) {writeFileSync(join(layer, `${name}.md`), text);}
   return layer;
 }
 
@@ -175,10 +170,10 @@ export function patchPolicy(rig: Rig, field: string, value: unknown): void {
 /** Kill every group a stub reported, ignoring one that is already gone. */
 function killSurvivors(markerDir: string): void {
   for (const name of readdirSync(markerDir)) {
-    if (!name.endsWith('pid') && !name.endsWith('pids')) continue;
+    if (!name.endsWith('pid') && !name.endsWith('pids')) {continue;}
     for (const raw of readText(join(markerDir, name)).split('\n')) {
       const pid = Number(raw.trim());
-      if (!Number.isInteger(pid) || pid <= 0) continue;
+      if (!Number.isInteger(pid) || pid <= 0) {continue;}
       try {
         process.kill(-pid, 'SIGKILL');
       } catch {
@@ -255,7 +250,7 @@ export function newRig(
 
 /** Every `run-*` directory under a run dir, in directory order. */
 export function runDirs(runDir: string): string[] {
-  if (!existsSync(runDir)) return [];
+  if (!existsSync(runDir)) {return [];}
   return readdirSync(runDir).filter((name) => name.startsWith('run-'));
 }
 
@@ -379,7 +374,7 @@ export const pause = (ms: number): Promise<void> => new Promise((resolve) => set
 export async function waitForPath(path: string, what = path, timeoutMs = 10000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for ${what}`);}
     await pause(5);
   }
 }
@@ -445,7 +440,7 @@ export const serveRig = (rig: Rig, options: ServeOptions = {}): LiveServer =>
 export async function waitForReplies(server: LiveServer, count: number, timeoutMs = 10000): Promise<Record<string, any>[]> {
   const deadline = Date.now() + timeoutMs;
   while (server.replies().length < count) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} replies: ${server.stderr()}`);
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for ${count} replies: ${server.stderr()}`);}
     await pause(5);
   }
   return server.replies();
@@ -462,10 +457,10 @@ export async function closeServer(server: LiveServer): Promise<void> {
 function expectedReplies(content: string): number {
   let count = 0;
   for (const raw of content.split('\n')) {
-    if (raw.trim().length === 0) continue;
+    if (raw.trim().length === 0) {continue;}
     try {
       const message = JSON.parse(raw) as Record<string, unknown>;
-      if (message && typeof message === 'object' && Object.hasOwn(message, 'id')) count += 1;
+      if (message && typeof message === 'object' && Object.hasOwn(message, 'id')) {count += 1;}
     } catch {
       // an unparsable record answers nothing
     }
@@ -491,7 +486,7 @@ export async function converse(
   const expected = expectedReplies(content);
   const server = openServer(env, serveOptions);
   server.send(content);
-  if (expected > 0) await waitForReplies(server, expected);
+  if (expected > 0) {await waitForReplies(server, expected);}
   await closeServer(server);
   return { replies: server.replies(), stderr: server.stderr() };
 }

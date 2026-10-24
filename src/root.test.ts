@@ -18,7 +18,7 @@ test('packageRoot is the checkout from the source tree, and packageVersion reads
 
 test('packageRoot is the package directory from a tsc-built dist tree', (t) => {
   const pkg = mkdtempSync(join(tmpdir(), 'quotient-root-'));
-  t.after(() => rmSync(pkg, { recursive: true, force: true }));
+  t.after(() => { rmSync(pkg, { recursive: true, force: true }); });
   execFileSync(process.execPath, [TSC, '-p', join(CHECKOUT, 'tsconfig.build.json'), '--outDir', join(pkg, 'dist')]);
   copyFileSync(join(CHECKOUT, 'package.json'), join(pkg, 'package.json'));
 

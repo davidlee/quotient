@@ -8,14 +8,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { clampCeilings, selectForm, transcriptBudget } from './policy.ts';
-import type { Admission } from './policy.ts';
+import { clampCeilings, selectForm, transcriptBudget, type Admission } from './policy.ts';
 import { sha256Hex } from './evidence.ts';
-import { admit, attempts, validPolicy, workspace } from './test-rig.ts';
-import type { Env } from './test-rig.ts';
+import { admit, attempts, validPolicy, workspace, type Env } from './test-rig.ts';
 
 function refuse(verdict: Admission, reason: string, detail: RegExp): void {
-  if (verdict.ok) assert.fail(`expected a ${reason} refusal, got an admission`);
+  if (verdict.ok) {assert.fail(`expected a ${reason} refusal, got an admission`);}
   assert.equal(verdict.reason, reason);
   assert.match(verdict.detail, detail);
 }
@@ -25,7 +23,7 @@ function refuse(verdict: Admission, reason: string, detail: RegExp): void {
 test('a policy declared by the launch environment is admitted', () => {
   const ws = workspace(validPolicy());
   const verdict = admit(ws.env, 1);
-  if (!verdict.ok) assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);
+  if (!verdict.ok) {assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);}
   assert.equal(verdict.policy.mode, 'per-call');
   assert.equal(verdict.policy.roots.length, 1);
   assert.equal(verdict.digest, sha256Hex(readFileSync(ws.policyPath)));
@@ -214,7 +212,7 @@ test('a policy re-read per call sees an enable flip at the next call', () => {
 function admittedPolicy(overrides: Record<string, unknown> = {}) {
   const ws = workspace(validPolicy(overrides));
   const verdict = admit(ws.env, 1);
-  if (!verdict.ok) assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);
+  if (!verdict.ok) {assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);}
   return verdict.policy;
 }
 
@@ -222,11 +220,11 @@ test('the profile capability selects its form; a form the policy does not declar
   const policy = admittedPolicy({ forms: { read: '/nix/store/aaa/bin/pi-mcp-read' } });
 
   const read = selectForm(policy, 'read');
-  if (!read.ok) assert.fail(`expected the read form, got ${read.reason}: ${read.detail}`);
+  if (!read.ok) {assert.fail(`expected the read form, got ${read.reason}: ${read.detail}`);}
   assert.deepEqual(read.form, { kind: 'confined', path: '/nix/store/aaa/bin/pi-mcp-read', extensions: [] }, 'the string form declares no extension');
 
   const write = selectForm(policy, 'write');
-  if (write.ok) assert.fail('expected wrapper-unavailable for a capability with no form');
+  if (write.ok) {assert.fail('expected wrapper-unavailable for a capability with no form');}
   assert.equal(write.reason, 'wrapper-unavailable');
   assert.match(write.detail, /write/);
 });
@@ -264,7 +262,7 @@ test('a form may declare the extensions it passes, and nothing else', () => {
     ).env,
     2,
   );
-  if (foreign.ok) assert.fail('expected a foreign extension to refuse policy-invalid');
+  if (foreign.ok) {assert.fail('expected a foreign extension to refuse policy-invalid');}
   assert.equal(foreign.reason, 'policy-invalid');
   assert.match(foreign.detail, /forms\.read\.extensions\[0\]/, 'the detail names the offending index');
   assert.match(foreign.detail, /other\.ts/, 'and the offending entry');
@@ -344,7 +342,7 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
   const maxima = { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
 
   const narrowed = clampCeilings({ requests: 5, context_tokens: 1000 }, maxima);
-  if (!narrowed.ok) assert.fail(`expected a clamp, got ${narrowed.reason}: ${narrowed.detail}`);
+  if (!narrowed.ok) {assert.fail(`expected a clamp, got ${narrowed.reason}: ${narrowed.detail}`);}
   assert.deepEqual(
     narrowed.ceilings,
     { requests: 5, context_tokens: 1000, cost_usd: 1.5, wall_clock_s: 600 },
@@ -352,7 +350,7 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
   );
 
   const atMaximum = clampCeilings({ requests: 20, cost_usd: 1.5 }, maxima);
-  if (!atMaximum.ok) assert.fail(`a ceiling at the maximum is admitted, got ${atMaximum.reason}`);
+  if (!atMaximum.ok) {assert.fail(`a ceiling at the maximum is admitted, got ${atMaximum.reason}`);}
   assert.equal(atMaximum.ceilings.requests, 20);
   assert.equal(atMaximum.ceilings.cost_usd, 1.5);
 
@@ -363,7 +361,7 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
     ['wall_clock_s', 601, 600],
   ] as const) {
     const refused = clampCeilings({ [unit]: requested }, maxima);
-    if (refused.ok) assert.fail(`expected ceiling-above-maximum for ${unit}`);
+    if (refused.ok) {assert.fail(`expected ceiling-above-maximum for ${unit}`);}
     assert.equal(refused.reason, 'ceiling-above-maximum');
     assert.match(refused.detail, new RegExp(unit));
     assert.match(refused.detail, new RegExp(String(requested)));
@@ -371,11 +369,11 @@ test('ceilings clamp to the maxima, refuse an above-maximum request, and take th
   }
 
   const unbounded = clampCeilings(undefined, {});
-  if (!unbounded.ok) assert.fail('no maximum and no request is not a refusal');
+  if (!unbounded.ok) {assert.fail('no maximum and no request is not a refusal');}
   assert.deepEqual(unbounded.ceilings, {}, 'no maximum and no request leaves the ceiling absent');
 
   const requestedOnly = clampCeilings({ context_tokens: 10 }, {});
-  if (!requestedOnly.ok) assert.fail('a request under no maximum is admitted');
+  if (!requestedOnly.ok) {assert.fail('a request under no maximum is admitted');}
   assert.deepEqual(requestedOnly.ceilings, { context_tokens: 10 });
 });
 

@@ -16,17 +16,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { countRecord, createTally, reduce } from '../reduce/reduce.ts';
-import type { Tally } from '../reduce/reduce.ts';
-import { createGate } from './gate.ts';
-import type { Gate, GateConfig } from './gate.ts';
+import { countRecord, createTally, reduce, type Tally } from '../reduce/reduce.ts';
+import { createGate, type Gate, type GateConfig } from './gate.ts';
 import {
   callLine,
   closeServer,
   emit,
   isAlive,
   jsonLines,
-  line,
   markerPids,
   newRig,
   serveRig,
@@ -35,9 +32,8 @@ import {
   resultDocument,
   SETTLED,
   waitForPath,
-  waitForReplies,
+  waitForReplies, type Rig 
 } from './test-rig.ts';
-import type { Rig } from './test-rig.ts';
 
 const cost = (total: number): Record<string, number> => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total });
 
@@ -96,19 +92,19 @@ const RETRY_FIXTURE: string[] = [
  *  `countRecord`, the one writer of its units. */
 const tallyOf = (lines: string[]): Tally => {
   const tally = createTally();
-  for (const raw of lines) countRecord(JSON.parse(raw), tally);
+  for (const raw of lines) {countRecord(JSON.parse(raw), tally);}
   return tally;
 };
 
 async function within<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), ms);
+    timer = setTimeout(() => { reject(new Error(`timed out waiting for ${what}`)); }, ms);
   });
   try {
     return await Promise.race([promise, timeout]);
   } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    if (timer !== undefined) {clearTimeout(timer);}
   }
 }
 
@@ -339,7 +335,7 @@ test('timeout: the wall clock aborts with cause timeout, however quiet the child
   const [trigger] = gate.triggers();
   assert.equal(trigger.unit, 'wall_clock_s');
   assert.equal(trigger.limit, 0.05);
-  assert.ok((trigger.observed as number) >= 0.1, `observed ${trigger.observed} s`);
+  assert.ok((trigger.observed!) >= 0.1, `observed ${trigger.observed} s`);
   gate.close();
 });
 

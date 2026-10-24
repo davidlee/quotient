@@ -47,7 +47,7 @@ const SUFFIX = '.md';
 
 /** A section by its name or alias; null for neither. */
 export function sectionName(name: string): Section | null {
-  if ((HELP_SECTIONS as readonly string[]).includes(name)) return name as Section;
+  if ((HELP_SECTIONS as readonly string[]).includes(name)) {return name as Section;}
   return ALIASES[name] ?? null;
 }
 
@@ -77,7 +77,7 @@ function layerSections(layer: string): { ok: true; sections: Set<string> } | Fai
   try {
     return { ok: true, sections: new Set(readdirSync(layer).filter((name) => name.endsWith(SUFFIX))) };
   } catch (error) {
-    if (absent(layer, error)) return { ok: true, sections: new Set() };
+    if (absent(layer, error)) {return { ok: true, sections: new Set() };}
     return unreadable(layer, error);
   }
 }
@@ -100,13 +100,13 @@ export function loadHelp(layers: readonly string[], root: string = packageRoot):
   const overrides = new Map<Section, { source: string; text: string }>();
   for (const layer of layers) {
     const listed = layerSections(layer);
-    if (!listed.ok) return listed;
+    if (!listed.ok) {return listed;}
     for (const section of HELP_SECTIONS) {
-      if (SOURCES[section].kind === 'contract' || !listed.sections.has(`${section}${SUFFIX}`)) continue;
+      if (SOURCES[section].kind === 'contract' || !listed.sections.has(`${section}${SUFFIX}`)) {continue;}
       const path = join(layer, `${section}${SUFFIX}`);
       const read = readText(path);
-      if (!read.ok) return read;
-      if (!overrides.has(section)) overrides.set(section, { source: path, text: read.text });
+      if (!read.ok) {return read;}
+      if (!overrides.has(section)) {overrides.set(section, { source: path, text: read.text });}
     }
   }
 
@@ -119,7 +119,7 @@ export function loadHelp(layers: readonly string[], root: string = packageRoot):
     if (chosen === null && source.kind !== 'rendered') {
       const path = join(root, source.path);
       const read = readText(path);
-      if (!read.ok) return read;
+      if (!read.ok) {return read;}
       chosen = { source: path, text: read.text };
     }
     const sourcePath = chosen?.source ?? `builtin:${section}`;
@@ -141,9 +141,9 @@ export type PolicyView =
 
 /** The policy as the rendered sections see it, read now. */
 export function policyView(policyPath: Resolved): PolicyView {
-  if (!policyPath.ok) return { ok: false, detail: policyPath.detail };
+  if (!policyPath.ok) {return { ok: false, detail: policyPath.detail };}
   const loaded = readPolicy(policyPath.path);
-  if (!loaded.ok) return { ok: false, detail: loaded.detail };
+  if (!loaded.ok) {return { ok: false, detail: loaded.detail };}
   return { ok: true, profiles: loaded.policy.profiles, wallClockS: loaded.policy.maxima.wall_clock_s };
 }
 
@@ -168,9 +168,9 @@ const cell = (text: string): string => text.replaceAll('|', '\\|');
 /** The snapshot's profiles with the capability the policy pins, as read now. */
 export function profileTable(profiles: readonly Profile[], policy: PolicyView): string {
   const heading = '## Profiles\n\n';
-  if (profiles.length === 0) return `${heading}This server has no profiles: every call refuses.\n`;
+  if (profiles.length === 0) {return `${heading}This server has no profiles: every call refuses.\n`;}
   const pinned = (name: string): string => {
-    if (!policy.ok) return 'unknown (policy unavailable)';
+    if (!policy.ok) {return 'unknown (policy unavailable)';}
     return policy.profiles[name] ?? 'not listed: every call refuses';
   };
   const rows = profiles.map((profile) =>
@@ -236,6 +236,6 @@ export function sectionText(snapshot: HelpSnapshot, section: Section, context: R
     case 'reduce':
       return text ?? `${REDUCE_USAGE}\n`;
     default:
-      return text as string;
+      return text!;
   }
 }

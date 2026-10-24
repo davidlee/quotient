@@ -27,13 +27,10 @@ import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
-import { countRecord, createTally } from '../reduce/reduce.ts';
-import type { Tally } from '../reduce/reduce.ts';
-import { attemptsPath, appendAudit, removeRun, runLayout } from './evidence.ts';
-import type { AuditRecord, CallId, RunLayout } from './evidence.ts';
+import { countRecord, createTally, type Tally } from '../reduce/reduce.ts';
+import { attemptsPath, appendAudit, removeRun, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
 import type { Form } from './policy.ts';
-import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument } from './profiles.ts';
-import type { Profile } from './profiles.ts';
+import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument, type Profile } from './profiles.ts';
 import type { Termination } from './result.ts';
 
 /** Design sec-4's grace between SIGTERM and SIGKILL on the abort path. Injectable
@@ -205,8 +202,8 @@ export function childEnv(
   ];
   const child: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(env)) {
-    if (name.startsWith(SERVER_VAR_PREFIX)) continue;
-    if (typeof value === 'string' && evidence.some((path) => value.includes(path))) continue;
+    if (name.startsWith(SERVER_VAR_PREFIX)) {continue;}
+    if (typeof value === 'string' && evidence.some((path) => value.includes(path))) {continue;}
     child[name] = value;
   }
   return child;
@@ -258,7 +255,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
 
   const audit = (record: AuditRecord): boolean => {
     const ok = appendAudit(layout, { policy_digest: plan.policyDigest, session: plan.session, ...record });
-    if (!ok) auditFailed = true;
+    if (!ok) {auditFailed = true;}
     return ok;
   };
 
@@ -330,7 +327,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   const decoder = new StringDecoder('utf8');
   let pending = '';
   const observe = (record: string): void => {
-    if (record.trim().length === 0) return;
+    if (record.trim().length === 0) {return;}
     lines.push(record);
     let event: unknown;
     try {
@@ -340,7 +337,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     }
     countRecord(event, tally);
     control.onRecord?.(tally);
-    if ((event as { type?: unknown }).type === 'agent_settled') settled = true;
+    if ((event as { type?: unknown }).type === 'agent_settled') {settled = true;}
   };
   const stdout = child.stdout!;
   stdout.on('data', (chunk: Buffer) => {
@@ -350,7 +347,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     while (newline >= 0) {
       let record = pending.slice(0, newline);
       pending = pending.slice(newline + 1);
-      if (record.endsWith('\r')) record = record.slice(0, -1);
+      if (record.endsWith('\r')) {record = record.slice(0, -1);}
       observe(record);
       newline = pending.indexOf('\n');
     }
@@ -362,7 +359,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   // reader follows — and it stays in events.jsonl verbatim.
   let eventsEnded = false;
   const finishEvents = (): void => {
-    if (eventsEnded) return;
+    if (eventsEnded) {return;}
     eventsEnded = true;
     events.end();
   };
@@ -371,7 +368,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
 
   let stderrEnded = false;
   const finishStderr = (): void => {
-    if (stderrEnded) return;
+    if (stderrEnded) {return;}
     stderrEnded = true;
     stderrLog.end();
   };
@@ -401,7 +398,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
    * before the ladder has finished with the leader.
    */
   const terminate = async (cause: AbortCause, crossing: Crossing | null = null): Promise<void> => {
-    if (abort !== null) return;
+    if (abort !== null) {return;}
     abort = cause;
     // Additive evidence, never a new cause: only a gate rung names a crossing, so
     // a `cancelled`/`eof`/`audit` abort writes the same record it always wrote.
@@ -415,7 +412,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     const pid = child.pid;
     // Never signal without a verified pid of our own child, and never `-0` or the
     // server's own group: the child leads its group, the server leads another.
-    if (!signallable(pid)) return;
+    if (!signallable(pid)) {return;}
     if (exit === null) {
       signalGroup(pid, 'SIGTERM');
       if (!(await waitFor(exited, graceMs))) {
@@ -446,7 +443,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     void terminate(abortCauseOf(reason), crossingOf(reason));
   };
   control.signal.addEventListener('abort', onAbort, { once: true });
-  if (control.signal.aborted) onAbort();
+  if (control.signal.aborted) {onAbort();}
 
   // Reap: the exit status is the child's, whatever the trigger. The abort listener
   // stays attached through the drain below: a trigger that lands while the pipe is
@@ -465,7 +462,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   for (;;) {
     const bound = drainBound;
     const slice = bound === null ? graceMs : bound - Date.now();
-    if (slice <= 0) break;
+    if (slice <= 0) {break;}
     if (await waitFor(pipesClosed, slice)) {
       drained = true;
       break;
@@ -477,7 +474,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     // SIGKILLed once more — and the pipes are destroyed so the two evidence
     // writers still end and the run ends without an unreachable tail rather than
     // never ending at all.
-    if (signallable(child.pid)) signalGroup(child.pid, 'SIGKILL');
+    if (signallable(child.pid)) {signalGroup(child.pid, 'SIGKILL');}
     stdout.destroy();
     child.stderr!.destroy();
   }
@@ -523,12 +520,12 @@ function abortCauseOf(reason: unknown): AbortCause {
  *  unit that crossed, what it read and the bound it crossed. A bare cause token,
  *  or a trigger without a readable unit, names no crossing and adds no fields. */
 function crossingOf(reason: unknown): Crossing | null {
-  if (typeof reason !== 'object' || reason === null) return null;
+  if (typeof reason !== 'object' || reason === null) {return null;}
   const trigger = (reason as { trigger?: unknown }).trigger;
-  if (typeof trigger !== 'object' || trigger === null) return null;
+  if (typeof trigger !== 'object' || trigger === null) {return null;}
   const fields = trigger as Record<string, unknown>;
   const unit = fields.unit;
-  if (typeof unit !== 'string') return null;
+  if (typeof unit !== 'string') {return null;}
   const observed = fields.observed;
   const limit = fields.limit;
   return {
@@ -560,7 +557,7 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
  *  out first. The timer is cleared either way. */
 function waitFor(done: Promise<unknown>, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), ms);
+    const timer = setTimeout(() => { resolve(false); }, ms);
     void done.then(() => {
       clearTimeout(timer);
       resolve(true);

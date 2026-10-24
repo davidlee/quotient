@@ -9,13 +9,11 @@
 // pid-reuse case (EX-6) and is deterministically stale.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fork, spawnSync } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import { fork, spawnSync, type ChildProcess } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SESSION_GRAMMAR, acquireSession, isSessionId, mintSessionId, processStartTime, releaseSession, sessionPaths } from './session.ts';
-import type { SessionPaths } from './session.ts';
+import { SESSION_GRAMMAR, acquireSession, isSessionId, mintSessionId, processStartTime, releaseSession, sessionPaths, type SessionPaths } from './session.ts';
 import { attempts } from './test-rig.ts';
 
 const SESSION_MODULE = new URL('./session.ts', import.meta.url).href;
@@ -108,8 +106,8 @@ class Caller {
     this.child = child;
     child.on('message', (message) => {
       const waiter = this.waiters.shift();
-      if (waiter !== undefined) waiter.resolve(message as CallerMessage);
-      else this.queue.push(message as CallerMessage);
+      if (waiter !== undefined) {waiter.resolve(message as CallerMessage);}
+      else {this.queue.push(message as CallerMessage);}
     });
     child.on('exit', (code, signal) => {
       const death = `exited (code ${String(code)}, signal ${String(signal)})`;
@@ -118,12 +116,12 @@ class Caller {
       }
     });
     child.on('error', (error) => {
-      for (const waiter of this.waiters.splice(0)) waiter.reject(error);
+      for (const waiter of this.waiters.splice(0)) {waiter.reject(error);}
     });
   }
 
   get pid(): number {
-    return this.child.pid as number;
+    return this.child.pid!;
   }
 
   send(message: unknown): void {
@@ -132,12 +130,12 @@ class Caller {
 
   next(): Promise<CallerMessage> {
     const queued = this.queue.shift();
-    if (queued !== undefined) return Promise.resolve(queued);
+    if (queued !== undefined) {return Promise.resolve(queued);}
     return new Promise<CallerMessage>((resolve, reject) => this.waiters.push({ resolve, reject }));
   }
 
   async stop(): Promise<void> {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
+    if (this.child.exitCode !== null || this.child.signalCode !== null) {return;}
     const exited = new Promise((resolve) => this.child.once('exit', resolve));
     this.send({ action: 'exit' });
     await exited;
@@ -149,7 +147,7 @@ type Cleanup = { after: (fn: () => Promise<void> | void) => void };
 
 /** Stop a caller that is still running, whatever it is doing. */
 async function dispose(caller: Caller): Promise<void> {
-  if (caller.child.exitCode !== null || caller.child.signalCode !== null) return;
+  if (caller.child.exitCode !== null || caller.child.signalCode !== null) {return;}
   caller.child.kill('SIGKILL');
   await new Promise((resolve) => caller.child.once('exit', resolve));
 }
@@ -224,7 +222,7 @@ test('a call with no session mints one and lays out owner-only state beside it (
   const { home, runDir } = state();
   const acquisition = acquireSession({ sessionHome: home, runDir, root: '/work/one', capability: 'read', callId: 7 });
   assert.equal(acquisition.ok, true);
-  if (!acquisition.ok) return;
+  if (!acquisition.ok) {return;}
 
   assert.ok(isSessionId(acquisition.session), 'a minted id matches the session grammar');
   assert.equal(acquisition.sessionDir, join(home, acquisition.session));
@@ -278,7 +276,7 @@ test('the grammar accepts one alnum character and refuses a trailing "." "_" or 
       callId: 1,
     });
     assert.equal(acquisition.ok, false);
-    if (acquisition.ok) return;
+    if (acquisition.ok) {return;}
     assert.equal(acquisition.reason, 'session-invalid');
     assert.ok(acquisition.detail.includes(SESSION_GRAMMAR.source), 'the refusal names the grammar');
     assert.equal(existsSync(home), false, 'a refused grammar creates no state at all');
@@ -291,7 +289,7 @@ test('a second caller is refused session-busy while the first holds the lock (EX
   const { home, runDir, helperPath } = state();
   const held = acquireSession({ sessionHome: home, runDir, session: 'oneshot', root: '/work/one', capability: 'read', callId: 1 });
   assert.equal(held.ok, true);
-  if (!held.ok) return;
+  if (!held.ok) {return;}
 
   const child = spawnSync(process.execPath, [helperPath], {
     env: {
@@ -340,7 +338,7 @@ test('a refused acquisition creates no session directory: the layout is made onl
 
   const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5 });
   assert.equal(refused.ok, false);
-  if (refused.ok) return;
+  if (refused.ok) {return;}
   assert.equal(refused.reason, 'session-busy');
   assert.match(refused.detail, /owned by pid/);
   // The loser leaves no side effect behind: <home>/<id> is the layout the winner
@@ -355,7 +353,7 @@ test('two forked callers racing for one session: exactly one owns it, the other 
   const session = 'race';
   const raced = await callers(t, helperPath, 2);
   const options = { sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1 };
-  for (const caller of raced) caller.send({ action: 'acquire', options, hold: true });
+  for (const caller of raced) {caller.send({ action: 'acquire', options, hold: true });}
   const answers = await Promise.all(raced.map((caller) => caller.next()));
 
   const winners = answers.filter((answer) => answer.ok === true);
@@ -380,7 +378,7 @@ test('a first-use race with conflicting roots binds exactly once; another root o
   const session = 'bind';
   const roots = ['/work/one', '/work/two'];
   const raced = await callers(t, helperPath, 2);
-  raced.forEach((caller, index) => caller.send({ action: 'acquire', hold: true, options: { sessionHome: home, runDir, session, root: roots[index], capability: 'read', callId: index } }));
+  raced.forEach((caller, index) => { caller.send({ action: 'acquire', hold: true, options: { sessionHome: home, runDir, session, root: roots[index], capability: 'read', callId: index } }); });
   const answers = await Promise.all(raced.map((caller) => caller.next()));
 
   const winnerIndex = answers.findIndex((answer) => answer.ok === true);
@@ -397,13 +395,13 @@ test('a first-use race with conflicting roots binds exactly once; another root o
   // Resuming on another root or another capability is refused, never rebound.
   const otherRoot = acquireSession({ sessionHome: home, runDir, session, root: roots[1 - winnerIndex], capability: 'read', callId: 2 });
   assert.equal(otherRoot.ok, false);
-  if (otherRoot.ok) return;
+  if (otherRoot.ok) {return;}
   assert.equal(otherRoot.reason, 'session-root-mismatch');
   assert.ok(otherRoot.detail.includes(roots[winnerIndex]));
 
   const otherCapability = acquireSession({ sessionHome: home, runDir, session, root: roots[winnerIndex], capability: 'write', callId: 3 });
   assert.equal(otherCapability.ok, false);
-  if (otherCapability.ok) return;
+  if (otherCapability.ok) {return;}
   assert.equal(otherCapability.reason, 'session-capability-mismatch');
 
   // A mismatch refusal leaves no lock behind and does not rewrite the binding.
@@ -412,7 +410,7 @@ test('a first-use race with conflicting roots binds exactly once; another root o
 
   const resumed = acquireSession({ sessionHome: home, runDir, session, root: roots[winnerIndex], capability: 'read', callId: 4 });
   assert.equal(resumed.ok, true, 'the bound pair still resumes');
-  if (resumed.ok) resumed.release();
+  if (resumed.ok) {resumed.release();}
 });
 
 // ── Stale reclamation (EX-4, EX-5) ─────────────────────────────────────────
@@ -424,7 +422,7 @@ test('two callers presented with one stale lock: exactly one reclaims under <loc
 
   const raced = await callers(t, helperPath, 2);
   const options = { sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1 };
-  for (const caller of raced) caller.send({ action: 'acquire', options, hold: true });
+  for (const caller of raced) {caller.send({ action: 'acquire', options, hold: true });}
   const answers = await Promise.all(raced.map((caller) => caller.next()));
 
   assert.equal(answers.filter((answer) => answer.ok === true).length, 1, 'exactly one caller reclaims and proceeds');
@@ -454,7 +452,7 @@ test('no caller wins an O_EXCL create of <lock> across a reclaim: the rename nev
 
   const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 3 });
   assert.equal(reclaimed.ok, true);
-  if (!reclaimed.ok) return;
+  if (!reclaimed.ok) {return;}
 
   prober.send({ action: 'stop' });
   const observed = await prober.next();
@@ -474,7 +472,7 @@ test('a killed reclaimer leaves a live lock plus an orphan claim: the next calle
 
   const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 9 });
   assert.equal(refused.ok, false);
-  if (refused.ok) return;
+  if (refused.ok) {return;}
   assert.equal(refused.reason, 'session-busy');
   assert.ok(refused.detail.includes(paths.claim), 'the refusal names the orphan claim');
   assert.match(refused.detail, /operator/);
@@ -483,14 +481,14 @@ test('a killed reclaimer leaves a live lock plus an orphan claim: the next calle
   // A second caller refuses identically: a lost claim is not a retry storm.
   const again = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 10 });
   assert.equal(again.ok, false);
-  if (again.ok) return;
+  if (again.ok) {return;}
   assert.equal(again.reason, 'session-busy');
 
   // Only an operator clears it; then the stale lock is reclaimed normally.
   unlinkSync(paths.claim);
   const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 11 });
   assert.equal(reclaimed.ok, true, 'once the operator clears the claim, the stale lock is reclaimable');
-  if (reclaimed.ok) reclaimed.release();
+  if (reclaimed.ok) {reclaimed.release();}
 });
 
 // ── Owner identity and unknowable liveness (EX-6) ──────────────────────────
@@ -507,7 +505,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
   );
   const busy = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1 });
   assert.equal(busy.ok, false);
-  if (busy.ok) return;
+  if (busy.ok) {return;}
   assert.equal(busy.reason, 'session-busy');
   assert.match(busy.detail, /owned by pid/);
 
@@ -516,11 +514,11 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
   writeFileSync(paths.lock, `${JSON.stringify(staleOwner(session))}\n`);
   const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 2 });
   assert.equal(reclaimed.ok, true, 'a reused pid does not read as the same owner');
-  if (reclaimed.ok) reclaimed.release();
+  if (reclaimed.ok) {reclaimed.release();}
 
   // Unknown: no pid table at all.
   const noProc = join(dir, 'no-proc');
-  writeFileSync(paths.lock, `${JSON.stringify({ ...staleOwner(session), pid: 999_999 })}`);
+  writeFileSync(paths.lock, JSON.stringify({ ...staleOwner(session), pid: 999_999 }));
   const unknowable = acquireSession({
     sessionHome: home,
     runDir,
@@ -531,7 +529,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
     callId: 3,
   });
   assert.equal(unknowable.ok, false);
-  if (unknowable.ok) return;
+  if (unknowable.ok) {return;}
   assert.equal(unknowable.reason, 'session-busy');
   assert.equal(readRecord(paths.lock).pid, 999_999, 'an unknowable owner is never stolen from');
   assert.equal(existsSync(paths.claim), false, 'liveness is decided before the claim is taken');
@@ -553,7 +551,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
     callId: 4,
   });
   assert.equal(unparsable.ok, false);
-  if (unparsable.ok) return;
+  if (unparsable.ok) {return;}
   assert.equal(unparsable.reason, 'session-busy');
   assert.equal(readRecord(paths.lock).pid, 999_999, 'a stat line without a start time is not evidence of death');
 });
@@ -568,7 +566,7 @@ test('every reclaim leaves an attempts.jsonl line naming the replaced record, th
 
   const acquisition = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5 });
   assert.equal(acquisition.ok, true);
-  if (!acquisition.ok) return;
+  if (!acquisition.ok) {return;}
 
   const lines = attempts(runDir);
   assert.equal(lines.length, 1, 'one line per reclaim');

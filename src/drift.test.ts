@@ -25,9 +25,8 @@ import {
   refusedResult,
   RESULT_REFUSAL_REASONS,
   RESULT_STATES,
-  TERMINATIONS,
+  TERMINATIONS, type AgentResult 
 } from './server/result.ts';
-import type { AgentResult } from './server/result.ts';
 import {
   FORM_KEYS,
   MAXIMA_FIELDS,
@@ -53,7 +52,7 @@ const HISTORICAL_POLICY_CONTRACT = 'docs/contract/quotient-policy-1.md';
  *  dropped, each cell trimmed and stripped of one pair of backticks. */
 function table(text: string, heading: string): string[][] {
   const start = text.indexOf(`\n## ${heading}\n`);
-  if (start < 0) return [];
+  if (start < 0) {return [];}
   const rest = text.slice(start + heading.length + 5);
   const end = rest.search(/\n## /);
   const section = end < 0 ? rest : rest.slice(0, end);
@@ -94,7 +93,7 @@ function codeRefusals(): string[] {
   const reasons: string[] = [...RESULT_REFUSAL_REASONS];
   for (const name of readdirSync(dir).filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))) {
     for (const [, union] of readFileSync(join(dir, name), 'utf8').matchAll(/export type \w*Refusal\w* =([^;]*);/g)) {
-      for (const [, reason] of union.matchAll(/'([a-z-]+)'/g)) reasons.push(reason);
+      for (const [, reason] of union.matchAll(/'([a-z-]+)'/g)) {reasons.push(reason);}
     }
   }
   return reasons;
@@ -115,10 +114,10 @@ const JSON_TYPES = ['string', 'number', 'boolean', 'object', 'array'];
  *  vocabulary would otherwise be misread silently. */
 function malformedFieldRows(contract: string): string[] {
   return table(contract, 'Fields').flatMap((row) => {
-    if (row.length !== 4) return [`Fields row \`${row[0]}\` has ${row.length} cells, not 4`];
+    if (row.length !== 4) {return [`Fields row \`${row[0]}\` has ${row.length} cells, not 4`];}
     const problems: string[] = [];
-    if (!JSON_TYPES.includes(row[1])) problems.push(`Fields row \`${row[0]}\`: type ${row[1]} is not a JSON type`);
-    if (row[2] !== 'yes' && row[2] !== 'no') problems.push(`Fields row \`${row[0]}\`: nullable is ${row[2]}, not yes or no`);
+    if (!JSON_TYPES.includes(row[1])) {problems.push(`Fields row \`${row[0]}\`: type ${row[1]} is not a JSON type`);}
+    if (row[2] !== 'yes' && row[2] !== 'no') {problems.push(`Fields row \`${row[0]}\`: nullable is ${row[2]}, not yes or no`);}
     return problems;
   });
 }
@@ -155,7 +154,7 @@ function shapeViolations(doc: AgentResult, documented: Map<string, Field>, label
       }
       if (value === null) {
         nulls.add(path);
-        if (!field.nullable) violations.push(`${label}: \`${path}\` is null, and the Fields table says non-nullable`);
+        if (!field.nullable) {violations.push(`${label}: \`${path}\` is null, and the Fields table says non-nullable`);}
         return;
       }
       if (jsonType(value) !== field.type) {
@@ -164,10 +163,10 @@ function shapeViolations(doc: AgentResult, documented: Map<string, Field>, label
       }
     }
     if (Array.isArray(value)) {
-      for (const element of value) walk(element, `${path}[]`);
+      for (const element of value) {walk(element, `${path}[]`);}
     } else if (typeof value === 'object' && value !== null) {
       violations.push(...bothWays(`${label}: keys of \`${path || '(document)'}\``, Object.keys(value), childrenOf(documented, path)));
-      for (const [key, member] of Object.entries(value)) walk(member, path === '' ? key : `${path}.${key}`);
+      for (const [key, member] of Object.entries(value)) {walk(member, path === '' ? key : `${path}.${key}`);}
     }
   };
   walk(doc, '');
@@ -178,12 +177,12 @@ function shapeViolations(doc: AgentResult, documented: Map<string, Field>, label
  *  field null in at least one fixture (else its null is never checked). */
 function keysAndTypesViolations(contract: string, fixtures: Record<string, AgentResult>): string[] {
   const documented = fields(contract);
-  if (documented.size === 0) return ['the contract has no Fields table'];
+  if (documented.size === 0) {return ['the contract has no Fields table'];}
   const nulls = new Set<string>();
   const violations = [...malformedFieldRows(contract)];
   violations.push(...Object.entries(fixtures).flatMap(([label, doc]) => shapeViolations(doc, documented, label, nulls)));
   for (const [path, field] of documented) {
-    if (field.nullable && !nulls.has(path)) violations.push(`nullable \`${path}\` is null in no fixture`);
+    if (field.nullable && !nulls.has(path)) {violations.push(`nullable \`${path}\` is null in no fixture`);}
   }
   return violations;
 }
@@ -292,7 +291,7 @@ const DOCTRINE_ID = /\b(?:SL|DEC|RV|ADR|REQ|POL|IMP|ISS|SPEC|RFC|REV|CHR|IDE|RSK
 
 /** Every file under PATH (a file or a directory), recursively. */
 function filesUnder(path: string): string[] {
-  if (!statSync(path).isDirectory()) return [path];
+  if (!statSync(path).isDirectory()) {return [path];}
   return readdirSync(path).flatMap((name) => filesUnder(join(path, name)));
 }
 
@@ -313,7 +312,7 @@ test('refusal tokens: the sources\' refusal unions equal the active pi-agent-res
 
 test('result keys and types: every fixture matches the Fields table at every level, and each nullable field is null somewhere', () => {
   const results = fixtures();
-  for (const [label, doc] of Object.entries(results)) assert.equal(doc.state, label.split(' ')[0], `the ${label} fixture`);
+  for (const [label, doc] of Object.entries(results)) {assert.equal(doc.state, label.split(' ')[0], `the ${label} fixture`);}
   assert.deepEqual(new Set(Object.values(results).map((doc) => doc.state)), new Set(RESULT_STATES), 'a fixture for every state');
   assert.ok(results.completed.status && (results.completed.status.alerts as unknown[]).length > 0, 'an alert element is checked');
   assert.deepEqual(keysAndTypesViolations(read(RESULT_CONTRACT), results), []);

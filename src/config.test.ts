@@ -6,8 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveLocations } from './config.ts';
-import type { Resolved } from './config.ts';
+import { resolveLocations, type Resolved } from './config.ts';
 
 const LAUNCH = '/work/project';
 const HOME = '/home/someone';

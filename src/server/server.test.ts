@@ -13,8 +13,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
 import { packageVersion } from '../root.ts';
+import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
 import {
   attempts,
   callLine,
@@ -30,9 +30,8 @@ import {
   validPolicy,
   waitForPath,
   workspace,
-  xdgProfileLayer,
+  xdgProfileLayer, type Env, type Rig 
 } from './test-rig.ts';
-import type { Env, Rig } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
 
@@ -229,7 +228,7 @@ test('SIGTERM to the server process shuts down through the same path and exits 0
   const server = spawn(...serverCommand, { cwd: rig.launchDir, env: rig.env, stdio: ['pipe', 'pipe', 'pipe'] });
   const stderr: string[] = [];
   server.stderr.on('data', (chunk: Buffer) => stderr.push(String(chunk)));
-  const exited = new Promise<number | null>((resolve) => server.once('exit', (code) => resolve(code)));
+  const exited = new Promise<number | null>((resolve) => server.once('exit', (code) => { resolve(code); }));
   t.after(() => server.kill('SIGKILL'));
 
   server.stdin.write(`${callLine(64, { prompt: 'work', profile: 'read', cwd: rig.root })}\n`);
@@ -363,7 +362,7 @@ test('no member of pi/mcp outside its tests authors a jail flag (design sec-3, S
   for (const name of sources) {
     const text = readFileSync(join(moduleDir, name), 'utf8');
     text.split('\n').forEach((sourceLine, index) => {
-      if (forbidden.test(sourceLine)) offenders.push(`${name}:${index + 1}: ${sourceLine.trim()}`);
+      if (forbidden.test(sourceLine)) {offenders.push(`${name}:${index + 1}: ${sourceLine.trim()}`);}
     });
   }
   assert.deepEqual(offenders, []);

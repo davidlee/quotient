@@ -10,8 +10,7 @@
 import { serve } from './server/server.ts';
 import { main as reduce } from './reduce/cli.ts';
 import { packageVersion } from './root.ts';
-import { resolveLocations } from './config.ts';
-import type { Env } from './config.ts';
+import { resolveLocations, type Env } from './config.ts';
 import { loadProfiles } from './server/profiles.ts';
 import { HELP_SECTIONS, loadHelp, renderContext, sectionName, sectionText } from './help/help.ts';
 
@@ -58,7 +57,7 @@ function help(section: string | undefined, env: Env, launchDir: string): number 
  *  signal takes the default action, the operator's way out of a stuck shutdown. */
 function shutdownSignal(): AbortSignal {
   const shutdown = new AbortController();
-  for (const name of ['SIGTERM', 'SIGINT'] as const) process.once(name, () => shutdown.abort(name));
+  for (const name of ['SIGTERM', 'SIGINT'] as const) {process.once(name, () => { shutdown.abort(name); });}
   return shutdown.signal;
 }
 
@@ -66,7 +65,7 @@ async function run(argv: string[]): Promise<number> {
   const [verb, ...rest] = argv;
   switch (verb) {
     case undefined:
-      if (process.stdin.isTTY) process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client. Try `quotient help`. Ctrl-D exits.\n');
+      if (process.stdin.isTTY) {process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client. Try `quotient help`. Ctrl-D exits.\n');}
       await serve(process.stdin, process.stdout, process.env, process.stderr, {
         launchDir: process.cwd(),
         signal: shutdownSignal(),

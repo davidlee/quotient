@@ -36,3 +36,14 @@ First run: shellcheck clean; eslint 1354 problems (src 619, test 735;
   functions (worst 38/40/46).
 - Hotspots: `src/reduce/reduce.ts` 155, `src/server/profiles.test.ts` 128,
   `src/server/server.ts` 85.
+
+## Noise pass (2026-10-24)
+
+1354 → 575 errors, no behaviour change (328 tests, `just gate` green):
+`no-floating-promises` allows node:test's runner calls
+(`allowForKnownSafeCalls`); `consistent-type-definitions` set to `type`
+(house style); then `eslint --fix` (curly, inline type imports, import
+order, …). The remainder is mostly the unsafe-`any` family around
+`Record<string, any>` test helpers and `src/reduce/reduce.ts`, type
+assertions, and template-expression typing — hand work. Per-file counts:
+`.doctrine/slice/002/lint-baseline.tsv` (SL-002 ratchets against it).

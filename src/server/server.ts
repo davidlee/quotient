@@ -13,26 +13,19 @@
 // incremental and ends at stdin EOF — no timer, no poll, no child.
 import { StringDecoder } from 'node:string_decoder';
 import { writeFileSync } from 'node:fs';
-import { addAbortSignal } from 'node:stream';
-import type { Readable, Writable } from 'node:stream';
-import { reduce } from '../reduce/reduce.ts';
-import type { Reduced } from '../reduce/reduce.ts';
-import { createLatch, failedResult, refusedResult, resultFor } from './result.ts';
-import type { AgentResult } from './result.ts';
+import { addAbortSignal, type Readable, type Writable } from 'node:stream';
+import { reduce, type Reduced } from '../reduce/reduce.ts';
+import { resolveLocations, usable, type Locations } from '../config.ts';
+import { loadHelp, renderContext, sectionText, type HelpSnapshot, type Section } from '../help/help.ts';
+import { packageVersion } from '../root.ts';
+import { createLatch, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
 import { admitCall, clampCeilings, formExtensions, selectForm, transcriptBudget } from './policy.ts';
-import { resolveLocations, usable } from '../config.ts';
-import type { Locations } from '../config.ts';
-import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot } from './profiles.ts';
-import type { Snapshot } from './profiles.ts';
-import { loadHelp, renderContext, sectionText } from '../help/help.ts';
-import type { HelpSnapshot, Section } from '../help/help.ts';
+import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot, type Snapshot } from './profiles.ts';
 import { acquireSession } from './session.ts';
 import { checkChildView } from './childview.ts';
-import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe } from './evidence.ts';
-import type { CallId, RunLayout } from './evidence.ts';
+import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe, type CallId, type RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
 import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
-import { packageVersion } from '../root.ts';
 
 export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
@@ -155,19 +148,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  */
 function readAgentRequest(value: Record<string, unknown>): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
   for (const field of Object.keys(value)) {
-    if (!ARGUMENT_FIELDS.includes(field)) return { ok: false, detail: `unknown field: ${field}` };
+    if (!ARGUMENT_FIELDS.includes(field)) {return { ok: false, detail: `unknown field: ${field}` };}
   }
-  if (value.prompt === undefined) return { ok: false, detail: 'prompt is required' };
-  if (typeof value.prompt !== 'string') return { ok: false, detail: 'prompt must be a string' };
-  if (value.profile === undefined) return { ok: false, detail: 'profile is required' };
-  if (typeof value.profile !== 'string') return { ok: false, detail: 'profile must be a string' };
+  if (value.prompt === undefined) {return { ok: false, detail: 'prompt is required' };}
+  if (typeof value.prompt !== 'string') {return { ok: false, detail: 'prompt must be a string' };}
+  if (value.profile === undefined) {return { ok: false, detail: 'profile is required' };}
+  if (typeof value.profile !== 'string') {return { ok: false, detail: 'profile must be a string' };}
 
   const request: AgentRequest = { prompt: value.prompt, profile: value.profile };
 
   for (const field of ['cwd', 'session'] as const) {
     const holder = value[field];
-    if (holder === undefined) continue;
-    if (typeof holder !== 'string') return { ok: false, detail: `${field} must be a string` };
+    if (holder === undefined) {continue;}
+    if (typeof holder !== 'string') {return { ok: false, detail: `${field} must be a string` };}
     request[field] = holder;
   }
 
@@ -181,18 +174,18 @@ function readAgentRequest(value: Record<string, unknown>): { ok: true; request: 
 
   if (value.ceilings !== undefined) {
     const ceilings = value.ceilings;
-    if (!isRecord(ceilings)) return { ok: false, detail: 'ceilings must be an object' };
+    if (!isRecord(ceilings)) {return { ok: false, detail: 'ceilings must be an object' };}
     for (const field of Object.keys(ceilings)) {
       if (field === 'tokens') {
         return { ok: false, detail: 'ceilings.tokens is no longer supported; use ceilings.context_tokens' };
       }
-      if (!CEILING_FIELDS.includes(field)) return { ok: false, detail: `unknown field: ceilings.${field}` };
+      if (!CEILING_FIELDS.includes(field)) {return { ok: false, detail: `unknown field: ceilings.${field}` };}
       const limit = ceilings[field];
       if (typeof limit !== 'number' || !Number.isFinite(limit)) {
         return { ok: false, detail: `ceilings.${field} must be a finite number` };
       }
     }
-    request.ceilings = ceilings as AgentRequest['ceilings'];
+    request.ceilings = ceilings;
   }
 
   if (value.transcript_budget_bytes !== undefined) {
@@ -208,11 +201,11 @@ function readAgentRequest(value: Record<string, unknown>): { ok: true; request: 
 
 /** Unwrap a `tools/call` params object down to the tool's own arguments. */
 function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
-  if (!isRecord(params)) return { ok: false, detail: 'params is not an object' };
+  if (!isRecord(params)) {return { ok: false, detail: 'params is not an object' };}
   if (params.name !== PI_AGENT_TOOL.name) {
     return { ok: false, detail: `name must be "${PI_AGENT_TOOL.name}"` };
   }
-  if (!isRecord(params.arguments)) return { ok: false, detail: 'arguments is not an object' };
+  if (!isRecord(params.arguments)) {return { ok: false, detail: 'arguments is not an object' };}
   return readAgentRequest(params.arguments);
 }
 
@@ -267,15 +260,15 @@ async function callTool(
 ): Promise<ToolResult> {
   // A snapshot that did not load is a start-up-refused server, not a per-call
   // discovery: every call answers the reason and the path, whatever its shape.
-  if (!context.startup.ok) return refused(context, id, 'profile-invalid', startupFailure(context.startup));
+  if (!context.startup.ok) {return refused(context, id, 'profile-invalid', startupFailure(context.startup));}
 
   const snapshot = context.startup.profiles;
   const parsed = readToolCall(params);
-  if (!parsed.ok) return refused(context, id, 'request-invalid', parsed.detail);
+  if (!parsed.ok) {return refused(context, id, 'request-invalid', parsed.detail);}
   const request = parsed.request;
 
   const admission = admitCall(context.locations, id);
-  if (!admission.ok) return toolResult(refusedResult(admission.reason, admission.detail));
+  if (!admission.ok) {return toolResult(refusedResult(admission.reason, admission.detail));}
 
   const refuse = (reason: string, detail: string): ToolResult => {
     appendAttempt(admission.runDir, { callId: id, reason, detail, policyDigest: admission.digest });
@@ -285,27 +278,27 @@ async function callTool(
   // Step 3: the profile, from the start-up snapshot only, its capability pinned
   // by the policy's map.
   const profile = resolveProfile(snapshot, request.profile, admission.policy.profiles);
-  if (!profile.ok) return refuse(profile.reason, profile.detail);
+  if (!profile.ok) {return refuse(profile.reason, profile.detail);}
 
   // Step 4: the root, canonicalised and allowlisted by components.
   const root = resolveRoot(request.cwd, context.launchDir, admission.policy.roots);
-  if (!root.ok) return refuse(root.reason, root.detail);
+  if (!root.ok) {return refuse(root.reason, root.detail);}
 
   // Step 5: the capability selects the wrapper form, and the form's declared
   // extensions must be able to deliver the profile's tools (EX-7).
   const form = selectForm(admission.policy, profile.profile.filesystem);
-  if (!form.ok) return refuse(form.reason, form.detail);
+  if (!form.ok) {return refuse(form.reason, form.detail);}
   const extensions = checkProfileExtensions(profile.profile, formExtensions(form.form));
-  if (!extensions.ok) return refuse(extensions.reason, extensions.detail);
+  if (!extensions.ok) {return refuse(extensions.reason, extensions.detail);}
 
   // Step 6: the ceilings, clamped downward.
   const ceilings = clampCeilings(request.ceilings, admission.policy.maxima);
-  if (!ceilings.ok) return refuse(ceilings.reason, ceilings.detail);
+  if (!ceilings.ok) {return refuse(ceilings.reason, ceilings.detail);}
 
   // The call's `tools` may only narrow the profile's snapshotted set; the whole
   // narrowed list is what the launch form will hand to `--tools` (PHASE-06).
   const tools = effectiveTools(profile.profile, request.tools);
-  if (!tools.ok) return refuse(tools.reason, tools.detail);
+  if (!tools.ok) {return refuse(tools.reason, tools.detail);}
 
   // The admitted values (`root.root`, `form.form`, `ceilings.ceilings`,
   // `tools.tools`) and the snapshot digest are what PHASE-06's spawn consumes.
@@ -323,7 +316,7 @@ async function callTool(
     callId: id,
     policyDigest: admission.digest,
   });
-  if (!session.ok) return refuse(session.reason, session.detail);
+  if (!session.ok) {return refuse(session.reason, session.detail);}
 
   // The run's evidence layout, allocated once and handed to the spawn: the spawn
   // would allocate the same five paths itself, and a throw before it returns must
@@ -339,7 +332,7 @@ async function callTool(
     policyPath: admission.policyPath,
     // The cause token stays the ladder's input; the trigger rides along
     // additively, so the abort's audit record can name the crossing.
-    abort: (trigger) => controller.abort({ cause: trigger.cause, trigger }),
+    abort: (trigger) => { controller.abort({ cause: trigger.cause, trigger }); },
     idleMs: context.gateIdleMs,
   });
 
@@ -361,7 +354,7 @@ async function callTool(
       profileLayers: context.locations.profileLayers,
       helpLayers: context.locations.helpLayers,
     });
-    if (!view.ok) return refuse(view.reason, view.detail);
+    if (!view.ok) {return refuse(view.reason, view.detail);}
 
     // Design sec-6's failure policy: a server that cannot record a refusal must
     // not start a run it also could not abort-audit. Decided before the run
@@ -430,9 +423,9 @@ async function callTool(
     // ladder's own cause, a launch that never ran, then an evidence append that
     // failed. `!wrote` is the same failure as a failed audit append — the run's own
     // evidence cannot be written — so it is the same cause, recorded once.
-    if (run.abort !== null) latch.record(run.abort);
-    if (run.spawnFailed) latch.record('spawn');
-    if (run.auditFailed || !wrote) latch.record('audit');
+    if (run.abort !== null) {latch.record(run.abort);}
+    if (run.spawnFailed) {latch.record('spawn');}
+    if (run.auditFailed || !wrote) {latch.record('audit');}
 
     // The commit point: after the ladder, the reap, the drain, the final accounting
     // (the reduction above) and the `exit`/abort evidence appends (inside the
@@ -465,7 +458,7 @@ function reply(context: Context, message: Record<string, unknown>): void {
 /** Dispatch one record. An unknown method with an id answers -32601; anything
  *  unparsable is dropped with a stderr note (there is no id to answer with). */
 async function handleLine(line: string, context: Context): Promise<void> {
-  if (line.trim().length === 0) return;
+  if (line.trim().length === 0) {return;}
 
   let message: unknown;
   try {
@@ -490,10 +483,10 @@ async function handleLine(line: string, context: Context): Promise<void> {
       // DEC-103: a wire act with a defined outcome. The request id it names is
       // aborted through the one ladder and reports `cancelled`; an id naming no
       // in-flight call is ignored — never a protocol error, and never a guess.
-      return abortNamed(message.params, context);
+      { abortNamed(message.params, context); return; }
   }
 
-  if (!hasId) return; // a notification for a request method: nothing to answer
+  if (!hasId) {return;} // a notification for a request method: nothing to answer
 
   switch (method) {
     case 'initialize':
@@ -527,12 +520,12 @@ async function handleLine(line: string, context: Context): Promise<void> {
       // the list already under its key: both calls stay reachable by the id they
       // share, for the cancellation and for the EOF sweep alike.
       const already = context.inFlight.get(key);
-      if (already === undefined) context.inFlight.set(key, [entry]);
-      else already.push(entry);
+      if (already === undefined) {context.inFlight.set(key, [entry]);}
+      else {already.push(entry);}
       entry.done = (async () => {
         try {
           const result = await callTool(message.params, id, context, entry.controller);
-          if (!context.closed) reply(context, { id, result });
+          if (!context.closed) {reply(context, { id, result });}
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
           context.diagnostics.write(`quotient: call ${String(id)} failed while running: ${detail}\n`);
@@ -553,8 +546,8 @@ async function handleLine(line: string, context: Context): Promise<void> {
           const running = context.inFlight.get(key);
           if (running !== undefined) {
             const at = running.indexOf(entry);
-            if (at >= 0) running.splice(at, 1);
-            if (running.length === 0) context.inFlight.delete(key);
+            if (at >= 0) {running.splice(at, 1);}
+            if (running.length === 0) {context.inFlight.delete(key);}
           }
         }
       })();
@@ -571,9 +564,9 @@ type Startup = { ok: true; profiles: Snapshot; help: HelpSnapshot } | { ok: fals
 
 function loadStartup(locations: Locations): Startup {
   const profiles = loadProfiles(locations.profileLayers);
-  if (!profiles.ok) return profiles;
+  if (!profiles.ok) {return profiles;}
   const help = loadHelp(locations.helpLayers);
-  if (!help.ok) return help;
+  if (!help.ok) {return help;}
   return { ok: true, profiles: profiles.snapshot, help: help.snapshot };
 }
 
@@ -615,12 +608,12 @@ export type ServeOptions = {
  * malformed params object aborts nothing and is not an error.
  */
 function abortNamed(params: unknown, context: Context): void {
-  if (!isRecord(params)) return;
+  if (!isRecord(params)) {return;}
   const requestId = params.requestId;
-  if (typeof requestId !== 'string' && typeof requestId !== 'number') return;
+  if (typeof requestId !== 'string' && typeof requestId !== 'number') {return;}
   // Every call running under the id, not just the most recent one: two calls may
   // share a wire id, and a cancellation names the id.
-  for (const call of context.inFlight.get(callKey(requestId)) ?? []) call.controller.abort('cancelled');
+  for (const call of context.inFlight.get(callKey(requestId)) ?? []) {call.controller.abort('cancelled');}
 }
 
 /**
@@ -629,14 +622,14 @@ function abortNamed(params: unknown, context: Context): void {
  * the iterator reports as an AbortError. Only the input's own errors are caught
  * here; an error from the consumer's loop body is not the input's and propagates.
  */
-async function* inputChunks(input: Readable, diagnostics: Writable, signal?: AbortSignal): AsyncGenerator<unknown> {
-  if (signal) addAbortSignal(signal, input);
+async function* inputChunks(input: Readable, diagnostics: Writable, signal?: AbortSignal): AsyncGenerator {
+  if (signal) {addAbortSignal(signal, input);}
   try {
-    for await (const chunk of input) yield chunk;
+    for await (const chunk of input) {yield chunk;}
   } catch (error) {
     // A failed input is the client gone, as EOF is; the signal's AbortError is
     // the operator's shutdown and needs no note.
-    if (!signal?.aborted) diagnostics.write(`quotient: the input failed: ${(error as Error).message}\n`);
+    if (!signal?.aborted) {diagnostics.write(`quotient: the input failed: ${(error as Error).message}\n`);}
   }
 }
 
@@ -662,7 +655,7 @@ export async function serve(
   const startup = loadStartup(locations);
   // One line, naming the path: the server refuses from here on, and an operator
   // needs to know which file to fix.
-  if (!startup.ok) diagnostics.write(`quotient: ${startupFailure(startup)}\n`);
+  if (!startup.ok) {diagnostics.write(`quotient: ${startupFailure(startup)}\n`);}
   const context: Context = {
     output,
     diagnostics,
@@ -684,7 +677,7 @@ export async function serve(
     while (newline >= 0) {
       let record = pending.slice(0, newline);
       pending = pending.slice(newline + 1);
-      if (record.endsWith('\r')) record = record.slice(0, -1);
+      if (record.endsWith('\r')) {record = record.slice(0, -1);}
       await handleLine(record, context);
       newline = pending.indexOf('\n');
     }
@@ -698,6 +691,6 @@ export async function serve(
   // written down the closed channel, and no child outlives the server.
   context.closed = true;
   const inFlight = [...context.inFlight.values()].flat();
-  for (const call of inFlight) call.controller.abort('eof');
+  for (const call of inFlight) {call.controller.abort('eof');}
   await Promise.all(inFlight.map((call) => call.done));
 }

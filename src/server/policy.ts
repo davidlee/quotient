@@ -12,13 +12,10 @@
 // refused. Nothing is defaulted from the caller's working directory.
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { usable } from '../config.ts';
-import type { Locations } from '../config.ts';
-import { appendAttempt, sha256Hex } from './evidence.ts';
+import { usable, type Locations } from '../config.ts';
+import { appendAttempt, sha256Hex, type CallId } from './evidence.ts';
 import { errorCode } from './paths.ts';
-import type { CallId } from './evidence.ts';
-import { MCP_EXTENSION, PROFILE_NAME, isFilesystem } from './profiles.ts';
-import type { Filesystem } from './profiles.ts';
+import { MCP_EXTENSION, PROFILE_NAME, isFilesystem, type Filesystem } from './profiles.ts';
 
 
 /** The only posture this build serves (design sec-1). */
@@ -135,7 +132,7 @@ export function readPolicy(policyPath: string): { ok: true; policy: Policy; dige
     return { ok: false, reason: 'policy-invalid', detail: `${policyPath} is not valid JSON`, digest };
   }
   const check = validatePolicy(parsed);
-  if (!check.ok) return { ok: false, reason: check.reason, detail: check.detail, digest };
+  if (!check.ok) {return { ok: false, reason: check.reason, detail: check.detail, digest };}
   return { ok: true, policy: check.policy, digest };
 }
 
@@ -152,26 +149,26 @@ export function readPolicy(policyPath: string): { ok: true; policy: Policy; dige
  * carried as a claim the spawn never acts on.
  */
 function readForm(field: string, value: unknown): { ok: true; form: Form } | { ok: false; detail: string } {
-  if (isAbsolutePath(value)) return { ok: true, form: { kind: 'confined', path: value, extensions: [] } };
+  if (isAbsolutePath(value)) {return { ok: true, form: { kind: 'confined', path: value, extensions: [] } };}
   if (!isRecord(value)) {
     return { ok: false, detail: `forms.${field} must be an absolute path string or an object carrying one` };
   }
   for (const key of Object.keys(value)) {
-    if (!FORM_KEYS.includes(key)) return { ok: false, detail: `unknown policy field: forms.${field}.${key}` };
+    if (!FORM_KEYS.includes(key)) {return { ok: false, detail: `unknown policy field: forms.${field}.${key}` };}
   }
   if (Object.hasOwn(value, 'unconfined')) {
-    if (Object.hasOwn(value, 'path')) return { ok: false, detail: `forms.${field}: path and unconfined are exclusive` };
-    if (Object.hasOwn(value, 'extensions')) return { ok: false, detail: `unknown policy field: forms.${field}.extensions` };
-    if (field === 'read') return { ok: false, detail: `forms.${field}: a read form cannot be unconfined` };
+    if (Object.hasOwn(value, 'path')) {return { ok: false, detail: `forms.${field}: path and unconfined are exclusive` };}
+    if (Object.hasOwn(value, 'extensions')) {return { ok: false, detail: `unknown policy field: forms.${field}.extensions` };}
+    if (field === 'read') {return { ok: false, detail: `forms.${field}: a read form cannot be unconfined` };}
     if (!isAbsolutePath(value.unconfined)) {
       return { ok: false, detail: `forms.${field}.unconfined must be an absolute path to pi (there is no PATH lookup)` };
     }
     return { ok: true, form: { kind: 'unconfined', pi: value.unconfined } };
   }
   const path = value.path;
-  if (!isAbsolutePath(path)) return { ok: false, detail: `forms.${field}.path must be an absolute path string` };
+  if (!isAbsolutePath(path)) {return { ok: false, detail: `forms.${field}.path must be an absolute path string` };}
   const extensions = value.extensions;
-  if (extensions === undefined) return { ok: true, form: { kind: 'confined', path, extensions: [] } };
+  if (extensions === undefined) {return { ok: true, form: { kind: 'confined', path, extensions: [] } };}
   if (!Array.isArray(extensions) || !extensions.every((extension) => typeof extension === 'string' && extension.length > 0)) {
     return { ok: false, detail: `forms.${field}.extensions must be an array of extension path strings` };
   }
@@ -192,11 +189,11 @@ function readForm(field: string, value: unknown): { ok: true; form: Form } | { o
  * policy that silently loses the constraint they meant to declare.
  */
 function validatePolicy(value: unknown): PolicyCheck {
-  if (!isRecord(value)) return invalid('the policy is not a JSON object');
+  if (!isRecord(value)) {return invalid('the policy is not a JSON object');}
 
   // The tag first: a document that does not say it is this schema is not read
   // against it, so no later check reports on a shape it was never written for.
-  if (!Object.hasOwn(value, 'schema')) return invalid('missing policy field: schema');
+  if (!Object.hasOwn(value, 'schema')) {return invalid('missing policy field: schema');}
   if (value.schema !== POLICY_SCHEMA) {
     if (value.schema === 'quotient-policy/1') {
       return invalid('quotient-policy/1 is not supported; migrate to quotient-policy/2 by choosing maxima.context_tokens and removing maxima.tokens');
@@ -216,14 +213,14 @@ function validatePolicy(value: unknown): PolicyCheck {
 
   const allowed = new Set([...REQUIRED_FIELDS, ...OPTIONAL_FIELDS]);
   for (const field of Object.keys(value)) {
-    if (!allowed.has(field)) return invalid(`unknown policy field: ${field}`);
+    if (!allowed.has(field)) {return invalid(`unknown policy field: ${field}`);}
   }
   for (const field of REQUIRED_FIELDS) {
-    if (!Object.hasOwn(value, field)) return invalid(`missing policy field: ${field}`);
+    if (!Object.hasOwn(value, field)) {return invalid(`missing policy field: ${field}`);}
   }
 
   const mode = value.mode;
-  if (typeof mode !== 'string') return invalid('mode must be a string');
+  if (typeof mode !== 'string') {return invalid('mode must be a string');}
   if (mode !== 'per-call') {
     return {
       ok: false,
@@ -238,12 +235,12 @@ function validatePolicy(value: unknown): PolicyCheck {
   }
 
   const maxima = value.maxima;
-  if (!isRecord(maxima)) return invalid('maxima must be an object');
+  if (!isRecord(maxima)) {return invalid('maxima must be an object');}
   for (const field of Object.keys(maxima)) {
     if (field === 'tokens') {
       return invalid('maxima.tokens is not supported; choose maxima.context_tokens and remove maxima.tokens');
     }
-    if (!MAXIMA_FIELDS.includes(field)) return invalid(`unknown policy field: maxima.${field}`);
+    if (!MAXIMA_FIELDS.includes(field)) {return invalid(`unknown policy field: maxima.${field}`);}
     const limit = maxima[field];
     if (typeof limit !== 'number' || !Number.isFinite(limit) || limit <= 0) {
       return invalid(`maxima.${field} must be a positive finite number`);
@@ -252,25 +249,25 @@ function validatePolicy(value: unknown): PolicyCheck {
   // A delegate with no ceiling is unbounded spend: every unit is bounded, and the
   // wall clock is the one that holds when the stream reports no usage (design sec-1).
   for (const field of MAXIMA_FIELDS) {
-    if (!Object.hasOwn(maxima, field)) return invalid(`missing policy field: maxima.${field}`);
+    if (!Object.hasOwn(maxima, field)) {return invalid(`missing policy field: maxima.${field}`);}
   }
 
   const profiles = value.profiles;
-  if (!isRecord(profiles)) return invalid('profiles must be an object mapping a profile name to "read" or "write"');
+  if (!isRecord(profiles)) {return invalid('profiles must be an object mapping a profile name to "read" or "write"');}
   for (const [name, capability] of Object.entries(profiles)) {
-    if (!PROFILE_NAME.test(name)) return invalid(`profiles.${name}: "${name}" is not a profile name (${PROFILE_NAME.source})`);
+    if (!PROFILE_NAME.test(name)) {return invalid(`profiles.${name}: "${name}" is not a profile name (${PROFILE_NAME.source})`);}
     if (!isFilesystem(capability)) {
       return invalid(`profiles.${name} must be "read" or "write"`);
     }
   }
 
   const forms = value.forms;
-  if (!isRecord(forms)) return invalid('forms must be an object');
+  if (!isRecord(forms)) {return invalid('forms must be an object');}
   const parsedForms: Forms = {};
   for (const field of Object.keys(forms)) {
-    if (!isFilesystem(field)) return invalid(`unknown policy field: forms.${field}`);
+    if (!isFilesystem(field)) {return invalid(`unknown policy field: forms.${field}`);}
     const parsed = readForm(field, forms[field]);
-    if (!parsed.ok) return invalid(parsed.detail);
+    if (!parsed.ok) {return invalid(parsed.detail);}
     parsedForms[field] = parsed.form;
   }
 
@@ -280,7 +277,7 @@ function validatePolicy(value: unknown): PolicyCheck {
   }
 
   const enabled = value.enabled;
-  if (typeof enabled !== 'boolean') return invalid('enabled must be a boolean');
+  if (typeof enabled !== 'boolean') {return invalid('enabled must be a boolean');}
 
   const budget = value.transcript_budget_bytes;
   if (budget !== undefined && (typeof budget !== 'number' || !Number.isInteger(budget) || budget < 0)) {
@@ -290,14 +287,14 @@ function validatePolicy(value: unknown): PolicyCheck {
   const policy: Policy = {
     schema: POLICY_SCHEMA,
     mode: 'per-call',
-    roots: roots as string[],
+    roots: roots,
     maxima: maxima as Required<Maxima>,
     profiles: profiles as Record<string, Filesystem>,
     forms: parsedForms,
-    exposure: exposure as string[],
+    exposure: exposure,
     enabled,
   };
-  if (budget !== undefined) policy.transcript_budget_bytes = budget as number;
+  if (budget !== undefined) {policy.transcript_budget_bytes = budget;}
   return { ok: true, policy };
 }
 
@@ -351,7 +348,7 @@ export function clampCeilings(requested: Maxima | undefined, maxima: Maxima): Ce
     const limit = requested?.[unit];
     const maximum = maxima[unit];
     if (limit === undefined) {
-      if (maximum !== undefined) ceilings[unit] = maximum;
+      if (maximum !== undefined) {ceilings[unit] = maximum;}
       continue;
     }
     if (maximum !== undefined && limit > maximum) {
@@ -380,9 +377,9 @@ export function clampCeilings(requested: Maxima | undefined, maxima: Maxima): Ce
  */
 export function transcriptBudget(requested?: number, policyMax?: number): number | undefined {
   const ceiling = policyMax !== undefined && policyMax > 0 ? policyMax : undefined;
-  if (ceiling === undefined) return requested;
-  if (requested === undefined) return ceiling;
-  if (requested <= 0) return ceiling;
+  if (ceiling === undefined) {return requested;}
+  if (requested === undefined) {return ceiling;}
+  if (requested <= 0) {return ceiling;}
   return Math.min(requested, ceiling);
 }
 
@@ -406,12 +403,12 @@ export function admitCall(locations: Locations, callId: CallId): Admission {
     return { ok: false, reason, detail, digest };
   };
 
-  if (!policyPath.ok) return refuse('policy-unavailable', policyPath.detail);
-  if (!runDir.ok) return refuse('policy-unavailable', runDir.detail);
-  if (!sessionHome.ok) return refuse('policy-unavailable', sessionHome.detail);
+  if (!policyPath.ok) {return refuse('policy-unavailable', policyPath.detail);}
+  if (!runDir.ok) {return refuse('policy-unavailable', runDir.detail);}
+  if (!sessionHome.ok) {return refuse('policy-unavailable', sessionHome.detail);}
 
   const loaded = readPolicy(policyPath.path);
-  if (!loaded.ok) return refuse(loaded.reason, loaded.detail, loaded.digest);
+  if (!loaded.ok) {return refuse(loaded.reason, loaded.detail, loaded.digest);}
 
   // The posture is fixed for the process lifetime (EX-11), and the mechanism is
   // the schema, not process state: every call re-reads and re-validates the

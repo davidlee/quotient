@@ -35,8 +35,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { errorCode } from './paths.ts';
-import { appendAttempt } from './evidence.ts';
-import type { CallId } from './evidence.ts';
+import { appendAttempt, type CallId } from './evidence.ts';
 import type { Filesystem } from './profiles.ts';
 
 /**
@@ -171,7 +170,7 @@ export type ProcessStart = { ok: true; starttime: string } | { ok: false; missin
  */
 function startTimeField(stat: string): string | null {
   const close = stat.lastIndexOf(')');
-  if (close < 0) return null;
+  if (close < 0) {return null;}
   const fields = stat.slice(close + 1).trim().split(/\s+/);
   const starttime = fields[19];
   return starttime !== undefined && /^\d+$/.test(starttime) ? starttime : null;
@@ -211,9 +210,9 @@ export type Liveness = 'alive' | 'stale' | 'unknown';
  * (EX-6).
  */
 export function observeLiveness(procDir: string, pid: number, starttime: string): Liveness {
-  if (!pidTableReadable(procDir)) return 'unknown';
+  if (!pidTableReadable(procDir)) {return 'unknown';}
   const observed = processStartTime(procDir, pid);
-  if (!observed.ok) return observed.missing ? 'stale' : 'unknown';
+  if (!observed.ok) {return observed.missing ? 'stale' : 'unknown';}
   return observed.starttime === starttime ? 'alive' : 'stale';
 }
 
@@ -254,7 +253,7 @@ type OwnershipRead =
  */
 function readOwnership(path: string): OwnershipRead {
   const read = readRecord(path);
-  if (!read.ok) return read;
+  if (!read.ok) {return read;}
   const pid = read.value.pid;
   const starttime = read.value.starttime;
   if (typeof pid !== 'number' || !Number.isInteger(pid)) {
@@ -368,7 +367,7 @@ function reclaim(
       // serialised and no record was observed: the plain create is legal again,
       // and it is re-attempted exactly once (never recursively — a second vanish
       // is a path that keeps changing under us, not a race to keep chasing).
-      if (!retried) return takeOwnership(paths, record, procDir, runDir, callId, policyDigest, true);
+      if (!retried) {return takeOwnership(paths, record, procDir, runDir, callId, policyDigest, true);}
       return {
         ok: false,
         reason: 'session-busy',
@@ -382,8 +381,8 @@ function reclaim(
     };
   }
   const liveness = observeLiveness(procDir, before.record.pid, before.record.starttime);
-  if (liveness === 'alive') return aliveRefusal(before.record);
-  if (liveness === 'unknown') return unknownRefusal(before.record, procDir);
+  if (liveness === 'alive') {return aliveRefusal(before.record);}
+  if (liveness === 'unknown') {return unknownRefusal(before.record, procDir);}
 
   try {
     closeSync(openSync(paths.claim, 'wx', OWNER_ONLY_FILE));
@@ -555,7 +554,7 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
   };
 
   const held = takeOwnership(paths, record, procDir, runDir, callId, options.policyDigest, false);
-  if (!held.ok) return refuse(held.reason, held.detail);
+  if (!held.ok) {return refuse(held.reason, held.detail);}
 
   // `<home>/<id>` is laid out only now, under the lock this call won: a refused
   // call leaves the session home exactly as it found it (EX-2), so the loser of a
@@ -587,7 +586,7 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
     root,
     capability,
     binding: bound.binding,
-    release: () => releaseSession(paths, record),
+    release: () => { releaseSession(paths, record); },
   };
 }
 
@@ -606,7 +605,7 @@ export function releaseSession(
 ): void {
   const observed = readOwnership(paths.lock);
   if (!observed.ok) {
-    if (observed.missing) return;
+    if (observed.missing) {return;}
     diagnostics.write(`quotient: leaving ${paths.lock} in place: ${observed.detail}\n`);
     return;
   }

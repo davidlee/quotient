@@ -4,12 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packageRoot, packageVersion } from './root.ts';
-import { validPolicy, workspace, xdgHelpLayer } from './server/test-rig.ts';
-import type { Env } from './server/test-rig.ts';
+import { validPolicy, workspace, xdgHelpLayer, type Env } from './server/test-rig.ts';
 
 const CLI = new URL('./cli.ts', import.meta.url).pathname;
 

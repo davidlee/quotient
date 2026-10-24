@@ -30,7 +30,7 @@ export function canonicalPath(path: string): string {
       return tail.length === 0 ? real : join(real, ...tail);
     } catch {
       const parent = dirname(head);
-      if (parent === head) return target;
+      if (parent === head) {return target;}
       tail.unshift(basename(head));
       head = parent;
     }
@@ -44,8 +44,8 @@ export function canonicalPath(path: string): string {
  */
 export function within(outer: string, inner: string): boolean {
   const rel = relative(outer, inner);
-  if (rel === '') return true;
-  if (isAbsolute(rel)) return false;
+  if (rel === '') {return true;}
+  if (isAbsolute(rel)) {return false;}
   return rel !== '..' && !rel.startsWith(`..${sep}`);
 }
 
@@ -59,7 +59,7 @@ export const errorCode = (error: unknown): string =>
  * deployment, not an absent one. The profile and help layers share the rule.
  */
 export function absent(path: string, error: unknown): boolean {
-  if (errorCode(error) !== 'ENOENT') return false;
+  if (errorCode(error) !== 'ENOENT') {return false;}
   try {
     lstatSync(path);
     return false;

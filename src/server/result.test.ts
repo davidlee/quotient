@@ -11,8 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reduce } from '../reduce/reduce.ts';
-import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD } from './test-rig.ts';
-import type { RunInput } from './test-rig.ts';
+import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD, type RunInput } from './test-rig.ts';
 import {
   CAUSE_STATE,
   createLatch,
@@ -22,18 +21,16 @@ import {
   RESULT_REFUSAL_REASONS,
   RESULT_SCHEMA,
   RESULT_STATES,
-  resultFor,
   TERMINATIONS,
-  validateAgentResult,
+  validateAgentResult, type AgentResult, type LatchCause, type Reachability, type ResultState, type Termination 
 } from './result.ts';
 import { transcriptBudget } from './policy.ts';
-import type { AgentResult, LatchCause, Reachability, ResultState, Termination } from './result.ts';
 
 /** Every mapped outcome must satisfy the advertised schema, and `termination` must
  *  always be `causes[0]` (sec-5, EX-4). */
 function assertConforms(doc: AgentResult, label: string): void {
   const check = validateAgentResult(doc);
-  if (!check.ok) assert.fail(`${label}: ${check.detail}`);
+  if (!check.ok) {assert.fail(`${label}: ${check.detail}`);}
   assert.equal(doc.schema, RESULT_SCHEMA);
   assert.equal(doc.causes[0], doc.termination, `${label}: termination is always causes[0]`);
   if (doc.status !== null) {
@@ -391,7 +388,7 @@ test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every
 
   await t.test('the table is total: every cause maps to a state and every state is reachable from it', () => {
     assert.deepEqual(Object.keys(CAUSE_STATE).sort(), [...TERMINATIONS].sort());
-    for (const token of TERMINATIONS) assert.ok(RESULT_STATES.includes(CAUSE_STATE[token]), token);
+    for (const token of TERMINATIONS) {assert.ok(RESULT_STATES.includes(CAUSE_STATE[token]), token);}
     assert.deepEqual([...new Set(Object.values(CAUSE_STATE))].sort(), [...RESULT_STATES].sort());
   });
 
@@ -427,7 +424,7 @@ test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every
   await t.test('a cause token outside the enum fails the suite, not the reader', () => {
     const outside = { ...buildResult({ causes: ['timeout'] }).doc, termination: 'backstop', causes: ['backstop'] };
     const check = validateAgentResult(outside);
-    if (check.ok) assert.fail('a cause token outside the enum must be rejected');
+    if (check.ok) {assert.fail('a cause token outside the enum must be rejected');}
     assert.match(check.detail, /backstop/);
   });
 
@@ -608,6 +605,6 @@ test('every state and every termination is produced by a named path or declared 
   // Every state is reached by a produced token's row, so the state enum has no
   // member the table cannot reach.
   const states = new Set([...produced.values()].map((doc) => doc.state));
-  for (const state of RESULT_STATES) assert.ok(states.has(state), `no named path produces state ${state}`);
+  for (const state of RESULT_STATES) {assert.ok(states.has(state), `no named path produces state ${state}`);}
   assert.ok(states.has('ceiling_exceeded'), 'the gate\'s own state is reachable, not merely declared');
 });

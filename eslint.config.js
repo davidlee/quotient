@@ -33,7 +33,15 @@ export default defineConfig(
       '@typescript-eslint/no-unsafe-return': 'error',
       '@typescript-eslint/no-unsafe-call': 'error',
       '@typescript-eslint/no-unsafe-member-access': 'error',
-      '@typescript-eslint/no-floating-promises': 'error',
+      // node:test's `test`/`describe` return promises the runner awaits.
+      '@typescript-eslint/no-floating-promises': [
+        'error',
+        {
+          allowForKnownSafeCalls: [
+            { from: 'package', package: 'node:test', name: ['test', 'describe', 'it', 'suite', 'before', 'after', 'beforeEach', 'afterEach'] },
+          ],
+        },
+      ],
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
 
@@ -56,6 +64,8 @@ export default defineConfig(
       '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/explicit-function-return-type': 'error',
       '@typescript-eslint/explicit-module-boundary-types': 'error',
+      // House style is `type X = { … }` (stylistic preset defaults to interface).
+      '@typescript-eslint/consistent-type-definitions': ['error', 'type'],
 
       complexity: ['error', 8],
       'max-depth': ['error', 3],

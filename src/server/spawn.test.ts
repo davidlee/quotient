@@ -14,10 +14,8 @@ import assert from 'node:assert/strict';
 import { spawn as spawnProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { buildArgv, childEnv, runChild } from './spawn.ts';
-import type { SpawnPlan } from './spawn.ts';
-import { runLayout } from './evidence.ts';
-import type { RunLayout } from './evidence.ts';
+import { buildArgv, childEnv, runChild, type SpawnPlan } from './spawn.ts';
+import { runLayout, type RunLayout } from './evidence.ts';
 import type { Profile } from './profiles.ts';
 import {
   callLine,
@@ -40,9 +38,8 @@ import {
   SETTLED,
   serverCommand,
   waitForPath,
-  waitForReplies,
+  waitForReplies, type Env, type Rig 
 } from './test-rig.ts';
-import type { Env, Rig } from './test-rig.ts';
 
 
 /** A usage-bearing assistant message with a terminal stop reason: a send that
@@ -93,7 +90,7 @@ const noAbort = (): AbortController => new AbortController();
 async function waitForRunDir(runDir: string): Promise<string> {
   const deadline = Date.now() + 10000;
   while (runDirs(runDir).length === 0) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for a run directory under ${runDir}`);
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for a run directory under ${runDir}`);}
     await pause(5);
   }
   return onlyRunDir(runDir);
@@ -117,7 +114,7 @@ async function oneShot(t: TestContext, rig: Rig, request: string, extraEnv: Env 
   child.stderr.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => out.push(chunk));
   child.stderr.on('data', (chunk: string) => err.push(chunk));
-  const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+  const exited = new Promise<number | null>((resolve) => child.on('exit', (code) => { resolve(code); }));
   child.stdin.write(`${request}\n`);
   const deadline = Date.now() + 20000;
   while (!out.join('').includes('\n')) {
@@ -809,7 +806,7 @@ test('two server processes on one session: the loser is refused session-busy and
   const winnerOut: string[] = [];
   winner.stdout.setEncoding('utf8');
   winner.stdout.on('data', (chunk: string) => winnerOut.push(chunk));
-  const exited = new Promise<number | null>((resolve) => winner.on('exit', (code) => resolve(code)));
+  const exited = new Promise<number | null>((resolve) => winner.on('exit', (code) => { resolve(code); }));
   winner.stdin.write(`${callLine(41, { prompt: 'winner', profile: 'read', cwd: rig.root, session: 'shared' })}\n`);
 
   await waitForPath(join(rig.markerDir, 'pids'), 'the winner\'s child');
@@ -822,7 +819,7 @@ test('two server processes on one session: the loser is refused session-busy and
   // would abort the very run this test is about.
   const deadline = Date.now() + 20000;
   while (!winnerOut.join('').includes('\n')) {
-    if (Date.now() > deadline) throw new Error('the winner never answered');
+    if (Date.now() > deadline) {throw new Error('the winner never answered');}
     await pause(5);
   }
   winner.stdin.end();
@@ -920,7 +917,7 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
   server.write(callLine(71, { prompt: 'second', profile: 'read', cwd: rig.root, session: 'dupe-two' }));
   const started = Date.now() + 10000;
   while (markerPids(rig, 'pids').length < 2) {
-    if (Date.now() > started) throw new Error('timed out waiting for both launchers');
+    if (Date.now() > started) {throw new Error('timed out waiting for both launchers');}
     await pause(5);
   }
 
@@ -935,13 +932,13 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
     assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
     assert.deepEqual(doc.causes, ['cancelled']);
   }
-  for (const pid of markerPids(rig, 'pids')) assert.equal(isAlive(pid), false, 'both cancelled children are gone');
+  for (const pid of markerPids(rig, 'pids')) {assert.equal(isAlive(pid), false, 'both cancelled children are gone');}
 
   // Two calls, two run directories, each with its own abort record: the first
   // call's cleanup did not remove the second from the index and vice versa.
   const audits = runDirs(rig.runDir).map((name) => jsonLines(join(rig.runDir, name, 'audit.jsonl')));
   assert.equal(audits.length, 2);
-  for (const records of audits) assert.equal(records.find((record) => record.record === 'abort')?.cause, 'cancelled');
+  for (const records of audits) {assert.equal(records.find((record) => record.record === 'abort')?.cause, 'cancelled');}
 });
 
 test('stdin EOF aborts every in-flight run through the same ladder, writes no result and leaves no child behind', async (t) => {

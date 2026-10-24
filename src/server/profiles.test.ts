@@ -21,9 +21,8 @@ import {
   loadProfiles,
   resolveProfile,
   resolveRoot,
-  toolsArgument,
+  toolsArgument, type Filesystem 
 } from './profiles.ts';
-import type { Filesystem } from './profiles.ts';
 import { readPolicy } from './policy.ts';
 import {
   attempts,
@@ -33,9 +32,8 @@ import {
   profileDocument,
   validPolicy,
   writeProfiles,
-  xdgProfileLayer,
+  xdgProfileLayer, type Env 
 } from './test-rig.ts';
-import type { Env } from './test-rig.ts';
 
 /** The example documents the package ships to start from (not a built-in layer). */
 const EXAMPLE_PROFILES = new URL('../../examples/profiles/', import.meta.url).pathname;
@@ -53,7 +51,7 @@ const pinRead = (...names: string[]): Record<string, Filesystem> =>
 
 function snapshotOf(documents: Record<string, string>) {
   const loaded = loadProfiles([profileDir(documents)]);
-  if (!loaded.ok) assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);
+  if (!loaded.ok) {assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);}
   return loaded.snapshot;
 }
 
@@ -61,7 +59,7 @@ function snapshotOf(documents: Record<string, string>) {
 function refuseDocument(text: string, detail: RegExp): void {
   const dir = profileDir({ read: text });
   const loaded = loadProfiles([dir]);
-  if (loaded.ok) assert.fail(`expected a start-up refusal matching ${detail}`);
+  if (loaded.ok) {assert.fail(`expected a start-up refusal matching ${detail}`);}
   assert.equal(loaded.path, join(dir, 'read.md'));
   assert.match(loaded.detail, detail);
 }
@@ -71,22 +69,22 @@ function refuseProfile(
   reason: string,
   detail?: RegExp,
 ): void {
-  if (resolution.ok) assert.fail(`expected a ${reason} refusal, got profile "${resolution.profile.name}"`);
+  if (resolution.ok) {assert.fail(`expected a ${reason} refusal, got profile "${resolution.profile.name}"`);}
   assert.equal(resolution.reason, reason);
-  if (detail !== undefined) assert.match(resolution.detail, detail);
+  if (detail !== undefined) {assert.match(resolution.detail, detail);}
 }
 
 function refuseRoot(resolution: ReturnType<typeof resolveRoot>, reason: string, detail?: RegExp): void {
-  if (resolution.ok) assert.fail(`expected a ${reason} refusal, got root "${resolution.root}"`);
+  if (resolution.ok) {assert.fail(`expected a ${reason} refusal, got root "${resolution.root}"`);}
   assert.equal(resolution.reason, reason);
-  if (detail !== undefined) assert.match(resolution.detail, detail);
+  if (detail !== undefined) {assert.match(resolution.detail, detail);}
 }
 
 // ── The example documents ──────────────────────────────────────────────────
 
 test('every example document loads as a profile layer', () => {
   const loaded = loadProfiles([EXAMPLE_PROFILES]);
-  if (!loaded.ok) assert.fail(`the example profiles do not validate: ${loaded.path}: ${loaded.detail}`);
+  if (!loaded.ok) {assert.fail(`the example profiles do not validate: ${loaded.path}: ${loaded.detail}`);}
   const snapshot = loaded.snapshot;
 
   assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
@@ -98,14 +96,14 @@ test('every example document loads as a profile layer', () => {
   assert.ok(shipped.includes('read') && shipped.includes('write'), 'a read and a write example ship');
 
   const read = snapshot.profiles.get('read');
-  if (read === undefined) assert.fail('the read profile is missing');
+  if (read === undefined) {assert.fail('the read profile is missing');}
   assert.equal(read.filesystem, 'read');
   assert.equal(read.model, 'llm-gateway/deepseek-flash');
   assert.equal(read.thinking, 'off');
   assert.ok(read.tools.includes('bash'), 'read-only is an OS claim, not a tool list');
 
   const write = snapshot.profiles.get('write');
-  if (write === undefined) assert.fail('the write profile is missing');
+  if (write === undefined) {assert.fail('the write profile is missing');}
   assert.equal(write.filesystem, 'write');
   assert.equal(write.model, 'llm-gateway/deepseek-flash');
   assert.equal(write.thinking, 'off');
@@ -113,7 +111,7 @@ test('every example document loads as a profile layer', () => {
   assert.ok(write.tools.includes('write'));
 
   const research = snapshot.profiles.get('research');
-  if (research === undefined) assert.fail('the research profile is missing');
+  if (research === undefined) {assert.fail('the research profile is missing');}
   assert.equal(research.filesystem, 'read');
   assert.equal(research.thinking, 'low');
   assert.deepEqual(research.tools, ['read', 'grep', 'find', 'ls', 'bash']);
@@ -124,7 +122,7 @@ test('every example document loads as a profile layer', () => {
     ['implement', 'high', write],
   ] as const) {
     const profile = snapshot.profiles.get(name);
-    if (profile === undefined) assert.fail(`the ${name} profile is missing`);
+    if (profile === undefined) {assert.fail(`the ${name} profile is missing`);}
     assert.equal(profile.thinking, thinking);
     assert.equal(profile.filesystem, base.filesystem);
     assert.equal(profile.model, base.model);
@@ -133,11 +131,11 @@ test('every example document loads as a profile layer', () => {
 
   // Copying the shipped policy and profiles together must admit every example.
   const policy = readPolicy(new URL('../../examples/policy.json', import.meta.url).pathname);
-  if (!policy.ok) assert.fail(`the example policy does not validate: ${policy.detail}`);
+  if (!policy.ok) {assert.fail(`the example policy does not validate: ${policy.detail}`);}
   assert.deepEqual(Object.keys(policy.policy.profiles).sort(), shipped);
   for (const name of shipped) {
     const result = resolveProfile(snapshot, name, policy.policy.profiles);
-    if (!result.ok) assert.fail(`${name}: ${result.reason}: ${result.detail}`);
+    if (!result.ok) {assert.fail(`${name}: ${result.reason}: ${result.detail}`);}
   }
 });
 
@@ -147,21 +145,21 @@ test('every thinking level parses, and an omitted field leaves no thinking key',
   for (const level of THINKING_LEVELS) {
     const snapshot = snapshotOf({ read: document({ thinking: level }) });
     const profile = snapshot.profiles.get('read');
-    if (profile === undefined) assert.fail('the fixture profile is missing');
+    if (profile === undefined) {assert.fail('the fixture profile is missing');}
     assert.equal(profile.thinking, level);
 
     // The accessor copies the field like the rest of the profile.
     const resolved = resolveProfile(snapshot, 'read', pinRead('read'));
-    if (!resolved.ok) assert.fail(`expected the profile, got ${resolved.reason}: ${resolved.detail}`);
+    if (!resolved.ok) {assert.fail(`expected the profile, got ${resolved.reason}: ${resolved.detail}`);}
     assert.equal(resolved.profile.thinking, level);
   }
 
   const snapshot = snapshotOf({ read: document() });
   const profile = snapshot.profiles.get('read');
-  if (profile === undefined) assert.fail('the fixture profile is missing');
+  if (profile === undefined) {assert.fail('the fixture profile is missing');}
   assert.equal('thinking' in profile, false, 'an omitted field is no key at all, not undefined');
   const resolved = resolveProfile(snapshot, 'read', pinRead('read'));
-  if (!resolved.ok) assert.fail(`expected the profile, got ${resolved.reason}: ${resolved.detail}`);
+  if (!resolved.ok) {assert.fail(`expected the profile, got ${resolved.reason}: ${resolved.detail}`);}
   assert.equal('thinking' in resolved.profile, false, 'the copy keeps the key absent');
 });
 
@@ -186,7 +184,7 @@ test("a model carrying pi's :<level> shorthand refuses: the thinking field is th
 test('the snapshot is frozen for the process: a mutated document is inert until a restart', () => {
   const dir = profileDir({ read: document() });
   const loaded = loadProfiles([dir]);
-  if (!loaded.ok) assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);
+  if (!loaded.ok) {assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);}
   const snapshot = loaded.snapshot;
   const digest = snapshot.digest;
   assert.ok(Object.isFrozen(snapshot), 'the snapshot itself is frozen');
@@ -196,22 +194,22 @@ test('the snapshot is frozen for the process: a mutated document is inert until 
   writeFileSync(join(dir, 'read.md'), document({ filesystem: 'write', tools: 'read, bash, write, edit' }));
 
   const resolved = resolveProfile(snapshot, 'read', pinRead('read'));
-  if (!resolved.ok) assert.fail(`expected the snapshotted profile, got ${resolved.reason}: ${resolved.detail}`);
+  if (!resolved.ok) {assert.fail(`expected the snapshotted profile, got ${resolved.reason}: ${resolved.detail}`);}
   assert.equal(resolved.profile.filesystem, 'read', 'the snapshotted capability survives the edit');
   assert.deepEqual(resolved.profile.tools, ['read', 'grep', 'find', 'ls', 'bash'], 'so does the tool set');
   assert.equal(snapshot.digest, digest, 'and the digest still describes what was loaded');
   assert.ok(Object.isFrozen(snapshot.profiles.get('read')), 'the entry is frozen');
 
   // Each accessor hands back a copy, so a caller cannot edit the authority.
-  const copied = resolved.profile.tools as string[];
+  const copied = resolved.profile.tools;
   copied.push('write');
   const again = resolveProfile(snapshot, 'read', pinRead('read'));
-  if (!again.ok) assert.fail('the snapshot must keep resolving');
+  if (!again.ok) {assert.fail('the snapshot must keep resolving');}
   assert.deepEqual(again.profile.tools, ['read', 'grep', 'find', 'ls', 'bash']);
 
   // A restart is a deployment act: it picks the edit up.
   const restarted = loadProfiles([dir]);
-  if (!restarted.ok) assert.fail(`expected a snapshot after the restart, got ${restarted.path}: ${restarted.detail}`);
+  if (!restarted.ok) {assert.fail(`expected a snapshot after the restart, got ${restarted.path}: ${restarted.detail}`);}
   const reloaded = restarted.snapshot.profiles.get('read');
   assert.equal(reloaded?.filesystem, 'write');
   assert.notEqual(restarted.snapshot.digest, digest, 'the digest follows the directory contents');
@@ -220,7 +218,7 @@ test('the snapshot is frozen for the process: a mutated document is inert until 
 test('an invalid document refuses at start-up, naming the path, and never per call', async () => {
   const dir = profileDir({ read: document(), broken: '<!-- quotient-profile\nfilesystem: read\n-->\n' });
   const loaded = loadProfiles([dir]);
-  if (loaded.ok) assert.fail('a document missing model and tools must not load');
+  if (loaded.ok) {assert.fail('a document missing model and tools must not load');}
   assert.equal(loaded.path, join(dir, 'broken.md'));
   assert.match(loaded.detail, /model/);
 
@@ -228,7 +226,7 @@ test('an invalid document refuses at start-up, naming the path, and never per ca
   // state is decided once, at start-up.
   const good = profileDir({ read: document() });
   const held = loadProfiles([good]);
-  if (!held.ok) assert.fail(`expected a snapshot, got ${held.path}: ${held.detail}`);
+  if (!held.ok) {assert.fail(`expected a snapshot, got ${held.path}: ${held.detail}`);}
   writeFileSync(join(good, 'read.md'), '{ not a document');
   assert.equal(resolveProfile(held.snapshot, 'read', pinRead('read')).ok, true, 'the held snapshot is unaffected');
 
@@ -252,10 +250,10 @@ test('an invalid document refuses at start-up, naming the path, and never per ca
 test('the snapshot digest is deterministic over the layer contents', () => {
   const dir = mkdtempSync(join(tmpdir(), 'quotient-digest-'));
   const digestOf = (documents: Record<string, string>): string => {
-    for (const name of readdirSync(dir)) rmSync(join(dir, name));
+    for (const name of readdirSync(dir)) {rmSync(join(dir, name));}
     writeProfiles(dir, documents);
     const loaded = loadProfiles([dir]);
-    if (!loaded.ok) assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);
+    if (!loaded.ok) {assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);}
     return loaded.snapshot.digest;
   };
   const first = digestOf({ read: document(), write: document({ filesystem: 'write' }) });
@@ -280,7 +278,7 @@ test('loadProfiles: per name the launch-dir layer wins, and each profile carries
     { read: document(), write: document({ filesystem: 'write' }) },
   );
   const loaded = loadProfiles([launch, xdg]);
-  if (!loaded.ok) assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);
+  if (!loaded.ok) {assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);}
   const read = loaded.snapshot.profiles.get('read');
   assert.deepEqual(read?.tools, ['read'], 'the launch-dir document shadows the XDG one');
   assert.equal(read?.source, join(launch, 'read.md'));
@@ -291,7 +289,7 @@ test('loadProfiles: a missing layer is empty; an unreadable one refuses start-up
   const [, xdg] = layers({}, { read: document() });
   const absent = join(tmpdir(), 'quotient-no-such-layer', 'profiles');
   const loaded = loadProfiles([absent, xdg]);
-  if (!loaded.ok) assert.fail(`a missing layer must be empty, got ${loaded.path}: ${loaded.detail}`);
+  if (!loaded.ok) {assert.fail(`a missing layer must be empty, got ${loaded.path}: ${loaded.detail}`);}
   assert.deepEqual([...loaded.snapshot.profiles.keys()], ['read']);
 
   const none = loadProfiles([absent]);
@@ -300,13 +298,13 @@ test('loadProfiles: a missing layer is empty; an unreadable one refuses start-up
   const dangling = join(mkdtempSync(join(tmpdir(), 'quotient-layer-link-')), 'profiles');
   symlinkSync(join(tmpdir(), 'quotient-no-such-target'), dangling);
   const unresolved = loadProfiles([dangling, xdg]);
-  if (unresolved.ok) assert.fail('a layer entry that does not resolve is unreadable, not absent');
+  if (unresolved.ok) {assert.fail('a layer entry that does not resolve is unreadable, not absent');}
   assert.equal(unresolved.path, dangling);
 
   const file = join(mkdtempSync(join(tmpdir(), 'quotient-layer-file-')), 'profiles');
   writeFileSync(file, 'not a directory');
   const unreadable = loadProfiles([file, xdg]);
-  if (unreadable.ok) assert.fail('a layer that is not a readable directory must refuse');
+  if (unreadable.ok) {assert.fail('a layer that is not a readable directory must refuse');}
   assert.equal(unreadable.path, file);
 });
 
@@ -314,7 +312,7 @@ test('loadProfiles: an invalid document refuses start-up even when another layer
   const broken = '<!-- quotient-profile\nfilesystem: read\n-->\n';
   const [launch, xdg] = layers({ read: document() }, { read: broken });
   const shadowed = loadProfiles([launch, xdg]);
-  if (shadowed.ok) assert.fail('a shadowed invalid document must still refuse');
+  if (shadowed.ok) {assert.fail('a shadowed invalid document must still refuse');}
   assert.equal(shadowed.path, join(xdg, 'read.md'));
 
   const [top, bottom] = layers({ read: broken }, { read: document() });
@@ -332,7 +330,7 @@ test('the digest covers each winning source path as well as its bytes', () => {
   const [launch2, xdg2] = layers({ read: same }, {});
   const fromXdg = loadProfiles([launch, xdg]);
   const fromLaunch = loadProfiles([launch2, xdg2]);
-  if (!fromXdg.ok || !fromLaunch.ok) assert.fail('both layouts load');
+  if (!fromXdg.ok || !fromLaunch.ok) {assert.fail('both layouts load');}
   assert.notEqual(fromXdg.snapshot.digest, fromLaunch.snapshot.digest, 'the same bytes from another path are another snapshot');
 });
 
@@ -404,12 +402,12 @@ test('root classification: a missing path, a file, and a canonical directory', (
   refuseRoot(resolveRoot(join(tree.file, 'under'), tree.dir, [tree.dir]), 'root-not-a-directory');
 
   const allowed = resolveRoot(tree.one, tree.dir, [tree.one]);
-  if (!allowed.ok) assert.fail(`expected an allowed root, got ${allowed.reason}: ${allowed.detail}`);
+  if (!allowed.ok) {assert.fail(`expected an allowed root, got ${allowed.reason}: ${allowed.detail}`);}
   assert.equal(allowed.root, realpathSync(tree.one), 'the canonical path is what the call proceeds with');
 
   // A non-canonical spelling is canonicalised before the allowlist compares.
   const dotted = resolveRoot(`${tree.one}/sub/..`, tree.dir, [tree.one]);
-  if (!dotted.ok) assert.fail(`expected the canonical root, got ${dotted.reason}: ${dotted.detail}`);
+  if (!dotted.ok) {assert.fail(`expected the canonical root, got ${dotted.reason}: ${dotted.detail}`);}
   assert.equal(dotted.root, realpathSync(tree.one));
 });
 
@@ -424,7 +422,7 @@ test('allowlisting is by path components, never by string prefix', () => {
   const link = join(tree.dir, 'link');
   symlinkSync(tree.one, link);
   const viaLink = resolveRoot(link, tree.dir, [tree.one]);
-  if (!viaLink.ok) assert.fail(`expected the symlink to canonicalise onto its target, got ${viaLink.reason}`);
+  if (!viaLink.ok) {assert.fail(`expected the symlink to canonicalise onto its target, got ${viaLink.reason}`);}
   assert.equal(viaLink.root, realpathSync(tree.one));
 });
 
@@ -432,7 +430,7 @@ test('an absent cwd resolves to the server launch directory through the same all
   const tree = roots();
 
   const inside = resolveRoot(undefined, join(tree.one, 'sub'), [tree.one]);
-  if (!inside.ok) assert.fail(`expected the launch directory to be allowed, got ${inside.reason}`);
+  if (!inside.ok) {assert.fail(`expected the launch directory to be allowed, got ${inside.reason}`);}
   assert.equal(inside.root, realpathSync(join(tree.one, 'sub')));
 
   refuseRoot(resolveRoot(undefined, tree.dir, [tree.one]), 'root-not-allowlisted', /pi-mcp-roots/);
@@ -447,9 +445,9 @@ test('a profile naming an mcp__ tool under a form that passes no -e builtin:mcp 
   });
 
   const mcp = snapshot.profiles.get('mcp');
-  if (mcp === undefined) assert.fail('the fixture profile is missing');
+  if (mcp === undefined) {assert.fail('the fixture profile is missing');}
   const refused = checkProfileExtensions(mcp, []);
-  if (refused.ok) assert.fail('expected profile-invalid: the profile asks for tools it can never receive');
+  if (refused.ok) {assert.fail('expected profile-invalid: the profile asks for tools it can never receive');}
   assert.equal(refused.reason, 'profile-invalid');
   assert.match(refused.detail, /mcp__/);
   assert.match(refused.detail, /builtin:mcp/);
@@ -457,7 +455,7 @@ test('a profile naming an mcp__ tool under a form that passes no -e builtin:mcp 
   assert.equal(checkProfileExtensions(mcp, [MCP_EXTENSION]).ok, true, 'the extension the form declares satisfies it');
 
   const read = snapshot.profiles.get('read');
-  if (read === undefined) assert.fail('the fixture profile is missing');
+  if (read === undefined) {assert.fail('the fixture profile is missing');}
   assert.equal(checkProfileExtensions(read, []).ok, true, 'a profile with no mcp__ tool needs no extension');
 });
 
@@ -466,14 +464,14 @@ test('a profile naming an mcp__ tool under a form that passes no -e builtin:mcp 
 test("a call's tools may only narrow: the intersection in profile order, handed whole to --tools", () => {
   const snapshot = snapshotOf({ read: document({ tools: 'read, grep, find, ls, bash' }) });
   const profile = snapshot.profiles.get('read');
-  if (profile === undefined) assert.fail('the fixture profile is missing');
+  if (profile === undefined) {assert.fail('the fixture profile is missing');}
 
   const whole = effectiveTools(profile, undefined);
-  if (!whole.ok) assert.fail(`expected the profile's own set, got ${whole.reason}`);
+  if (!whole.ok) {assert.fail(`expected the profile's own set, got ${whole.reason}`);}
   assert.deepEqual(whole.tools, ['read', 'grep', 'find', 'ls', 'bash']);
 
   const narrowed = effectiveTools(profile, ['bash', 'read']);
-  if (!narrowed.ok) assert.fail(`expected the intersection, got ${narrowed.reason}: ${narrowed.detail}`);
+  if (!narrowed.ok) {assert.fail(`expected the intersection, got ${narrowed.reason}: ${narrowed.detail}`);}
   assert.deepEqual(narrowed.tools, ['read', 'bash'], 'the intersection, in the profile order');
   assert.equal(toolsArgument(narrowed.tools), 'read,bash', '--tools receives the whole narrowed list');
 
@@ -487,9 +485,9 @@ function refuseTools(
   detail?: RegExp,
   note?: string,
 ): void {
-  if (resolution.ok) assert.fail(`expected a ${reason} refusal, got [${resolution.tools.join(', ')}]${note ? ` (${note})` : ''}`);
+  if (resolution.ok) {assert.fail(`expected a ${reason} refusal, got [${resolution.tools.join(', ')}]${note ? ` (${note})` : ''}`);}
   assert.equal(resolution.reason, reason);
-  if (detail !== undefined) assert.match(resolution.detail, detail);
+  if (detail !== undefined) {assert.match(resolution.detail, detail);}
 }
 
 // ── Steps 3-6 and the narrowing over the wire ──────────────────────────────
