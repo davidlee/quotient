@@ -48,15 +48,18 @@ call(cwd) ─▶ machine policy: grant + limits     (~/.config/quotient/policy.j
   launch-dir `.quotient/profiles` or `.quotient/help` exists (research X3).
 - Drop the profile/help-layer entries for the launch dir from the protected
   stores; `<root>/.quotient/` is not protected. ISS-001's refusal disappears.
-- Resolve per-call forms: the matched root's `.quotient/` forms, else the
-  machine default forms. A project may not name the unconfined form.
-- Approval: a machine-side approval record; admission checks the resolved
-  form identity against it; refusal `form-unapproved` names old and new
-  identity, a review hint and the approve command.
-- An operator verb to approve a root's forms (e.g. `quotient allow <root>`).
-- Contracts: a new policy schema version if the document shape or semantics
-  break (design decides; DEC-004 pattern); a `.quotient/` format contract;
-  result/refusal additions. Help, README, examples, client snippet.
+- Resolve per-call forms (DEC-010): `<root>/.quotient/forms/{read,write}`
+  replaces the executable of the machine's confined slot for that capability
+  and inherits its `extensions`; else the machine form. Real path must lie
+  outside every `roots` and `exposure` path. Refusals `form-invalid`,
+  `form-unapproved`.
+- Approval (DEC-009): `<xdgConfig>/quotient/approvals.json`, a never-writable
+  protected store, checked at admission every call.
+- `quotient allow [--dry-run] [<path>]` records approvals (DEC-009).
+- Contracts (DEC-011): `quotient-policy/2` edited in place (no field
+  changes); `form-1` clarification (a form that cannot confine exits
+  non-zero); refusal additions to `pi-agent-result/2`; `.quotient/forms`
+  layout documented. Help, README, examples, client snippet.
 - Version bump; migration note for satan (move `.quotient/profiles` to XDG).
 
 Expected surface: `src/config.ts`, `src/server/{policy,childview,profiles,server}.ts`,
@@ -81,10 +84,6 @@ new form-resolution/approval module(s) under `src/server/`, `src/cli.ts`,
   failure. Only satan known affected (checked `~/dev/*/.quotient`, 2026-10-24).
 - **Re-approval friction:** every form identity change stops calls until
   approved. Mitigation is operational (narrow, stable form toolchains).
-- **Approval store:** location, format, and whether it is a protected store
-  (it must be: a delegate must not approve its own form). Design decides.
-- **`.quotient/` format:** how a project names its forms (relative symlinks to
-  a build output, a small JSON naming paths, …). Design decides.
 - **Hash scope:** for non-store paths the sha256 pins only the executable;
   anything it calls is the operator's responsibility (DEC-008).
 - **Nested roots:** longest-match rule; design confirms behaviour when a call's
@@ -117,3 +116,4 @@ the exact built forms.
   `.quotient/` forms.
 - satan: move `.quotient/profiles` to the XDG layer.
 - IDE-001 — likely obsolete under DEC-007; re-triage.
+- IDE-002 — broaden extension permissions (operator wants this later).

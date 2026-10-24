@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 10
+slug = "project-forms-substitute-the-executable-of-a-machine-form-slot"
+title = "Project forms substitute the executable of a machine form slot"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-007 lets a project supply forms; SL-002 inq-2 and inq-3. A symlink cannot carry the policy form's extensions; an executable inside a writable path can be swapped between the admission hash and spawn."
+choice = "<root>/.quotient/forms/{read;write}: each must resolve to an executable regular file whose real path lies outside every roots entry and every exposure path. A project form replaces only the executable of a confined form slot the machine policy declares for that capability and inherits that slot's extensions; no machine slot means wrapper-unavailable as today; a project cannot express unconfined. The call executes the resolved real path. Unusable project form refuses form-invalid; usable but unapproved or changed refuses form-unapproved. Quotient has no fallback to unconfined; a form that cannot establish confinement must exit non-zero (form-1 clarification)."
+alternatives = ["forms/<cap>/bin/ directory layout", "committed JSON naming paths and extensions", "exec through a held file descriptor"]
+rationale = "Machine keeps the form interface (extensions are a grant-like property); project owns only the binary. Requiring the real path outside writable paths closes the swap race with no platform-specific machinery; Nix store paths satisfy it. Backend-agnostic: a seatbelt form is just a script."
+consequences = ["IMP-003 helper should emit single-file scripts (writeShellScript)", "two new refusal reasons form-invalid and form-unapproved", "the hash covers only the executable: confinement config should be embedded or immutable", "broadening extension permissions is out of scope (IDE-002)"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-002"

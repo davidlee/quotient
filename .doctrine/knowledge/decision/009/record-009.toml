@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 9
+slug = "approvals-file-and-allow-verb-gate-project-forms"
+title = "Approvals file and allow verb gate project forms"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-24"
+updated = "2026-10-24"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-008 requires operator approval of project forms by identity; SL-002 inq-1 and inq-5."
+choice = "Approvals live in <xdgConfig>/quotient/approvals.json (fixed path; no env var): one entry per (canonical roots entry; capability) holding real path + sha256 + approved_at; re-approval replaces. Written only by 'quotient allow [--dry-run] [<path>]' (temp file + rename); read by admission every call; absent file = nothing approved. The file is a never-writable protected store (step 8). allow resolves the roots entry for <path> (default cwd); prints link + real path + sha256 + previous identity per form; refuses if any form is invalid; no interactive prompt."
+alternatives = ["approvals inside the policy file", "approvals under XDG state", "interactive confirmation", "per-form revoke verb"]
+rationale = "The security control is file write access: a confined delegate cannot write the approvals store; so it cannot approve its own form. A prompt adds nothing an agent could not answer. Deleting .quotient/forms makes an approval moot; so no revoke."
+consequences = ["new protected store kind for approvals", "first atomic-write helper in src", "new CLI subcommand allow", "approving is documented as the operator act"]
+decided_by = "operator (user), 2026-10-24 session"
+decided_on = "2026-10-24"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-002"
