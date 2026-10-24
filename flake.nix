@@ -18,6 +18,7 @@
       # is the operator's choice and is named by the policy.
       lib = {
         mkFormFamily = import ./nix/form-family.nix;
+        checkFormFamily = import ./nix/check-family.nix;
       };
     in
     {
