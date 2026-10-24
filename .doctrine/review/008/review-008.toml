@@ -1,0 +1,85 @@
+id    = 8
+slug  = "design-review-of-sl-002"
+title = "design review of SL-002"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "design"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Amendments-only adversarial pass by codex over git diff 4f57c16 36d5281 -- .doctrine/slice/002/design.md, checking affected unamended passages, accepted DEC-007..DEC-011, RV-006 F-1/F-3 responses, and revised PHASE-03..05. RV-008 was created with default raiser label 'raiser'; attempting as=codex was rejected as invalid role, so codex performs the accepted raiser acts with attribution in the finding details and this basis. No metadata was hand-edited.
+
+Raised F-1 MAJOR: the new single-probe rootsEntry override plus pure rendering leaves allow's report without the governing root link's state when that root differs from rootsEntry; both healthy/broken governing-link states produce the same declared report input. Raised F-2 MINOR: A5's earlier extensions failure contradicts the retained read-on-every-present-slot statement and detailed flowchart. No blockers found. Dispositions belong to the responder.
+
+A1's admission default base remains governing?.root ?? rootsEntry, so no direct regression of governing-by-containment/RV-006 F-1 was found. Record still probes freshly under updateApprovals and compares BOTH expected real path and digest, so RV-006 F-3 remains intact; its direct probe inside change is not a second store/governing/base composition. A2/A3 renames are carried by PHASE-03/EX-1, EX-5 and downstream criteria; SlotRefusal still matches the existing refusal-union scan. A4 correctly uses SpawnPlan with FormSource in policy.ts. The specified import direction forms -> approvals, with approvals forbidden to import forms, introduces no dependency cycle through the current policy/profiles/paths/evidence dependencies. A5 preserves the actual current slot/extensions first-failure order and has PHASE-04 verification. Apart from F-1/F-2, no amendment/plan mismatch or accepted-decision regression was found.
+
+A6 checked against current config resolver, loadProfiles/resolveProfile and server step order: a read-only Node probe with an actual valid absolute examples/policy.json override and absolute run/session overrides, but absent/relative/empty HOME/XDG_CONFIG_HOME, derived the intended PHASE-01 XDG-only layer list [], called the real loadProfiles([]), and confirmed every allowed profile resolves profile-unknown. Absolute HOME restored an XDG layer as a positive control. Thus after launch-layer removal there are no built-in profiles to bypass step 3; an absolute policy override does not make step 5 reachable. This is bounded component evidence plus source reasoning about the planned resolver, not execution of the unimplemented SL-002 server. No full tests, builds, confinement runs, paid calls or non-ledger writes. Pass concluded after the last raise."""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-002"
+
+[[finding]]
+id = "F-1"
+status = "answered"
+severity = "major"
+title = "The roots-entry lookup does not supply the governing-link state required by the pure allow report"
+detail = """
+Raised by codex, acting through RV-008's declared default raiser role (the ledger rejects the requested codex alias as invalid role).
+
+Amendment A1 adds a single ProjectFormLookup tuple with governing, base and one probe (design.md:161-176), makes allow obtain it with base = rootsEntry (:189, :317), and makes report rendering pure over those lookups and the slot (:335). The retained requirement in the same report paragraph is that a governing approval whose own link is missing or changed must be identified as such and accompanied by revoke advice. PHASE-03/EX-7 and VT-5, PHASE-05/EX-1..EX-2 and VT-3 repeat this one-probe/pure-rendering allocation.
+
+Concrete inferred information gap: roots are /work/A and /work/A/B, write approval is at A, and allow reports B. The overridden lookup returns governing=A, base=B, probe=B's candidate form. Hold the store, B's link/bytes and slot fixed; compare host state 1 where A's link still matches its approval with host state 2 where A's link has been deleted or repointed. The declared lookup result is identical in both states because only B is probed, but the report is required to distinguish them. A pure renderer cannot recover the unobserved A-link state. Conversely comparing B's candidate identity to A's approval would falsely diagnose a healthy parent approval as changed. This is a design-level data-flow counterexample, not an executed implementation failure.
+
+Repair: explicitly supply both observations when the governing root differs from rootsEntry: the candidate at rootsEntry for the approval command, and the form at governing.root for the current-admission status/revoke advice. Extend the lookup/report inputs or explicitly prescribe a second use of the same lookup composition; do not introduce another independently assembled store/governing/base/probe algorithm. Add report tests varying A's link while B stays fixed, and vice versa. Keep admission's omitted-base behavior and record's fresh path+digest check inside updateApprovals unchanged. This closes a contradiction introduced by making the previously filesystem-capable report a renderer over the new single-probe result."""
+disposition = "fix-now"
+route = "review"
+response = "Verified: with base = rootsEntry the lookup never observes the governing root's link, so a pure renderer cannot report its state. Repair keeps one composition: allow calls lookupProjectForm without base (what admission sees: governing status, revoke advice) and, only when governing.root differs from rootsEntry, again with base = rootsEntry (the candidate for the record command). design sec-2 'The selection module', sec-3 allow/report paragraphs, sec-4 approve: report row; plan PHASE-05/EX-1 and VT-3 (vary the governing link with the candidate fixed, and vice versa). Admission's omitted-base path and record's in-lock path+digest check unchanged."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified: with base = rootsEntry the lookup never observes the governing root's link, so a pure renderer cannot report its state. Repair keeps one composition: allow calls lookupProjectForm without base (what admission sees: governing status, revoke advice) and, only when governing.root differs from rootsEntry, again with base = rootsEntry (the candidate for the record command). design sec-2 'The selection module', sec-3 allow/report paragraphs, sec-4 approve: report row; plan PHASE-05/EX-1 and VT-3 (vary the governing link with the candidate fixed, and vice versa). Admission's omitted-base path and record's in-lock path+digest check unchanged."
+
+[[finding]]
+id = "F-2"
+status = "answered"
+severity = "minor"
+title = "A5's extensions-before-store order contradicts the retained unconditional store-read rule"
+detail = """
+Raised by codex, acting through RV-008's declared raiser role.
+
+Expected: the amended design should consistently state when the approvals store is consulted and which refusal wins. A5's new design.md:54 explicitly orders slot -> checkProfileExtensions -> store/project lookup; the added verification row at :475 and PHASE-04/EX-1 plus VT-3 require profile-invalid to win over a malformed store when the slot lacks a profile extension. This is consistent with the actual current order in src/server/server.ts:289-292.
+
+Observed contradiction with unamended text: design.md:226 still promises the store is 'Read on every call that reaches step 5 with a machine slot present.' Such a call can now stop at the extensions check without reading it. The detailed step-5 flowchart (:91-94) also takes a present slot directly to the store-readable decision, omitting the new failure branch; following it would select form-unapproved in the very case A5 says must remain profile-invalid.
+
+Repair: qualify the read rule as applying after the slot and extensions checks have passed, and align the detailed flowchart with that order. Preserve the behavior specified by A5 and the new plan/test criterion. This is verified textual inconsistency introduced by the amendment, not a request to move extensions behind the store or reopen DEC-007..011."""
+disposition = "fix-now"
+response = "Verified (design.md store-read rule and step-5 flowchart omitted the A5 branch). Read rule now applies to calls that pass the slot lookup and extensions check; flowchart gains the extensions node (profile-invalid) between slot and store. Sweep: the other step-5 order statements agree."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified (design.md store-read rule and step-5 flowchart omitted the A5 branch). Read rule now applies to calls that pass the slot lookup and extensions check; flowchart gains the extensions node (profile-invalid) between slot and store. Sweep: the other step-5 order statements agree."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

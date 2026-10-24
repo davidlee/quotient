@@ -89,7 +89,9 @@ The link is looked up with `lstat`. Only an absent entry (the existing `absent()
 ```mermaid
 flowchart TD
   A["machine slot for capability"] -->|absent| W["refuse wrapper-unavailable (as today)"]
-  A -->|present| B{"approvals store readable?"}
+  A -->|present| X{"slot extensions deliver the profile's tools?"}
+  X -->|no| XP["refuse profile-invalid (as today)"]
+  X -->|yes| B{"approvals store readable?"}
   B -->|no| U0["refuse form-unapproved: store unreadable or malformed"]
   B -->|yes| G{"governing approval? (deepest root containing the call's root)"}
   G -->|yes| GL{"link at approval root?"}
@@ -186,7 +188,7 @@ export function chooseForm(
 ): SelectedForm;
 ```
 
-`governingApproval` lives in `approvals.ts` beside the store's other readers. `lookupProjectForm` is the only composition of store, governing approval, base and probe: admission calls it, refuses `form-unapproved` naming the store when it returns `ok: false`, and otherwise passes `governing` and `probe` to `chooseForm`; `quotient allow` calls it with `base` set to its roots entry and renders the result. The two can therefore not disagree about what governs a root or what is at its link. `probeProjectForm` is the one place the filesystem is touched for a project form. A capability with no machine slot refuses `wrapper-unavailable` before the store or the link is read, as today.
+`governingApproval` lives in `approvals.ts` beside the store's other readers. `lookupProjectForm` is the only composition of store, governing approval, base and probe: admission calls it, refuses `form-unapproved` naming the store when it returns `ok: false`, and otherwise passes `governing` and `probe` to `chooseForm`; `quotient allow` calls it without `base` — exactly what admission sees, for the governing approval's status and revoke advice — and, when the governing approval's root differs from its roots entry, calls it again with `base` set to the roots entry for the candidate it would record (RV-008 F-1). When the two coincide, one call serves both. Report and admission can therefore not disagree about what governs a root or what is at its link, and there is still one composition. `probeProjectForm` is the one place the filesystem is touched for a project form. A capability with no machine slot refuses `wrapper-unavailable` before the store or the link is read, as today.
 
 ```ts
 // policy.ts, beside Form, so spawn.ts needs no import from forms.ts
@@ -223,7 +225,7 @@ Location: `<xdgConfig>/quotient/approvals.json`, a new `Locations.approvalsPath:
 
 - At most one entry per (`root`, `capability`). `root` is the canonical `roots` entry the approved path matched when `quotient allow` recorded it.
 - Closed-world parsing: an unknown key, a duplicate pair, a non-absolute path, a capability other than `read`/`write`, or a sha256 that is not 64 lowercase hex characters makes the store **malformed**.
-- Read on every call that reaches step 5 with a machine slot present. An absent file is an empty store. An unreadable or malformed file refuses `form-unapproved` naming the path and the parse failure: whether an approval governs a call is itself the selection, so no call can be decided without it. `allow` and `revoke` never overwrite a malformed store; the operator repairs or removes it.
+- Read on every call that passes step 5's slot lookup and extensions check. An absent file is an empty store. An unreadable or malformed file refuses `form-unapproved` naming the path and the parse failure: whether an approval governs a call is itself the selection, so no call can be decided without it. `allow` and `revoke` never overwrite a malformed store; the operator repairs or removes it.
 - An entry keeps governing by containment even if its `root` is no longer a `roots` entry: removing a root from the policy does not silently revert its calls to the machine default. Only `revoke` does.
 
 ```ts
@@ -314,7 +316,7 @@ quotient allow <path> <cap>=<realpath>@<sha256>...  record, only if each named f
 quotient revoke <approval-root> [<cap>...]       remove stored entries (all capabilities when none named)
 ```
 
-`allow` resolves `<path>` (default: the current directory; relative paths against it) the way admission does: read the machine policy with `readPolicy` (`src/server/policy.ts:123`) at `Locations.policyPath`, take the writable set with `writablePaths(policy, Locations.sessionHome)`, canonicalise, and take the roots entry with the same function step 4 uses (`rootsEntry`). `allow` approves the link at `<rootsEntry>/.quotient/forms/<cap>` and keys the approval by that roots entry. It reads that link through `lookupProjectForm` with `base` set to the roots entry, so the governing approval it reports is the one admission would find. A path inside no entry, or an unreadable or invalid policy, exits 1 naming why; usage errors exit 2.
+`allow` resolves `<path>` (default: the current directory; relative paths against it) the way admission does: read the machine policy with `readPolicy` (`src/server/policy.ts:123`) at `Locations.policyPath`, take the writable set with `writablePaths(policy, Locations.sessionHome)`, canonicalise, and take the roots entry with the same function step 4 uses (`rootsEntry`). `allow` approves the link at `<rootsEntry>/.quotient/forms/<cap>` and keys the approval by that roots entry. It observes through `lookupProjectForm` as sec-2 describes: without `base` for the governing approval's own link (what admission would run), and with `base` set to the roots entry for the candidate when that is a different root. A path inside no entry, or an unreadable or invalid policy, exits 1 naming why; usage errors exit 2.
 
 **Report.** For each capability, one block:
 
@@ -332,7 +334,7 @@ to approve what is shown:
   quotient allow /home/op/work/satan write=/nix/store/abc…-quotient-write@9f2c…
 ```
 
-`governed` names the approval that governs calls at `<path>` today (sec-2), which may sit at a shallower root than the roots entry; recording then adds a deeper approval that governs calls inside the roots entry. Rendering is a pure function of the lookups and the slot, so report tests assert text without a filesystem or argv. An unusable link prints its `form-invalid` detail instead of an identity and contributes nothing to the suggested command. A governing approval whose link is missing or changed says so and suggests `quotient revoke` as well. Exit 0 whenever the report printed.
+`governed` names the approval that governs calls at `<path>` today (sec-2), which may sit at a shallower root than the roots entry; recording then adds a deeper approval that governs calls inside the roots entry. Rendering is a pure function of the one or two lookups and the slot, so report tests assert text without a filesystem or argv. An unusable link prints its `form-invalid` detail instead of an identity and contributes nothing to the suggested command. A governing approval whose link is missing or changed says so and suggests `quotient revoke` as well. Exit 0 whenever the report printed.
 
 **Record.** Each `<cap>=<realpath>@<sha256>` (split at the last `@`; a sha256 contains none) is checked against a fresh `probeProjectForm` at the roots entry and against the machine slot, inside the store lock (`updateApprovals`'s `change`). All must pass or nothing is written: the form must be usable, the slot confined, and the observed real path **and** sha256 both equal to those given. A mismatch exits 1 naming both identities: the form changed between the operator's review and the record — new bytes, or the same bytes at another path (RV-006 F-3) — and what is there now was not reviewed. On success it writes `{ root, capability, path, sha256, approved_at }`, replacing any entry for that pair, and prints the recorded identities.
 
@@ -482,7 +484,7 @@ Red first for each; the ISS-001 case is the first red.
 | approvals: writer | lock held → second writer fails naming the holder; malformed store never overwritten; publish is rename (no partial file observable) |
 | approve: report | per-capability identity, approval state, exact command; unusable form shows its detail |
 | approve: record | path and digest match → records at the roots entry; changed bytes → nothing written, exit 1; same bytes at a different real path (RV-006 F-3) → nothing written, exit 1; one bad pair in a batch writes nothing; unconfined or absent slot refused |
-| approve: report | shows the governing approval when it sits at a shallower root than the roots entry; report and admission agree because both use `lookupProjectForm` |
+| approve: report | shows the governing approval when it sits at a shallower root than the roots entry; with the candidate fixed, a changed or deleted governing link changes the governing status and adds revoke advice, and with the governing link fixed, a changed candidate changes only the suggested command (RV-008 F-1) |
 | approve: revoke | removes named / all capabilities of an exact stored root; after the root is removed from `roots`, and after its directory is deleted, the entry is still revocable; revoking a child root leaves a parent approval intact; an unknown root or capability exits 1 listing stored roots |
 | cli: verbs and usage | exit codes 0 / 1 / 2 |
 | help: legacy layer | `quotient help` warns and still prints |
