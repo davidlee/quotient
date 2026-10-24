@@ -69,3 +69,26 @@ to its rows).
 - Forms are normally Nix store paths or other immutable locations outside
   the project's writable tree (S1, S2).
 - One server per client session serves every root in the machine policy.
+
+## Design review 1 (2026-10-24, informal, Codex gpt-6.1-sol)
+
+Pre-drafting second opinion on DEC-007..011. Codex thread
+`01a16b88-df39-7c13-88c1-194fa0dec4f8`; verdict "proceed with amendments".
+All cited sites verified before disposition. Operator agreed to all
+dispositions.
+
+| # | finding | disposition |
+|---|---|---|
+| 1 | blocker: session dirs writable (form-1 G3) but not excluded from form real-path rule | integrated: DEC-010 forbidden set = roots ∪ exposure ∪ session home (G5 writable set) |
+| 2 | major: deleting project links falls back to broader defaults; deletion ≠ revocation | integrated: approval entry is the selection (DEC-008); no fallback once approved; `quotient revoke` (DEC-009); DEC-007 wording |
+| 3 | major: `--dry-run` then `allow` can approve an unreviewed repoint | integrated: `allow <path> <cap>=<sha256>` records only on match; bare `allow` reports (DEC-009) |
+| 4 | major: concurrent allow lost update; corrupt store unspecified | integrated: lock across read-modify-write; malformed store refuses and is never overwritten (DEC-009) |
+| 5 | major: staying on /2 unjustified | partly contested: no /2 document changes power without an operator act; integrated the missing rationale as an explicit compatibility rule in the contract (DEC-011); /2 kept by operator choice |
+| 6 | minor: root-keyed identity; `canonicalPath` swallows all errors (`src/server/paths.ts:29`) | integrated: documented (DEC-007 consequence); `.quotient` lookup treats only ENOENT as absent (DEC-010) |
+| 7 | minor: "in-flight unaffected" overclaims (GC/deletion before spawn) | integrated: guarantee narrowed to "selection never changes mid-call; failed launch, no fallback" (DEC-008) |
+| 8 | note: hash doesn't freeze confinement inputs | integrated: MUST embed or keep delegate-immutable; form-1 publishing requirement (DEC-010) |
+| 9 | note: unknown refusal reasons | integrated: pi-agent-result/2 gains a must-handle-unknown rule (DEC-011); validator already accepts any reason (`src/server/result.ts:388`) |
+
+Defect class: the design proved approval *checking* but not operator
+ownership of *selection, fallback and revocation*; 2/3/7 were siblings.
+Follow-up: re-run Codex on the drafted design.md (operator request).

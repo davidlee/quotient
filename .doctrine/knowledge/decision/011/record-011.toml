@@ -12,9 +12,9 @@ tags = []
 
 [facet]                         # every field typed; seeded empty (captured later)
 context = "SL-002 inq-4 and inq-8. DEC-004 forbids silently reinterpreting an old policy; research round 1 argued for quotient-policy/3 because the contract prose changes."
-choice = "Keep quotient-policy/2 and edit its contract in place: no policy field changes and a /2 file keeps its meaning. The behaviour that breaks (launch-dir profile/help layers) fails loudly: if <launch dir>/.quotient/profiles or /help exists; start-up fails naming the path and saying to move its documents to <xdgConfig>/quotient/ and restart (every call refuses profile-invalid). 'quotient help' only warns. New refusal reasons are additive to pi-agent-result/2."
+choice = "Keep quotient-policy/2 and edit its contract in place, adding an explicit compatibility rule: a change is breaking when it changes what an existing policy document grants or selects without an operator act. Under SL-002 no /2 document gains or loses power without an approval; a stray .quotient/forms refuses rather than silently changing selection. forms.read/write become the default form per capability; documented. The behaviour that does break (launch-dir profile/help layers) fails loudly: if <launch dir>/.quotient/profiles or /help exists; start-up fails naming the path and saying to move its documents to <xdgConfig>/quotient/ and restart (every call refuses profile-invalid). 'quotient help' only warns. New refusal reasons are additive to pi-agent-result/2; that contract gains the rule that consumers must handle unknown refusal reasons. Fix the copy slip at quotient-policy-2.md:4."
 alternatives = ["mint quotient-policy/3", "silently ignore legacy layers"]
-rationale = "A version bump would mark a change no policy document expresses; the start-up failure is the direct non-silent signal DEC-004 requires."
+rationale = "A version bump would mark a change no policy document expresses; the operator-act test makes the compatibility boundary explicit instead of resting on DEC-004 (which concerned the /1 migration only). The start-up failure is the direct non-silent signal DEC-004's pattern requires."
 consequences = ["package minor version bump", "satan must move .quotient/profiles before upgrading"]
 decided_by = "operator (user), 2026-10-24 session"
 decided_on = "2026-10-24"
