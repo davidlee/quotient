@@ -87,8 +87,9 @@ Compare the output against `lint-baseline.tsv`.
 - `test-rig` already points `XDG_CONFIG_HOME` inside the rig and keeps its
   stub launchers outside `root`. PHASE-04's project-form helper can link to a
   stub launcher.
-- `hostile-audit` needs a paid model to run end to end. The gate only
-  syntax-checks it, so PHASE-01 verifies its fixture change by reading the
-  diff (VA-1).
+- `hostile-audit` needs a real jail and a paid model to give a verdict. The
+  gate only syntax-checks it. PHASE-01/VA-1 runs it with a stub form to show
+  the fixture's server gets past start-up (design sec-4), without relying on
+  the verdict.
 - There is no changelog. The release note goes in the version-bump commit
   body (precedent: 61fd1a9).
