@@ -6,29 +6,30 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · PHASE-05 · 1efd918
+fresh-as-of: 2026-10-26 · audit (RV-011, round 2 open) · 9c75e2b
 
 ### Produced
-- slice scoped + research round (edbae66); design run inq-1..inq-10 disposed; review RV-010 (pi, three rounds), 18 findings answered
-- minted: DEC-014..DEC-022 — form-builder design decisions; IMP-007 — gate builds the Nix server package (accepted into SL-003)
-- PHASE-01..04 implemented: 4c3152e, cf3cf74, a2e9fcd, ef83954+cce3d80; Codex round 3 follow-up 9adcf9a (phase sheets hold reds, renders, review adjudications)
-- minted: DEC-023..DEC-028 — operator-accepted amendments to design sec-2/sec-3 (committed 54ca07a)
-- PHASE-05 done — docs/nix-forms.md, README/setup/policy wording (dc46a9e); VH-1 hostile-audit PASS for read and write against a real-pi family built from 54ca07a
-- minted: ISS-002 — hostile-audit's ambient QUOTIENT_* guard fails open without `compgen` (1efd918); QUE-001 — F-28
+- PHASE-01..05: 4c3152e, cf3cf74, a2e9fcd, ef83954+cce3d80, 9adcf9a, dc46a9e; VH-1 PASS read+write
+- audit RV-011 opened; operator chose option A (fix in slice): DEC-029..037 agreed; plan appended PHASE-06..08 (0f8d132)
+- PHASE-06 check parses with bash, overlay exposure, (j) aliases: 7cea541, 421a132
+- PHASE-07 builder refusals, piFiles in tail, eval-refusal table: e4e8b58
+- PHASE-08 docs examples as fixtures, read-root text fixed: 8fc5495
+- post-phase hardening: 3f50a48 (unquoted $, \$, no \001), 701c96d (.. resolution, \037 separator)
+- minted: ISS-002 — hostile-audit QUOTIENT_ guard fails open without compgen; QUE-001 (answered by DEC-036)
 
 ### Learned
-- quotient delegates: no write in repo root; jailed without nix/bwrap-userns/git/shellcheck — see Execution notes
-- mem.fact.doctrine.design-apply-payload — design apply --input shape; same-batch needs edge refusal
+- mem.fact.quotient.no-doctrine-ids-in-shipped-text — drift test fails the gate on ids in nix/ docs/ etc; print the gate's own exit when backgrounding
+- Codex (OpenAI) cyber filter kills turns briefed as "attack"/"make eval execute"; frame as correctness/equivalence review
+- mem.fact.doctrine.design-apply-payload — design apply --input shape
 
 ### Open
-- QUE-001 — literal `$` in an env value or protect path fails the build (F-28); operator decision; undocumented
-- DEC-023..DEC-028 — reconcile must fold into design.md sec-2/sec-3
-- DEC-020 — env-leak claim proven by form-probe canary rows (PHASE-02); confirm at audit
-- DEC-017 — residual: --args / add-runtime binds unchecked by checkFormFamily
-- IMP-003 — answer the selection-gap note at close (design inq-9 disposition)
-- PHASE-04 N1 residue — quoted multi-word env value can pose as a bwrap option (check.sh; printed as residue by the check)
-- PHASE-04 Codex round-2 and rounds 4–6 fixes not re-reviewed; x86_64-linux only
-- PHASE-05 — empty `.local/state/quotient` in a persisted home is documented but not observed by any probe row
+- RV-011 F-20..F-24 — Codex round 2: glob/brace, unresolved .. equality, piFiles canonical containment, --bind-fd, quoted backtick (fix-now, within DEC-029..032 intent)
+- RV-011 F-25 — multi-line env literal falsely refused: operator decision (builder refusal vs read multi-line statements)
+- RV-011 F-1, F-3, F-6, F-16, F-17 — reconciliation brief items (design.md fold-in of DEC-023..037; residues; x86_64-only; mis-targeted PHASE-02/03 VT mandates; policy contract step-8 sentence)
+- DEC-033 reading — context strings in the store accepted for piFiles; tell operator
+- DEC-017 — --args / add-runtime binds unchecked (declared residue)
+- IMP-003 — selection-gap note at close
+- ISS-002 — outside slice
 
 ## Further review
 
