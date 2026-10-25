@@ -777,5 +777,227 @@ act = "verify"
 role = "raiser"
 note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
 
+[[finding]]
+id = "F-27"
+status = "answered"
+severity = "major"
+title = "(j) should distinguish tilde expansion from literal tilde paths; observed: a quoted target aliases masked state"
+detail = """
+VERIFIED at HEAD d7ba2b (round 3), incomplete quote-provenance protection adjacent to F-18/F-20/F-24, not a repeat of them. Evidence: nix/check.sh:226-248 replaces every ~ with an inert byte and maps it back without preserving quoting; :590-606 spells home paths as ~; :639-642 then exempts equal source/target spellings.
+
+Exact added bwrap fragment:
+  --ro-bind ~/.local/state/quotient '~/.local/state/quotient'
+For each of launcher-read, launcher-write and baseline, replace '--clearenv' with "--clearenv <fragment>" in a default-family fixture, outcome pass. The unchanged checker ACCEPTS the complete family (r3-tilde-quoted-target; scratch Nix fixture report /nix/store/bz47kmsr8g8zjvnds6vlpfva77jyhkzi-check-fixtures, 115/115).
+
+shell_words reads both operands as '~/.local/state/quotient'; protected_aliases emits nothing because source == target. Bash's harmless `eval 'set -- <line>'; printf '[%s]' "$@"` reads the source as /home/david/.local/state/quotient and the target as literal ~/.local/state/quotient. bwrap resolves that relative target as /~/.local/state/quotient, a different mount point. A real bwrap probe with HOME=/tmp/rv011-r3-lhjbsmna/runtime-tilde/home, a canary in HOME/.local/state/quotient, this exact fragment followed by --tmpfs ~/.local/state/quotient, and a Bash test inside the jail printed protected-state-visible-at-literal-tilde: canary readable at /~/.local/state/quotient and absent at the masked source path. No variable-path residue accounts for this: both operands are literal shell text with different tilde quoting.
+
+Repair: retain expansion provenance for ~ (and refuse unsupported tilde spellings) so quoted/escaped ~ is a literal relative path, never the home symbol. Apply that distinction to the own-path exemption, piFiles admission and path comparisons; add a complete-family regression."""
+disposition = "fix-now"
+response = "Reproduced by the raiser at runtime. Fix: a ~ is read as the home only where bash expands it (unquoted, word-initial, followed by / or word end); any other ~ on the bwrap line is refused, so a quoted ~ never compares equal to the home. Regression: the raiser's complete-family fragment. Delegated to a worker; commit cited at verify."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Reproduced by the raiser at runtime. Fix: a ~ is read as the home only where bash expands it (unquoted, word-initial, followed by / or word end); any other ~ on the bwrap line is refused, so a quoted ~ never compares equal to the home. Regression: the raiser's complete-family fragment. Delegated to a worker; commit cited at verify."
+
+[[finding]]
+id = "F-28"
+status = "withdrawn"
+severity = "major"
+title = "mount rules should resolve relative targets as bwrap does; observed: tmp bypasses the /tmp mount rule"
+detail = """
+VERIFIED at HEAD d7ba2b (round 3). Evidence: nix/check.sh:375-405 treats the first segment of every non-absolute path as an opaque anchor, so canonical_target('tmp') is 'tmp', not '/tmp'; :478-490 mounts/mounts_to pass that through to rule (d), :817-820. Ordinary relative paths are conflated with the builder's intentionally symbolic anchors.
+
+Concrete fixture: on the default family, in launcher-read, launcher-write and baseline, replace '--clearenv' with '--clearenv --ro-bind /etc tmp'. The checker ACCEPTS (r3-relative-target in /nix/store/bz47kmsr8g8zjvnds6vlpfva77jyhkzi-check-fixtures; 115/115). Its mount records report --ro-bind target 'tmp', so (d) sees only the existing --tmpfs /tmp; bind-set equality and (j) also pass.
+
+Runtime reproduction, harmless and verified with bwrap 0.12.0:
+  bwrap --ro-bind / / --tmpfs /tmp --ro-bind /etc tmp -- /run/current-system/sw/bin/bash -c 'if test -f /tmp/passwd; then echo relative-target-mounted-at-/tmp; fi'
+It exits 0 and prints relative-target-mounted-at-/tmp. The effective mount is a second mount at /tmp, replacing its tmpfs with host /etc, although the rule read a different target. This is not a variable expansion or an unknown literal real-home path.
+
+Repair: use separate source and destination path semantics. Resolve ordinary relative destinations against bwrap's new root (or refuse them), rather than assigning their first component a symbolic anchor. Ordinary relative sources also need refusal or an explicitly unresolved treatment instead of claiming kernel resolution. Add tmp and ./tmp target regressions."""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "withdraw"
+role = "raiser"
+note = "Replacing this entry only to correct secondary source references: mounts/mounts_to are nix/check.sh:464-475 and rule (d)'s /tmp comparison is :808-810. The primary canonical_target reference and reproduced behavior are unchanged."
+
+[[finding]]
+id = "F-29"
+status = "withdrawn"
+severity = "major"
+title = "mount comparisons should account for symlink traversal; observed: an explicit symlink redirects an accepted bind onto /tmp"
+detail = """
+VERIFIED at HEAD d7ba2b (round 3), a remaining kernel-path gap after F-19/F-22's lexical canonicalization fixes. Evidence: nix/check.sh:375-405 removes . and .. lexically; :478-490 reads each destination independently, without applying --symlink records or following intermediate symlinks. Thus :817-820's /tmp comparison misses a mount whose effective destination is /tmp.
+
+Exact bwrap fragment:
+  --dir /tmp/work --symlink /tmp /tmp/work/alias --ro-bind /etc /tmp/work/alias/.
+Add it after '--clearenv' in all three default-family launchers, keeping the normal --tmpfs /tmp and the form tails. The complete family is ACCEPTED (r3-symlink-target in /nix/store/bz47kmsr8g8zjvnds6vlpfva77jyhkzi-check-fixtures; 115/115). mounts reports --dir /tmp/work, --symlink /tmp/work/alias, --ro-bind /tmp/work/alias; protected_aliases and climbing_mounts emit nothing. Rule (d) reads exactly one /tmp mount.
+
+Verified runtime reproduction with bwrap 0.12.0:
+  bwrap --ro-bind / / --tmpfs /tmp --dir /tmp/work --symlink /tmp /tmp/work/alias --ro-bind /etc /tmp/work/alias/. -- /run/current-system/sw/bin/bash -c 'if test -f /tmp/passwd; then echo intermediate-symlink-target-mounted-at-/tmp; fi'
+It exits 0 and prints intermediate-symlink-target-mounted-at-/tmp: the bind replaces /tmp with host /etc. A control using final destination /tmp/work/alias without '/.' fails with "Can't mount on symlink destination", but '/.' traverses the symlink as an intermediate component and succeeds. The path and redirecting symlink are both in the checked argv; no host symlink, variable expansion or caller runtime bind is needed.
+
+Repair: track explicit symlink effects in destination resolution or conservatively refuse mounts traversing such aliases. Do not treat lexical removal of . or .. as kernel resolution in the presence of symlinks. Cover the intermediate-component '/.' case, not only a final symlink."""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "withdraw"
+role = "raiser"
+note = "Replacing this entry only to correct secondary source references: mounts/mounts_to are nix/check.sh:464-475 and rule (d)'s /tmp comparison is :808-810. The primary canonical_target reference and reproduced behavior are unchanged."
+
+[[finding]]
+id = "F-30"
+status = "answered"
+severity = "major"
+title = "mount rules should resolve relative targets as bwrap does; observed: tmp bypasses the /tmp mount rule"
+detail = """
+VERIFIED at HEAD d7ba2b (round 3). Evidence: nix/check.sh:375-405 treats the first segment of every non-absolute path as an opaque anchor, so canonical_target('tmp') is 'tmp', not '/tmp'; :464-475 mounts/mounts_to pass that through to rule (d), :808-810. Ordinary relative paths are conflated with the builder's intentionally symbolic anchors.
+
+Concrete fixture: on the default family, in launcher-read, launcher-write and baseline, replace '--clearenv' with '--clearenv --ro-bind /etc tmp'. The checker ACCEPTS (r3-relative-target in /nix/store/bz47kmsr8g8zjvnds6vlpfva77jyhkzi-check-fixtures; 115/115). Its mount records report --ro-bind target 'tmp', so (d) sees only the existing --tmpfs /tmp; bind-set equality and (j) also pass.
+
+Runtime reproduction, harmless and verified with bwrap 0.12.0:
+  bwrap --ro-bind / / --tmpfs /tmp --ro-bind /etc tmp -- /run/current-system/sw/bin/bash -c 'if test -f /tmp/passwd; then echo relative-target-mounted-at-/tmp; fi'
+It exits 0 and prints relative-target-mounted-at-/tmp. The effective mount is a second mount at /tmp, replacing its tmpfs with host /etc, although the rule read a different target. This is not a variable expansion or an unknown literal real-home path.
+
+Repair: use separate source and destination path semantics. Resolve ordinary relative destinations against bwrap's new root (or refuse them), rather than assigning their first component a symbolic anchor. Ordinary relative sources also need refusal or an explicitly unresolved treatment instead of claiming kernel resolution. Add tmp and ./tmp target regressions."""
+disposition = "fix-now"
+response = "Fix: a mount path operand must be absolute or begin with a symbol the check names (unquoted ~, or a $-variable); an ordinary relative path is refused under (c). Regressions: tmp and ./tmp targets, a relative source."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fix: a mount path operand must be absolute or begin with a symbol the check names (unquoted ~, or a $-variable); an ordinary relative path is refused under (c). Regressions: tmp and ./tmp targets, a relative source."
+
+[[finding]]
+id = "F-31"
+status = "answered"
+severity = "major"
+title = "mount comparisons should account for symlink traversal; observed: an explicit symlink redirects an accepted bind onto /tmp"
+detail = """
+VERIFIED at HEAD d7ba2b (round 3), a remaining kernel-path gap after F-19/F-22's lexical canonicalization fixes. Evidence: nix/check.sh:375-405 removes . and .. lexically; :464-475 reads each destination independently, without applying --symlink records or following intermediate symlinks. Thus :808-810's /tmp comparison misses a mount whose effective destination is /tmp.
+
+Exact bwrap fragment:
+  --dir /tmp/work --symlink /tmp /tmp/work/alias --ro-bind /etc /tmp/work/alias/.
+Add it after '--clearenv' in all three default-family launchers, keeping the normal --tmpfs /tmp and the form tails. The complete family is ACCEPTED (r3-symlink-target in /nix/store/bz47kmsr8g8zjvnds6vlpfva77jyhkzi-check-fixtures; 115/115). mounts reports --dir /tmp/work, --symlink /tmp/work/alias, --ro-bind /tmp/work/alias; protected_aliases and climbing_mounts emit nothing. Rule (d) reads exactly one /tmp mount.
+
+Verified runtime reproduction with bwrap 0.12.0:
+  bwrap --ro-bind / / --tmpfs /tmp --dir /tmp/work --symlink /tmp /tmp/work/alias --ro-bind /etc /tmp/work/alias/. -- /run/current-system/sw/bin/bash -c 'if test -f /tmp/passwd; then echo intermediate-symlink-target-mounted-at-/tmp; fi'
+It exits 0 and prints intermediate-symlink-target-mounted-at-/tmp: the bind replaces /tmp with host /etc. A control using final destination /tmp/work/alias without '/.' fails with "Can't mount on symlink destination", but '/.' traverses the symlink as an intermediate component and succeeds. The path and redirecting symlink are both in the checked argv; no host symlink, variable expansion or caller runtime bind is needed.
+
+Repair: track explicit symlink effects in destination resolution or conservatively refuse mounts traversing such aliases. Do not treat lexical removal of . or .. as kernel resolution in the presence of symlinks. Cover the intermediate-component '/.' case, not only a final symlink."""
+disposition = "fix-now"
+response = "Fix: a mount whose path lies at or under the destination of an earlier --symlink on the line (as canonical_target resolves both) is refused under (c), the conservative arm the raiser offers. Host symlinks inside bound trees stay a runtime residue (design brief). Regression: the raiser's /tmp/work/alias/. fragment."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fix: a mount whose path lies at or under the destination of an earlier --symlink on the line (as canonical_target resolves both) is refused under (c), the conservative arm the raiser offers. Host symlinks inside bound trees stay a runtime residue (design brief). Regression: the raiser's /tmp/work/alias/. fragment."
+
+[[finding]]
+id = "F-32"
+status = "answered"
+severity = "minor"
+title = "a builder-emitted single-quoted literal should remain text; observed: backslash plus backtick is falsely refused"
+detail = '''
+VERIFIED at HEAD d7ba2b (round 3), a remaining builder-compatibility case after F-24. Evidence: nix/check.sh:208-210 rejects the byte sequence backslash/backtick anywhere, before Bash parses its quoting. nix/form-family.nix:94-99 only refuses $ and newline in env values; :226-230 forwards the other values to jail.nix's shell quoting.
+
+Concrete family, using sampleBase from nix/checks/flake.nix:
+  family (sampleBase pkgs // { env.NOTE = "a\\`b"; })
+(The Nix source contains two backslashes, so NOTE contains one literal backslash before a backtick.) mkFormFamily evaluates and builds both forms and baseline, including the launcher's ShellCheck. Actual emitted fragment:
+  --setenv NOTE 'a\`b'
+The built read form is /nix/store/x5bicwn0mwgfwblxz7ldf2acfvxc1hkl-quotient-read/bin/quotient-read. Harmless Bash eval/set -- reads NOTE as exactly a, backslash, backtick, b; no command substitution or escape takes effect within single quotes. shell_words instead returns 1, 'an escaped backtick', so the complete family fails (e) baseline and (c) read/write. Reproduced as r3-backslash-backtick in /nix/store/f5cm06s2dqj22j6b9aj82m4d6hwywspi-check-fixtures (118/118, including the expected false refusal).
+
+DEC-029 Amendment 2 item 4 currently describes this blanket refusal; this finding is the requested builder/checker mismatch, not a claim that the implementation omitted that blanket rule. Repair the quote-blind prefilter so a backslash/backtick inside a single-quoted literal remains ordinary text, or make the builder reject this input at evaluation with a named, documented limit. Add the actual builder-emitted family as a regression.'''
+disposition = "tolerated"
+response = '''DEC-029 Amendment 2 item 4 refuses \` anywhere as a deliberate cost, like the escaped operators the first amendment already refuses: inside double quotes it is a backtick the inert byte cannot stand for, and the quote-blind prefilter is what keeps the parser simple. It fails closed, the input (a backslash before a backtick in an env value) is exotic, and docs/nix-forms.md's plain-words bullet already lists \` as refused.'''
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = '''DEC-029 Amendment 2 item 4 refuses \` anywhere as a deliberate cost, like the escaped operators the first amendment already refuses: inside double quotes it is a backtick the inert byte cannot stand for, and the quote-blind prefilter is what keeps the parser simple. It fails closed, the input (a backslash before a backtick in an env value) is exotic, and docs/nix-forms.md's plain-words bullet already lists \` as refused.'''
+
+[[finding]]
+id = "F-33"
+status = "answered"
+severity = "minor"
+title = "newline limits should cover text mkFormFamily emits; observed: a piFiles key builds a launcher the checker cannot read"
+detail = '''
+VERIFIED at HEAD d7ba2b (round 3), an uncovered emitted-text case adjacent to F-25's newline refusal fix. Evidence: nix/form-family.nix:49-50 admits a piFiles key containing a newline; :94-99 newlineValues covers env and hostPaths, excluding piFiles keys; :219-221 emits the escaped key on the bwrap line. nix/check.sh:193 extracts one physical line, so shell_words (:238-240) sees an unclosed single quote.
+
+Concrete family (Nix source):
+  family (sampleBase pkgs // {
+    piFiles."first\nsecond" = pkgs.writeText "newline-key" "hi";
+  })
+It evaluates and builds both forms and baseline without an evaluation refusal or ShellCheck failure. Actual launcher bytes include:
+  --ro-bind /nix/store/zg8raz475kr6xnq535ap06vz9y27w7cm-newline-key ~/.pi/agent/'first<LF>second'
+Bash reads a single target argument containing the newline. The checker returns 1 with 'the bwrap line is not plain words: quoting that does not close' for (e) baseline and (c) read/write, exactly the misleading downstream failure F-25 was intended to move to evaluation. Built read form: /nix/store/9m7mn18w7ldwmm7bc7sdjvjiw8d4dijs-quotient-read/bin/quotient-read. Scratch fixture r3-pifile-newline confirms the complete-family refusal in /nix/store/f5cm06s2dqj22j6b9aj82m4d6hwywspi-check-fixtures (118/118).
+
+Repair: given the chosen one-physical-line/one-word-per-line design, extend the evaluation-time named newline refusal to piFiles keys (or explicitly support this emitted shape). Add the builder input and exact diagnostic to the evaluation-refusal corpus.'''
+disposition = "fix-now"
+response = "In the direction the operator chose for F-25 (refuse at evaluation what the checker cannot read): the newline refusal extends to piFiles keys. Eval-refusal case added."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "In the direction the operator chose for F-25 (refuse at evaluation what the checker cannot read): the newline refusal extends to piFiles keys. Eval-refusal case added."
+
+[[finding]]
+id = "F-34"
+status = "answered"
+severity = "minor"
+title = "builder and checker should agree on literal control bytes; observed: a carriage-return env value builds but is falsely refused"
+detail = '''
+VERIFIED at HEAD d7ba2b (round 3). Evidence: nix/form-family.nix:94-99 rejects only $ and LF in env values, whereas nix/check.sh:222-224 rejects bytes 001-010 and 013-037 in the entire launcher line, including safely single-quoted literal data.
+
+Concrete family (Nix source):
+  family (sampleBase pkgs // { env.NOTE = "a\rb"; })
+This evaluates and builds both forms and baseline, including ShellCheck. Actual emitted bytes are --setenv NOTE 'a<CR>b' (CR is hex 0d, not LF). A harmless Bash eval/set -- reproduction reads the NOTE operand with bytes 61 0d 62, exactly what the builder emits. shell_words returns 1, 'a control byte'; the family is refused as (e) baseline and (c) read/write. Built read form: /nix/store/ca6hdg2q8f9nimh078gsz452rhkrv929-quotient-read/bin/quotient-read. Scratch fixture r3-carriage-return verifies the full failure in /nix/store/f5cm06s2dqj22j6b9aj82m4d6hwywspi-check-fixtures (118/118).
+
+DEC-029 intentionally reserves control bytes from the parser; this is a builder/checker input-contract mismatch, not a suggestion to let reserved delimiter bytes into its record format. Repair: reject reserved bytes in the builder's accepted values/paths at evaluation with a named diagnostic, or redesign the encoding to preserve such literal data. Cover at least CR so the existing LF check is not mistaken for the complete emitted-text limit.'''
+disposition = "fix-now"
+response = "Same direction as F-33: the builder refuses, at evaluation, a control character other than tab (which the check reads, fixture tab-in-source) in env values, host paths and piFiles keys, by name; message and docs widened from newline to control character. Eval-refusal case for CR."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Same direction as F-33: the builder refuses, at evaluation, a control character other than tab (which the check reads, fixture tab-in-source) in env values, host paths and piFiles keys, by name; message and docs widened from newline to control character. Eval-refusal case for CR."
+
 # Findings are append-only `[[finding]]` tables, added by `review raise`.
 # Empty here at creation — a fresh review is Active, awaiting the raiser.
