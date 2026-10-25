@@ -23,3 +23,11 @@ Mechanism refined during PHASE-06 planning; the principle (bash is the parser, n
 2. `eval "set -- <line>"` in a subshell with `set -f`, `set +B` yields the argv; the bytes map back, so expansions stay symbolic.
 3. A second parse replaces each operator character with two inert bytes around a space: quoted, the space stays in the word; unquoted, it splits it. More words than the first parse means an unquoted operator, and the line is refused.
 Cost: a caller's backslash-escaped operator (`\;`) is refused, not read; jail.nix escapes with single quotes.
+
+
+## Amendment 2 (2026-10-26, RV-011 F-20, F-24, F-26)
+Within the principle (a line bash reads otherwise than its words say is refused), as built at round 2. Basis: the responder's fixes to Codex round-2 findings; not put to the operator separately.
+1. A backtick, `*`, `?`, `[` and `{` join the split operators, each with its own inert byte: an unquoted glob or brace is refused (bash would expand it at launch).
+2. A backtick stands in the second parse as a quoted space then an unquoted one, so it splits the line unless single quotes hold it: a single-quoted backtick is text (F-24); a double-quoted one opens a command substitution and is refused.
+3. A `$(` or `$[` anywhere refuses the line, and every `${…}` must be a name, `name[@]`, or `name:-default` with no quote, escape, substitution, paren or brace. Inside double quotes these open a quoting context of their own, which the inert parse cannot follow (F-26). The builder emits none of them on the lines read; DEC-036 keeps `$` out of single-quoted caller text.
+4. `\$` and `` \` `` refuse the line.

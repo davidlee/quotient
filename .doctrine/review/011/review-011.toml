@@ -16,7 +16,7 @@ ref   = "SL-003"
 
 [[finding]]
 id = "F-1"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "design.md sec-2/sec-3 should carry DEC-023..028; observed: unamended text"
 detail = """
@@ -40,9 +40,14 @@ response = """
 Design text lags DEC-023..028 (and PHASE-06's DECs). Reconciliation brief, per-slice direct edit of design.md sec-2/sec-3/sec-5.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Brief entry exists: review-011.md Reconciliation Brief, design.md sec-2/sec-3/sec-5 fold-in of DEC-023..037."
+
 [[finding]]
 id = "F-2"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "docs/nix-forms.md says a read root is never compared to protected stores; server refuses one containing sessions or run evidence"
 detail = """
@@ -68,9 +73,14 @@ response = """
 Operator chose option A: PHASE-06 corrects docs/nix-forms.md:348-355 to the child-view check as implemented (src/server/childview.ts: unreachable stores refused at any exposure; never-writable stores and non-store paths such as forms/ readable through a read root).
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "docs/nix-forms.md:406-413 now states a read root containing session or run stores is refused view-overlaps-protected; gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-3"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "sec-3 residue list should match what check.sh prints; observed: multi-word env value residue undeclared in design"
 detail = """
@@ -94,9 +104,14 @@ response = """
 The residue is real and printed by the check; design sec-3's residue list omits it. Reconciliation brief, per-slice direct edit. If PHASE-06's boundary-preserving tokeniser removes the residue, the brief entry becomes: delete it from check.sh's printout instead.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Brief entry exists: sec-3 Residues replaced with what check.sh prints; the multi-word residue is gone (DEC-029)."
+
 [[finding]]
 id = "F-4"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "a literal $ in an env value or protect path should be refused clearly or supported; observed: build fails at shellcheck SC2016, undocumented"
 detail = """
@@ -116,9 +131,14 @@ role = "responder"
 disposition = "fix-now"
 response = "DEC-036 (operator-agreed 2026-10-26): refuse a literal $ in env values and protect paths at evaluation with a named message; docs state the limit. Lands in PHASE-07; QUE-001 answered."
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "eval-refusals env-dollar, protect-dollar; form-probe rows PASS; docs state the limit (DEC-036); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-5"
-status = "answered"
+status = "verified"
 severity = "nit"
 title = "docs name only .local/state/quotient as a persisted-home mount point; observed: piFiles leave empty placeholders too"
 detail = """
@@ -142,9 +162,14 @@ response = """
 PHASE-06: docs name piFiles placeholders beside .local/state/quotient as what a persisted home gains.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "docs/nix-forms.md:406 names the empty read-only piFiles placeholders; gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-6"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "verification should cover the platforms the builder accepts; observed: x86_64-linux only"
 detail = """
@@ -168,9 +193,14 @@ response = """
 The design claims Linux, not any architecture's verification; the only host available is x86_64-linux, and the builder's text and jail.nix's rendering are architecture-independent (no arch-specific branch in nix/form-family.nix or check.sh). Accepted drift: a sec-5 Risks line naming x86_64-linux as the only verified platform goes in the reconciliation brief.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Brief entry exists: sec-5 Risks line naming x86_64-linux as the only verified platform."
+
 [[finding]]
 id = "F-7"
-status = "answered"
+status = "verified"
 severity = "blocker"
 title = "check.sh should read bwrap arguments as bwrap receives them; observed: quote stripping drops empty args and shifts the scan"
 detail = """
@@ -196,9 +226,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "fixtures empty-env-quotient (e), raw-empty-bind (g) refuse; the line is read by bash (DEC-029); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-8"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "check.sh should not refuse valid builder output; observed: false refusals on a multi-word env value and an apostrophe in a path"
 detail = '''
@@ -224,9 +259,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "fixtures multiword-env-value, apostrophe-exposure pass; gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-9"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "G5 rw-bind accounting should cover every host-writable mount; observed: overlay upper/work dirs unchecked"
 detail = """
@@ -251,9 +291,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "fixture overlay-unexposed refuses (g) (DEC-030); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-10"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "G6 mask should hide protected state whatever the caller binds; observed: a caller bind of the state dir at another path passes"
 detail = """
@@ -278,9 +323,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "fixtures alias-state-dir, alias-protect, alias-host-root, alias-dotdot, alias-climb refuse (j) (DEC-031); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-11"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "caller binds should not cover piFiles; observed: a caller defer lands after them"
 detail = """
@@ -305,9 +355,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "fixture pifiles-defer passes with piFiles in the deferred tail after every caller option (DEC-032); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-12"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "piFiles sources should be store paths (G10); observed: toString keeps a host path outside a flake"
 detail = """
@@ -332,9 +387,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "eval-refusal pifiles-string; sources interpolated into the store (DEC-033 and Amendment); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-13"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "pi should see no QUOTIENT_* variable; observed: secretEnv.QUOTIENT_* passes builder and check"
 detail = """
@@ -358,9 +418,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "eval-refusal secret-quotient; fixture secret-name-quotient refuses (e) (DEC-034); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-14"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "HOME should stay forwarded (sec-2 Environment table); observed: env.HOME overrides it"
 detail = """
@@ -384,9 +449,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "eval-refusals env-home, secret-home (DEC-034); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-15"
-status = "answered"
+status = "verified"
 severity = "nit"
 title = "builder should refuse jail.nix options incompatible with the exec chain; observed: add-cleanup accepted, then check (b) fails"
 detail = """
@@ -410,9 +480,14 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "eval-refusal add-cleanup names the cause (DEC-035); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-16"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "PHASE-02/03 VT-1 mandates should find their keywords; observed: verify-vt FAIL"
 detail = """
@@ -436,123 +511,271 @@ response = """
 Plan criteria are immutable-append and off reconcile's surface, so the mandate cannot be edited in place. The behaviour holds (form-probe canary-proc1 / secret-cmdline rows PASS in every gate run this session). Reconciliation brief: record in notes that PHASE-02/03 VT-1's test_file should have been nix/checks/flake.nix; verify-vt FAILs for those two rows are known mis-targeted mandates, with the gate's probe rows as their evidence.
 """
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Brief entry exists: notes.md line on the mis-targeted PHASE-02/03 VT-1 mandates, with the probe rows as evidence."
+
 [[finding]]
 id = "F-17"
-status = "open"
+status = "verified"
 severity = "minor"
 title = "policy contract step 8 should say a read root is compared too; observed: 'compares the child's writable view'"
 detail = """
 Expected: docs/contract/quotient-policy-2.md "Protected stores" describes what the server compares.
 Observed: :188-190 "Step 8 compares the child's writable view, which is the root under a write profile, the session directory and every `exposure` path". src/server/childview.ts:89-95 includes the root at read-only exposure under a read profile, and :184-186 refuses an unreachable store (run evidence, attempts ledger, session home) at any exposure. The table below the sentence ("neither read nor write it") matches the code; the sentence does not, and it is what led docs/nix-forms.md to say a read root is never compared (F-2).
 """
+disposition = "design-wrong"
+response = "The sentence lags src/server/childview.ts (:89-95 includes the read root at read-only exposure; :184-186 refuses unreachable stores at any exposure); the table below it is right. Reconciliation brief, per-slice direct edit of docs/contract/quotient-policy-2.md:188-190."
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = "The sentence lags src/server/childview.ts (:89-95 includes the read root at read-only exposure; :184-186 refuses unreachable stores at any exposure); the table below it is right. Reconciliation brief, per-slice direct edit of docs/contract/quotient-policy-2.md:188-190."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Brief entry exists: docs/contract/quotient-policy-2.md:188-190 per-slice direct edit."
+
 [[finding]]
 id = "F-18"
-status = "open"
+status = "verified"
 severity = "major"
 title = 'check.sh parser should match bash or refuse; observed: unquoted $, \\$ and \\001 misread (fixed 3f50a48)'
 detail = '''
 Found by the responder during the round-2 wait (2026-10-26), fixed in 3f50a48: an unquoted `$var` (split by bash at launch) read as one symbol; `"a\$b"` kept its backslash where bash reads `$`; a quote-blind `$'`/`$"` test refused quoted literals; `\001` (bash's internal CTLESC) was an inert byte. Now: `$` is a split operator (unquoted refused, quoted symbolic), `\$` refused, no `\001`. Fixtures line-unquoted-expansion, line-escaped-dollar; secret-in-env-value quoted its expansion.
 '''
+disposition = "fix-now"
+response = 'Fixed in 3f50a48: $ is a split operator (unquoted refused, quoted symbolic), \$ refused, no \001 inert byte. Fixtures line-unquoted-expansion, line-escaped-dollar. Gate green at af01198 (includes it).'
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = 'Fixed in 3f50a48: $ is a split operator (unquoted refused, quoted symbolic), \$ refused, no \001 inert byte. Fixtures line-unquoted-expansion, line-escaped-dollar. Gate green at af01198 (includes it).'
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "3f50a48; fixtures line-unquoted-expansion, line-escaped-dollar refuse (c); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-19"
-status = "open"
+status = "verified"
 severity = "major"
 title = "(j) and (g) should see .. segments and tabs in paths; observed: alias via .., tab truncated the compared source (fixed 701c96d)"
 detail = '''
 Codex round 2 (partial run, cut by its content filter), reproduced by fixtures alias-dotdot (`${extra}/../protect` bound at /visible-protect passed) and tab-in-source (exposure `extra`, rw-bind `extra<TAB>x` passed). Fixed 701c96d: canonical_target resolves `.`/`..` lexically; records use \037, which shell_words refuses in any line.
 '''
+disposition = "fix-now"
+response = 'Fixed in 701c96d: canonical_target resolves . and .. lexically; records split on \037, which shell_words refuses in a line. Fixtures alias-dotdot, tab-in-source. Gate green at af01198.'
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = 'Fixed in 701c96d: canonical_target resolves . and .. lexically; records split on \037, which shell_words refuses in a line. Fixtures alias-dotdot, tab-in-source. Gate green at af01198.'
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "701c96d; fixtures alias-dotdot (j), tab-in-source (g) refuse; gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-20"
-status = "open"
+status = "verified"
 severity = "major"
 title = "parser should refuse unquoted glob and brace syntax; observed: quotien? and {a,b} read literally, expanded by bash"
 detail = """
 Codex round 2 (gpt-6.1-sol, 701c96d), verified by Codex with a builder family: `--ro-bind ~/.local/state/quotien? /visible` passes (bash globs it to the state dir; (j) never sees it); `--setenv NOTE {a,b}` is one word to the checker, two to bash. shell_words sets -f/+B for its own parse but the launcher does not.
 """
+disposition = "fix-now"
+response = "Fixed in af01198: * ? [ { (and the backtick) are split operators with their own inert bytes, so an unquoted glob or brace is refused; set -f/+B kept. Fixtures line-unquoted-glob-{question,star,bracket}, line-unquoted-brace (red before). DEC-029 Amendment 2."
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fixed in af01198: * ? [ { (and the backtick) are split operators with their own inert bytes, so an unquoted glob or brace is refused; set -f/+B kept. Fixtures line-unquoted-glob-{question,star,bracket}, line-unquoted-brace (red before). DEC-029 Amendment 2."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-21"
-status = "open"
+status = "verified"
 severity = "major"
 title = "(j) should not exempt two different unresolved paths as equal; observed: ~/../x and ~/../y both read as /"
 detail = """
 Codex round 2: `--ro-bind ~/../david/.local/state/quotient ~/../david/visible` — canonical_target returns `/` for any climb above the anchor, so source and target compare equal and the at-its-own-path exemption fires; the default state dir is aliased. Verified by Codex with a builder family.
 """
+disposition = "fix-now"
+response = "Fixed in af01198: canonical_target keeps a climbing .. instead of reading it as /; (c) refuses any mount path that climbs above its anchor (climbing_mounts over mount_records); (j) reads a climbing path as overlapping everything and never as its own target. Fixtures mount-climb (c), alias-climb (j), family aliasclimb (red before)."
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fixed in af01198: canonical_target keeps a climbing .. instead of reading it as /; (c) refuses any mount path that climbs above its anchor (climbing_mounts over mount_records); (j) reads a climbing path as overlapping everything and never as its own target. Fixtures mount-climb (c), alias-climb (j), family aliasclimb (red before)."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-22"
-status = "open"
+status = "verified"
 severity = "major"
 title = "check_tail's piFiles admission should test canonical containment; observed: /nix/store/../../etc admitted"
 detail = """
 Codex round 2: inserting `--ro-bind /nix/store/../../etc ~/.pi/agent/../../../visible` between mask and root (in form and baseline) passes; check_tail matches raw prefixes `/nix/store/` and `~/.pi/agent/`. Verified by Codex.
 """
+disposition = "fix-now"
+response = "Fixed in af01198: check_tail admits a piFiles bind only when canonical_target(source) is under /nix/store/ and canonical_target(target) under ~/.pi/agent/ (pifiles_bind). Fixtures tail-pifiles-source-climb, tail-pifiles-target-climb (red before)."
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fixed in af01198: check_tail admits a piFiles bind only when canonical_target(source) is under /nix/store/ and canonical_target(target) under ~/.pi/agent/ (pifiles_bind). Fixtures tail-pifiles-source-climb, tail-pifiles-target-climb (red before)."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-23"
-status = "open"
+status = "verified"
 severity = "major"
 title = "rw accounting should cover --bind-fd; observed: an fd bind writes the host with empty EXPOSURE"
 detail = """
 Codex round 2: a family opening `exec 3</tmp/dir` and adding `--bind-fd 3 /visible` passes with EXPOSURE empty; a scratch bwrap run showed writes through it reach the host. bind_words/rw_sources omit --bind-fd and --ro-bind-fd; their source is a descriptor the text cannot name.
 """
+disposition = "fix-now"
+response = "Fixed in af01198: bind_words includes --bind-fd/--ro-bind-fd; rw_sources writes a --bind-fd source as 'descriptor N', which no exposure path is, so (g) refuses; (j) reads any descriptor bind as an alias. Fixtures fd-bind-unexposed (g), alias-fd-bind (j) (red before)."
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fixed in af01198: bind_words includes --bind-fd/--ro-bind-fd; rw_sources writes a --bind-fd source as 'descriptor N', which no exposure path is, so (g) refuses; (j) reads any descriptor bind as an alias. Fixtures fd-bind-unexposed (g), alias-fd-bind (j) (red before)."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-24"
-status = "open"
+status = "verified"
 severity = "minor"
 title = "a single-quoted backtick should read as text; observed: refused"
 detail = """
 Codex round 2: `env.NOTE = "a`b"` builds (jail.nix single-quotes it) and the check refuses it: shell_words refuses any backtick, quoted or not.
 """
+disposition = "fix-now"
+response = '''Fixed in af01198, not as planned: a backtick splits in the second parse unless single-quoted (quoted space then unquoted space), so a single-quoted backtick is text and a double-quoted one is refused — the planned 'double-quoted kept as a symbol' would have hidden binds (F-26). \` refused. Fixtures quoted-specials (family, red before), line-escaped-backtick.'''
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
 
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = '''Fixed in af01198, not as planned: a backtick splits in the second parse unless single-quoted (quoted space then unquoted space), so a single-quoted backtick is text and a double-quoted one is refused — the planned 'double-quoted kept as a symbol' would have hidden binds (F-26). \` refused. Fixtures quoted-specials (family, red before), line-escaped-backtick.'''
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
 [[finding]]
 id = "F-25"
-status = "open"
+status = "verified"
 severity = "minor"
 title = "a multi-line env literal should be read or refused clearly; observed: 'quoting that does not close'"
 detail = '''
 Codex round 2: `env.NOTE = "first\nsecond"` builds; the single-quoted argument spans two physical lines; extract_line takes one, so the check refuses with a misleading reason. Fails closed.
 '''
+disposition = "fix-now"
+response = "Operator chose (a), 2026-10-26. Fixed in af01198: mkFormFamily refuses a newline in env values and persistHome/exposure/protect paths, by name; docs/nix-forms.md states it; DEC-036 Amendment. eval-refusals env-newline, exposure-newline (form-probe rows PASS in the gate)."
 
 [[finding.turn]]
 act = "raise"
 role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Operator chose (a), 2026-10-26. Fixed in af01198: mkFormFamily refuses a newline in env values and persistHome/exposure/protect paths, by name; docs/nix-forms.md states it; DEC-036 Amendment. eval-refusals env-newline, exposure-newline (form-probe rows PASS in the gate)."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
+
+[[finding]]
+id = "F-26"
+status = "verified"
+severity = "major"
+title = "parser should refuse a double-quoted expansion holding a quote; observed: a nested quote hides a bind"
+detail = """
+Found by the responder while weighing F-24's planned fix (2026-10-26), reproduced against nix/check.sh at 9dd3a2a by comparing shell_words with bash's own eval word-for-word. Inside double quotes, `$(…)`, `${…:-…}` and a backtick open a quoting context of their own; the parse with every `$` and backtick inert cannot follow it, so a quote inside one ends the double quotes for the checker alone. `--setenv A "a$(echo '"')" --bind /etc /visible "$(echo '"')b"` and `--setenv A "${X:-'"'}" --bind /etc /visible "${X:-'"'}"`: bash reads a live `--bind /etc /visible`, the checker one quoted word, so no rule sees the bind. `"$(echo "x y")"` shifts arity instead (two words to the checker, one to bash). F-24's planned fix (a double-quoted backtick kept as a symbol) would have added the backtick form.
+"""
+disposition = "fix-now"
+response = "Fixed in af01198: $( and $[ refuse the line anywhere; every ${…} must be a name, name[@] or a plain name:-default (brace_body); a double-quoted backtick is refused (F-24). Fixtures line-quoted-{backtick,substitution,default}-nested, line-quoted-arithmetic (red before); a word-for-word probe against bash eval refuses every desync line and reads the builder's expansions unchanged. Residue/docs text updated in 443f5f5. DEC-029 Amendment 2."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Fixed in af01198: $( and $[ refuse the line anywhere; every ${…} must be a name, name[@] or a plain name:-default (brace_body); a double-quoted backtick is refused (F-24). Fixtures line-quoted-{backtick,substitution,default}-nested, line-quoted-arithmetic (red before); a word-for-word probe against bash eval refuses every desync line and reads the builder's expansions unchanged. Residue/docs text updated in 443f5f5. DEC-029 Amendment 2."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "af01198; the finding's fixtures were red before the fix and pass after (named in the response); gate green at af01198 (rv011-r2-gate.log GATE_EXIT=0); fixtures 112/112"
 
 # Findings are append-only `[[finding]]` tables, added by `review raise`.
 # Empty here at creation — a fresh review is Active, awaiting the raiser.

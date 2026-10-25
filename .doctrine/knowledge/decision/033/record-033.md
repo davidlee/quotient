@@ -10,3 +10,7 @@ RV-011 F-12: `toString source` kept a host path when evaluated outside flake sou
 
 ## Basis
 Operator, in session 2026-10-26: chose option A for RV-011 (fix inside SL-003), then "agreed" to the proposed amendments D1–D9 (D1 in its bash-as-parser form; D3 "yeah makes sense", with `/`).
+
+
+## Amendment (2026-10-26, operator accepted in session)
+As built, a string that carries Nix store context and names a store path (`"${drv}/share/models.json"`) is accepted beside a path and a derivation: it already points into the store, so G10 (no host path bound from piFiles) holds. Any other string is refused.
