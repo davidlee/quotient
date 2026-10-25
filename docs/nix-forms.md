@@ -367,11 +367,12 @@ What you add is yours to get right.
   session binds, so a bind added there can cover them. Nothing stops you, and
   nothing checks you either.
 - **The bwrap line must be plain words.** The check refuses a line bash would
-  read as more than one command of words: an unquoted `;`, `&`, `|`, `<`, `>`,
-  `(`, `)` or `#`, a backtick, or an ANSI-C quote (`$'…'`). jail.nix quotes
-  everything it writes, so this meets only raw arguments of your own; quote
-  them, and do not escape an operator with a backslash, which the check also
-  refuses.
+  read as more than one command of words, or as words it cannot know until
+  launch: an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or `#`, an unquoted `$`
+  (an expansion bash would split, an ANSI-C or locale quote), a `\$`, or a
+  backtick. jail.nix quotes everything it writes, so this meets only raw
+  arguments of your own; quote them, and do not escape an operator with a
+  backslash, which the check also refuses.
 - **`/tmp` belongs to the jail.** The check refuses a mount at exactly `/tmp`,
   because a shared host `/tmp` would leak between runs. Binds below `/tmp` (an
   X11 socket, say) are allowed. A temporary directory that should survive a run,

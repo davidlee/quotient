@@ -111,6 +111,14 @@ edit launcher-read '--clearenv' '--clearenv $(true)'
 fixture line-backtick default 'refuse:(c)'
 edit launcher-read '--clearenv' '--clearenv `true`'
 
+# An expansion outside double quotes is split into words at launch, which the
+# text cannot know; inside them, `\$` is a `$`. Both are refused.
+fixture line-unquoted-expansion default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE $HOME'
+
+fixture line-escaped-dollar default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE "a\$b"'
+
 fixture line-ansi-quote default 'refuse:(c)'
 edit launcher-read '--clearenv' "--clearenv --setenv NOTE \$'x'"
 
@@ -331,10 +339,11 @@ edit launcher-read '--setenv PATH' '--setenv CHECK_SECRET_OTHER literal --setenv
 fixture secret-fd-other full 'refuse:(h)'
 edit launcher-read '--args "$quotient_secret_fd"' '--args "$quotient_secret_fd_other"'
 
-# An option named inside an environment value is not an option bwrap reads.
+# An option named inside an environment value is not an option bwrap reads. The
+# expansion is quoted, as any on the line must be.
 fixture secret-in-env-value full 'refuse:(h)'
 edit launcher-read ' --args "$quotient_secret_fd"' ''
-edit launcher-read '--setenv PATH' '--setenv CHECK_LITERAL --args $quotient_secret_fd --setenv PATH'
+edit launcher-read '--setenv PATH' '--setenv CHECK_LITERAL --args "$quotient_secret_fd" --setenv PATH'
 
 # The open is a command: a quoted mention of it opens nothing.
 fixture secret-open-inert full 'refuse:(h)'

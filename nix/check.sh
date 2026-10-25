@@ -87,17 +87,20 @@ secret_open='^exec \{quotient_secret_fd\}<'
 mask_plain='^\[ -e (.+) \] && quotient_mask\+=\(--tmpfs (.+)\)$'
 mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf '\''quotient: protect path %s is not a directory\\n'\'' (.+) >&2; exit 1; \}; quotient_mask\+=\(--tmpfs (.+)\); \}$'
 
-# Reading a line as bash does. The characters that make a line more
-# than words: the two expansions (`$`, `~`), then every character that can end a
-# word or start an operator — a command boundary, a redirection, a subshell, a
-# comment. Each has an inert control byte of its own, at the same position, so
-# bash parses the quoting of a line in which nothing can expand or run, and the
-# bytes map back after: `"$quotient_root"` is the word `$quotient_root`, a
-# symbol a rule can name. An operator in the second parse is two inert bytes
-# around a space: quoted, the space is part of the word; unquoted, it ends one.
-expanders='$~'
-operators=';&|<>()#'
-inert=$'\001\002\003\004\005\006\007\016\017\020'
+# Reading a line as bash does. The characters that make a line more than words:
+# `~`, then `$` and every character that can end a word or start an operator — a
+# command boundary, a redirection, a subshell, a comment. Each has an inert
+# control byte of its own, at the same position (none of them \001, which bash
+# keeps for itself), so bash parses the quoting of a line in which nothing can
+# expand or run, and the bytes map back after: `"$quotient_root"` is the word
+# `$quotient_root`, a symbol a rule can name. In the second parse each of the
+# operators is two inert bytes around a space: quoted, the space is part of the
+# word; unquoted, it ends one. So an unquoted `$` — an expansion bash would
+# split into words at launch, an ANSI-C or a locale quote — is refused with the
+# operators, and an unquoted `~` is read as written.
+tilde='~'
+operators='$;&|<>()#'
+inert=$'\002\003\004\005\006\007\016\017\020\023'
 split_mark=$'\021 \022'
 
 # Normalisation, for the builder's own line shapes only (the form's guards, the
@@ -183,10 +186,12 @@ extract_line() { awk "$bwrap_shape { print; exit }" "$1" >"$2"; }
 # quoting that does not close. A line it reads otherwise than its words say is
 # refused, never read the way a rule would like.
 shell_words() { # line
-  local line=$1 one split i c specials=$expanders$operators words count
+  local line=$1 one split i c specials=$tilde$operators words count
+  # A backtick substitutes a command; inside double quotes `\$` is a `$`, which
+  # the inert byte standing for it would not be.
   case $line in
     *'`'*) echo 'a backtick'; return 1 ;;
-    *"\$'"* | *'$"'*) echo "an ANSI-C or locale quote"; return 1 ;;
+    *'\$'*) echo 'an escaped $'; return 1 ;;
   esac
   if [ "$(printf '%s' "$line" | LC_ALL=C tr -d '\001-\010\013-\037')" != "$line" ]; then
     echo 'a control byte'
@@ -196,7 +201,7 @@ shell_words() { # line
   for ((i = 0; i < ${#specials}; i++)); do
     c=${specials:i:1}
     one=${one//"$c"/"${inert:i:1}"}
-    if ((i < ${#expanders})); then
+    if ((i < ${#tilde})); then
       split=${split//"$c"/"${inert:i:1}"}
     else
       split=${split//"$c"/"$split_mark"}
@@ -211,7 +216,7 @@ shell_words() { # line
   words=${words%.}
   count=$( (set -f && set +B && eval "set -- $split" && printf '%s\n' "$#") 2>/dev/null) || count=-1
   if [ "$count" != "$(printf '%s' "$words" | grep -c '')" ]; then
-    echo 'a shell operator outside quotes'
+    echo 'a shell operator or an expansion outside quotes'
     return 1
   fi
   printf '%s' "$words" | LC_ALL=C tr "$inert" "$specials"
