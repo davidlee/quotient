@@ -6,36 +6,29 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-25 · PHASE-05 in progress · cce3d80
+fresh-as-of: 2026-10-26 · PHASE-05 · 1efd918
 
 ### Produced
-- slice scoped + research round (commit edbae66); design run inq-1..inq-10 all disposed
-- minted: DEC-014..DEC-022 — the form-builder design decisions; IMP-007 — gate builds the Nix server package (accepted into SL-003)
-- research/research.md: persisted-home G5 claim corrected (declared in exposure on this host)
-- pi review of DEC-014..022 (research/raw/review-decs-014-022.md): F-1,F-4,F-5c contested; rest integrated by amending DEC-017,019,020,021,022 (operator-accepted)
-
-- design drafted sec-1..sec-5; review pass RV-010 (pi, three rounds): 18 findings, all answered; F-5 unverifiable by the reviewer (jail.nix outside its jail), evidence in the response
-
-- PHASE-01..04 implemented: 4c3152e, cf3cf74, a2e9fcd, ef83954+cce3d80 (phase sheets hold reds, renders, review adjudications)
-- minted: DEC-023..DEC-028 — operator-accepted amendments to design sec-2/sec-3 (protect files fail launch; secretEnv must expand; quote/whitespace normalisation; --dev-bind; PROTECT input; durable check-fixtures)
+- slice scoped + research round (edbae66); design run inq-1..inq-10 disposed; review RV-010 (pi, three rounds), 18 findings answered
+- minted: DEC-014..DEC-022 — form-builder design decisions; IMP-007 — gate builds the Nix server package (accepted into SL-003)
+- PHASE-01..04 implemented: 4c3152e, cf3cf74, a2e9fcd, ef83954+cce3d80; Codex round 3 follow-up 9adcf9a (phase sheets hold reds, renders, review adjudications)
+- minted: DEC-023..DEC-028 — operator-accepted amendments to design sec-2/sec-3 (committed 54ca07a)
+- PHASE-05 done — docs/nix-forms.md, README/setup/policy wording (dc46a9e); VH-1 hostile-audit PASS for read and write against a real-pi family built from 54ca07a
+- minted: ISS-002 — hostile-audit's ambient QUOTIENT_* guard fails open without `compgen` (1efd918); QUE-001 — F-28
 
 ### Learned
 - quotient delegates: no write in repo root; jailed without nix/bwrap-userns/git/shellcheck — see Execution notes
 - mem.fact.doctrine.design-apply-payload — design apply --input shape; same-batch needs edge refusal
 
 ### Open
-- IMP-003 — answer the selection-gap note at close (design inq-9 disposition)
-- DEC-020 — env-leak claim: proven behaviourally by form-probe canary rows (PHASE-02); confirm at audit
+- QUE-001 — literal `$` in an env value or protect path fails the build (F-28); operator decision; undocumented
 - DEC-023..DEC-028 — reconcile must fold into design.md sec-2/sec-3
-- PHASE-04 N1 residue — quoted multi-word env value can pose as a bwrap option (check.sh); audit
-- PHASE-04 Codex round-2 fixes not re-reviewed; x86_64-linux only
-- PHASE-05 VH-1 — operator runs hostile-audit with a real pi, read + write
-- PHASE-04 F-28 — a protect path or env value containing a literal `$` fails the build (writeShellApplication shellcheck SC2016 on single-quoted `$`); operator decision pending; docs do not yet mention it
-- PHASE-04 Codex rounds 4–6 fixes (P1–P5, arity table) not re-reviewed
-- PHASE-05 — empty `.local/state/quotient` in a persisted home is claimed in docs but not observed by any probe row
+- DEC-020 — env-leak claim proven by form-probe canary rows (PHASE-02); confirm at audit
 - DEC-017 — residual: --args / add-runtime binds unchecked by checkFormFamily
-- DEC-017 — state mask under persistHome leaves an empty quotient state dir in the persisted home; document
-- PHASE-05 docs: `protect` has no effect inside the root (the mask precedes the root bind); say so.
+- IMP-003 — answer the selection-gap note at close (design inq-9 disposition)
+- PHASE-04 N1 residue — quoted multi-word env value can pose as a bwrap option (check.sh; printed as residue by the check)
+- PHASE-04 Codex round-2 and rounds 4–6 fixes not re-reviewed; x86_64-linux only
+- PHASE-05 — empty `.local/state/quotient` in a persisted home is documented but not observed by any probe row
 
 ## Further review
 
