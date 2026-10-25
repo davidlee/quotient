@@ -81,3 +81,41 @@ F-17 (route review) was settled in the design.
 
 - `lint` stays outside `gate` (IMP-002); each phase runs it on touched files.
 - IMP-003's selection-gap answer is recorded at close, not in a phase.
+
+## Amendment: RV-011 (PHASE-06..PHASE-08)
+
+The audit's independent pass (RV-011) found the check accepting non-conformant
+families built from ordinary arguments, and refusing valid ones. The operator
+chose to fix inside the slice (option A) and agreed DEC-029..DEC-037.
+
+Order and boundaries:
+
+- **PHASE-06, the check first.** The parser change (DEC-029) moves every
+  bwrap-line rule onto a new argv, so it lands before anything that adds rules
+  on top of it. DEC-030 and DEC-031 are rules over that argv. The full fixture
+  corpus is the regression net: a pre-existing verdict that flips is recorded,
+  not silently re-expected.
+- **PHASE-07, the builder.** Its refusals happen at evaluation, so they need a
+  second kind of case (tryEval) beside the check-fixtures table. The piFiles move
+  (DEC-032) changes the tail's shape, and with it the check's tail-order rule,
+  which is why it follows PHASE-06.
+- **PHASE-08, the docs last,** because they describe what PHASE-06/07 built, and
+  their examples become fixtures the gate builds (DEC-037).
+
+After PHASE-08 the audit (RV-011) resumes: the gate, a Codex re-review of the
+check and builder, verification of F-2, F-4, F-5 and F-7..F-15, then the
+reconciliation brief. design.md is not edited here; reconcile folds
+DEC-023..DEC-037 in.
+
+Risks:
+
+- **The restricted shell's limits** (DEC-029): `bash -r` refuses output
+  redirection and commands containing `/`, but builtins still run. The
+  `declare -f` gate, which admits one simple `set` command only, is what makes
+  the call safe; a fixture per refused shape keeps it honest.
+- **Verdict churn.** Fixtures written against the normalised text may change
+  verdict for the right reason. EX-3 makes each change explicit.
+- **tryEval does not capture messages.** `builtins.tryEval` reports only failure
+  for a `throw`; checking the message may need a build-time `nix eval` in a
+  check or an `assert` with a known message shape. The phase sheet records the
+  mechanism chosen.

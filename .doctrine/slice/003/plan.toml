@@ -139,3 +139,69 @@ verification = [
 ]
 specs        = []
 requirements = []
+
+[[phase]]
+id        = "PHASE-06"
+name      = "The check reads argv as bash does (RV-011)"
+objective = "check.sh reads the bwrap line with bash's parser (DEC-029), counts overlay upper/work dirs as rw sources (DEC-030) and refuses binds that alias a protected path (DEC-031). Every RV-011 check reproduction is a permanent fixture (DEC-037)."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-05 exits hold. Read DEC-029, DEC-030, DEC-031, DEC-037 and RV-011 F-7..F-10 in full (`doctrine review show RV-011 -f 7,8,9,10`); the reproduction flake named there. Read nix/check.sh's argv_scan, bind_words and rule (g), and nix/checks/fixtures/cases.sh's table grammar." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Red first: each RV-011 check reproduction is a sample family in nix/checks/flake.nix with a check-fixtures row stating the verdict the check must reach — F-7: `env = { S_EMPTY = \"\"; QUOTIENT_DEBUG = \"1\"; }` refuse (e), and a raw `--setenv NOTE '' --bind …` refuse (g); F-8: `env.NOTE = \"ordinary --share-net\"` with network = false, and exposure `/srv/it's`, both pass; F-9: overlay-rw with exposure [] refuse (g); F-10: an alias of the default state dir, of a protect path, and of `/`, each refuse with DEC-031's label. Each fails before its fix; the order is recorded in the phase sheet." },
+  { id = "EX-2", text = "DEC-029: the bwrap line's argv comes from bash's parser — `$` to a sentinel, a backtick refused, the line parsed as `f() { set -- …; }`, `declare -f f` required to show one simple `set` command, `f` called in a restricted, empty-environment shell with `set -f`, `set +B`, `HOME='~'`, argv read NUL-separated. Doctored-launcher fixtures refuse a backtick, a `;`, a `&&` and an unquoted `$(` on the bwrap line, each with a stated label." },
+  { id = "EX-3", text = "Every bwrap-line rule reads that argv; EXPOSURE and PROTECT are compared unnormalised; quote stripping and whitespace folding no longer touch the bwrap line (DEC-025 superseded). The 71 existing check-fixtures cases and the 14 neg- checks still reach their verdicts; any case whose expected verdict changes is listed in the phase sheet with the reason." },
+  { id = "EX-4", text = "DEC-030: rule (g) treats `--overlay`'s upper and work operands as rw sources. DEC-031: a new labelled rule refuses a bind or overlay source that equals, contains or lies inside a PROTECT path, the default state dir in each textual spelling, or `/`, unless its target is the same path. The residue printout drops the multi-word env residue and names the literal-home-path alias residue." },
+  { id = "EX-5", text = "`just gate` green; `shellcheck nix/check.sh nix/checks/*.sh nix/checks/fixtures/*.sh` clean." },
+]
+verification = [
+  { id = "VT-1", expects = "check.sh parses the bwrap line with bash and accounts for overlays.", test_file = "nix/check.sh", keywords = ["declare -f", "set -f", "set +B", "--overlay"], waived = false },
+  { id = "VT-2", expects = "The fixture table carries the RV-011 reproductions and the parser refusals.", test_file = "nix/checks/fixtures/cases.sh", keywords = ["empty-env-quotient", "overlay", "alias", "backtick"], waived = false },
+  { id = "VA-1", expects = "Phase sheet lists each RV-011 F-7..F-10 reproduction with its red and green run, and every pre-existing fixture whose verdict changed, with the reason." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-07"
+name      = "Builder refusals and piFiles placement (RV-011)"
+objective = "mkFormFamily places piFiles in its tail (DEC-032), imports them into the store (DEC-033) and refuses reserved env names (DEC-034), add-cleanup (DEC-035) and a literal `$` in env values or protect paths (DEC-036). Each refusal is a permanent evaluation case; the probe shows a caller defer cannot cover piFiles."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-06 exits hold. Read DEC-032..DEC-036 and RV-011 F-4, F-11..F-15. Read nix/form-family.nix's callerPermissions, piFilePermission and deferred tail, and check.sh's tail-order rule." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Red first: evaluation cases in nix/checks/flake.nix (builtins.tryEval, plus a message match where Nix exposes it) for a string piFiles value, `env.QUOTIENT_DEBUG`, `secretEnv.QUOTIENT_DEBUG`, `env.HOME`, `secretEnv.HOME`, `options` using add-cleanup, a `$` in an env value and a `$` in a protect path; each fails before its refusal exists. The order is recorded in the phase sheet." },
+  { id = "EX-2", text = "DEC-032: piFiles binds render inside the deferred tail, after the mask and before the root bind; check.sh's tail-order rule admits only `--ro-bind /nix/store/… ~/.pi/agent/…` there. Fixtures: RV-011 F-11's deferPi family passes with piFiles after the caller's defer; a doctored launcher with any other mount between the mask and the root bind is refused (c)." },
+  { id = "EX-3", text = "DEC-033: piFiles sources are interpolated; the full family's launcher shows a /nix/store source for each piFiles entry. DEC-034: check rule (e) also refuses a QUOTIENT_ name in SECRET_ENV_NAMES (a hand-built family fixture, since the builder now refuses it). DEC-035, DEC-036 refusals name the offending entry." },
+  { id = "EX-4", text = "scripts/form-probe: the probe family adds a caller `defer` ro-bind over `~/.pi/agent`; a new row shows the piFiles file still reads its store content inside the jail, for read and write." },
+  { id = "EX-5", text = "`just gate` green; shellcheck clean on scripts/form-probe and nix/check.sh." },
+]
+verification = [
+  { id = "VT-1", expects = "The builder refuses reserved names, add-cleanup and literal dollars.", test_file = "nix/form-family.nix", keywords = ["QUOTIENT_", "HOME", "add-cleanup", "protect"], waived = false },
+  { id = "VT-2", expects = "The test flake carries the evaluation-refusal cases.", test_file = "nix/checks/flake.nix", keywords = ["tryEval", "add-cleanup", "QUOTIENT_DEBUG"], waived = false },
+  { id = "VT-3", expects = "The probe asserts piFiles survive a caller defer.", test_file = "scripts/form-probe", keywords = ["pi-files-defer"], waived = false },
+  { id = "VA-1", expects = "Phase sheet lists each refusal with its red and green run and the message it prints." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-08"
+name      = "Docs examples as fixtures; docs corrections (RV-011)"
+objective = "docs/nix-forms.md's nix examples are files the gate builds and checks (DEC-037). The docs correct the read-root text (RV-011 F-2) and the persisted-home placeholders (F-5), and state every refusal and residue PHASE-06/07 introduced."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-07 exits hold. Read DEC-037, RV-011 F-2 and F-5, src/server/childview.ts protectedStores/refuses, and docs/nix-forms.md in full." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Red first: src/drift.test.ts asserts each tagged nix block in docs/nix-forms.md equals its file under nix/checks/examples/, and fails." },
+  { id = "EX-2", text = "The consumer flake and the credentials example are files under nix/checks/examples/, quoted verbatim in the docs; the test flake evaluates each with a stub pi and quotient overridden to the working tree, and runs checkFormFamily over the family it builds." },
+  { id = "EX-3", text = "F-2: the read-root paragraph states the child-view check as implemented — run evidence and the session home are refused at any exposure; the policy, approvals, layers and non-store paths such as forms/ are readable through a read root. F-5: a persisted home gains `.local/state/quotient` and an empty placeholder per piFiles entry." },
+  { id = "EX-4", text = "The docs state DEC-030's overlay exposure, DEC-031's alias refusal and its residue, DEC-032..DEC-036's refusals and limits; the docs' residue list matches the check's printout." },
+  { id = "EX-5", text = "No shipped text cites a doctrine id; pack contents unchanged by this phase except docs/nix-forms.md (pack-check); `just gate` green; `npx eslint src/drift.test.ts --max-warnings 0` clean." },
+]
+verification = [
+  { id = "VT-1", expects = "The drift test pins the docs' nix examples to their fixture files.", test_file = "src/drift.test.ts", keywords = ["nix-forms.md", "nix/checks/examples"], waived = false },
+  { id = "VA-1", expects = "Checklist in the phase sheet: one line per PHASE-06/07 refusal, limit and residue, each with the docs sentence that states it; F-2 and F-5 text quoted." },
+]
+specs        = []
+requirements = []
