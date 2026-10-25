@@ -340,19 +340,49 @@ option_operand_count() { # line option operand
   printf '%s\n' "$n"
 }
 
-# A mount target as the kernel resolves it: repeated slashes and `/./` collapse,
-# and a trailing `/.` or slash names the same directory, so `//tmp`, `/tmp/`,
-# `/./tmp` and `/tmp/.` are all `/tmp`. The steps run to a fixed point, because
-# one pass over `/././tmp/./` leaves a `/./` behind.
+# A path as the kernel resolves it, lexically: repeated slashes, `.` segments
+# and a trailing slash name nothing, and `..` climbs one segment, so `//tmp`,
+# `/./tmp/`, `/tmp/.` and `/x/../tmp` are all `/tmp`. A path that does not open
+# with `/` is anchored at its first segment (`~`, `$quotient_root`), and a `..`
+# that would climb above that anchor leaves a directory no text names: it reads
+# as `/`, which holds everything.
 canonical_target() {
-  local path=$1 before=
-  while [ "$path" != "$before" ]; do
-    before=$path
-    path=$(printf '%s\n' "$path" |
-      sed -E -e 's|//+|/|g' -e 's|/\./|/|g' -e 's|/\.$|/|' -e 's|(.)/+$|\1|')
+  local path=$1 anchor part
+  local -a parts=() kept=()
+  case $path in
+    /*) anchor=/ ;;
+    *)
+      anchor=${path%%/*}
+      path=${path#"$anchor"}
+      ;;
+  esac
+  IFS=/ read -ra parts <<<"$path"
+  for part in "${parts[@]}"; do
+    case $part in
+      '' | .) ;;
+      ..)
+        if [ "${#kept[@]}" -gt 0 ]; then
+          unset 'kept[-1]'
+        elif [ "$anchor" != / ]; then
+          printf '/\n'
+          return
+        fi
+        ;;
+      *) kept+=("$part") ;;
+    esac
   done
-  printf '%s\n' "$path"
+  if [ "$anchor" = / ]; then
+    (IFS=/ && printf '/%s\n' "${kept[*]}")
+  elif [ "${#kept[@]}" -eq 0 ]; then
+    printf '%s\n' "$anchor"
+  else
+    (IFS=/ && printf '%s/%s\n' "$anchor" "${kept[*]}")
+  fi
 }
+
+# The field separator of the records below: a byte no word can hold, since
+# shell_words refuses a line that carries one.
+sep=$'\037'
 
 # Every mount on a bwrap line, one per line as `flag target`: the target of a
 # mount operation is its last operand, which the stream carries at the flag's
@@ -368,18 +398,18 @@ mounts() { # line-file
       if [ "$flag" = "$op" ]; then
         n=$(arity_of "$flag")
         target=${stream[i + n]-}
-        printf '%s %s\n' "$flag" "$(canonical_target "${target#* }")"
+        printf '%s%s%s\n' "$flag" "$sep" "$(canonical_target "${target#* }")"
       fi
     done
   done
 }
 
 # The mounts on a bwrap line whose target is $2.
-mounts_to() { mounts "$1" | awk -v target="$2" '$NF == target'; }
+mounts_to() { mounts "$1" | awk -F "$sep" -v target="$2" '$2 == target { print $1 " " $2 }'; }
 
 # Every bind on a bwrap line, sorted and unique (lifted from satan), one per
-# line with its fields tab-separated, since a word may hold a space: the form's
-# set minus the baseline's is the residue (f) reads. Read from the option
+# line with its fields separated by $sep, since a word may hold a space or a
+# tab: the form's set minus the baseline's is the residue (f) reads. Read from the option
 # stream, so a word after the `--` that spells a bind names no mount. A device
 # bind is a read-write bind, so it is in the set: (f) and (g) are about the
 # permissions a caller ends up with, and the flag's name is no part of that. An
@@ -402,7 +432,7 @@ bind_words() { # argument-file
       word=${stream[i + op]-}
       fields+=("${word#operand }")
     done
-    (IFS=$'\t' && printf '%s\n' "${fields[*]}")
+    (IFS=$sep && printf '%s\n' "${fields[*]}")
   done |
     sed -E "$fold_store" |
     sort -u
@@ -411,7 +441,7 @@ bind_words() { # argument-file
 # The host paths a bind set writes, one per line: the source of every
 # read-write bind, and an overlay's upper and work directories.
 rw_sources() { # bind-set-file
-  awk -F'\t' '
+  awk -F "$sep" '
     $1 ~ /^--(dev-)?bind(-try)?$/ { print $2 }
     $1 == "--overlay" { print $2; print $3 }
   ' "$1"
@@ -724,7 +754,7 @@ check_capability() {
   # permission has moved between the form and its baseline.
   bind_words "$line" >"$work/$cap-binds"
   # The expected set is written here, not read from a launcher: it needs no scan.
-  printf '%s\t%s\t%s\n' "$root" '$quotient_root' '$quotient_root' --bind "$session_var" "$session_var" |
+  printf "%s$sep%s$sep%s\\n" "$root" '$quotient_root' '$quotient_root' --bind "$session_var" "$session_var" |
     sed -E "$fold_store" | sort -u >"$work/$cap-expected-set"
   comm -13 "$work/baseline-binds" "$work/$cap-binds" >"$work/$cap-added"
   comm -23 "$work/baseline-binds" "$work/$cap-binds" >"$work/$cap-dropped"
@@ -773,7 +803,7 @@ check_capability() {
   local kind test_word mount_word dir_word printf_word declared first_append last_append
   : >"$work/protect-masked"
   appends=$(grep -cF -- 'quotient_mask+=' "$raw" || true)
-  while IFS=$'\t' read -r kind test_word mount_word dir_word printf_word; do
+  while IFS=$sep read -r kind test_word mount_word dir_word printf_word; do
     parsed=$((parsed + 1))
     # Each captured word as bash reads it, so a protect path compares exactly
     # as the policy names it, an apostrophe or a space included.
@@ -809,8 +839,8 @@ check_capability() {
       printf '%s\n' "$test_word" >>"$work/protect-masked"
       guarded=$((guarded + 1))
     fi
-  done < <(sed -nE -e "s@$mask_plain@plain\t\1\t\2@p" \
-    -e "s@$mask_guarded@guarded\t\1\t\4\t\2\t\3@p" "$raw")
+  done < <(sed -nE -e "s@$mask_plain@plain$sep\\1$sep\\2@p" \
+    -e "s@$mask_guarded@guarded$sep\\1$sep\\4$sep\\2$sep\\3@p" "$raw")
   if [ "$appends" -eq 0 ]; then
     fail "$i" "the launcher masks nothing"
   fi
@@ -912,7 +942,7 @@ check_baseline() {
 residue_binds() { # heading file
   printf 'residue: %s\n' "$1"
   if [ -s "$2" ]; then
-    sed 's/^/residue:   /' "$2"
+    tr "$sep" ' ' <"$2" | sed 's/^/residue:   /'
   else
     printf 'residue:   (none)\n'
   fi

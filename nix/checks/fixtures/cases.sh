@@ -455,6 +455,15 @@ fixture alias-state-dir aliasstate 'refuse:(j)'
 fixture alias-protect aliasprotect 'refuse:(j)'
 fixture alias-host-root aliasroot 'refuse:(j)'
 
+# A `..` segment names the directory it climbs to, as the kernel reads it.
+fixture alias-dotdot aliasdotdot 'refuse:(j)'
+
+## (g) a source holding a tab
+
+# A tab inside a quoted path is part of the path: the source compared is the
+# whole of it, not the declared path it begins with.
+fixture tab-in-source tabsource 'refuse:(g)'
+
 ## piFiles in the tail
 
 # The builder's piFiles binds follow every caller option, a deferred one

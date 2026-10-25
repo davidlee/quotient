@@ -387,6 +387,24 @@
             }
           );
           aliasroot = family (sampleBase pkgs // { options = c: [ (c.ro-bind "/" "/host") ]; });
+          # A protect path spelled through `..`, bound at another target: the
+          # same directory to the kernel, so the same alias.
+          aliasdotdot = family (
+            full
+            // {
+              options =
+                c: (callerOptions c) ++ [ (c.ro-bind "${samplePaths.extra}/../protect" "/visible-protect") ];
+            }
+          );
+          # A bind source holding a tab, whose first part is a declared exposure
+          # path: the source is another path, and undeclared.
+          tabsource = family (
+            sampleBase pkgs
+            // {
+              exposure = [ samplePaths.extra ];
+              options = c: [ (c.rw-bind "${samplePaths.extra}\tx" "${samplePaths.extra}\tx") ];
+            }
+          );
           # A caller's deferred bind over ~/.pi/agent: the builder's piFiles binds
           # follow it, in the tail, so it covers none of them.
           deferpi = family (
