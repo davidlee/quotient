@@ -86,12 +86,17 @@ let
   reservedName = name: name == "HOME" || lib.hasPrefix "QUOTIENT_" name;
   reservedNames = lib.filter reservedName (lib.unique (lib.attrNames env ++ lib.attrNames secretEnv));
 
-  # The launcher writes an env value and a protect path as single-quoted
+  # The launcher writes an env value and a host path as single-quoted
   # literals, and writeShellApplication's shellcheck fails the build on a `$`
-  # in one; refuse it here instead, by name.
+  # in one (env and protect); and the check reads the launcher a line at a time,
+  # so a newline in one would split it (env and every host path). Refuse both
+  # here instead, by name.
+  envValuesWith =
+    infix: map (name: "env ${name}") (lib.filter (name: lib.hasInfix infix (toString env.${name})) (lib.attrNames env));
   dollarValues =
-    map (name: "env ${name}") (lib.filter (name: lib.hasInfix "$" (toString env.${name})) (lib.attrNames env))
-    ++ map (path: "protect \"${path}\"") (lib.filter (lib.hasInfix "$") protectPaths);
+    envValuesWith "$" ++ map (path: "protect \"${path}\"") (lib.filter (lib.hasInfix "$") protectPaths);
+  newlineValues =
+    envValuesWith "\n" ++ map describePath (lib.filter (entry: lib.hasInfix "\n" entry.path) hostPaths);
 
   # The combinator set a caller's `options` receive. A cleanup hook makes
   # jail.nix run bwrap under a trap rather than exec it, so the form would no
@@ -280,6 +285,8 @@ assert lib.assertMsg (reservedNames == [ ])
   "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: ${lib.concatStringsSep ", " reservedNames}";
 assert lib.assertMsg (dollarValues == [ ])
   "mkFormFamily: env values and protect paths cannot contain $: ${lib.concatStringsSep ", " dollarValues}";
+assert lib.assertMsg (newlineValues == [ ])
+  "mkFormFamily: env values and host paths cannot contain a newline: ${lib.concatStringsSep ", " newlineValues}";
 assert lib.assertMsg (badHostPaths == [ ])
   "mkFormFamily: persistHome, exposure and protect paths must be absolute: ${lib.concatStringsSep ", " (map describePath badHostPaths)}";
 {

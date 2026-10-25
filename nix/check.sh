@@ -89,7 +89,8 @@ mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf '\''quotient: pr
 
 # Reading a line as bash does. The characters that make a line more than words:
 # `~`, then `$` and every character that can end a word or start an operator — a
-# command boundary, a redirection, a subshell, a comment. Each has an inert
+# command boundary, a redirection, a subshell, a comment — or start an expansion
+# bash makes at launch: a backtick, a glob, a brace. Each has an inert
 # control byte of its own, at the same position (none of them \001, which bash
 # keeps for itself), so bash parses the quoting of a line in which nothing can
 # expand or run, and the bytes map back after: `"$quotient_root"` is the word
@@ -97,11 +98,22 @@ mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf '\''quotient: pr
 # operators is two inert bytes around a space: quoted, the space is part of the
 # word; unquoted, it ends one. So an unquoted `$` — an expansion bash would
 # split into words at launch, an ANSI-C or a locale quote — is refused with the
-# operators, and an unquoted `~` is read as written.
+# operators, as are an unquoted glob and brace, and an unquoted `~` is read as
+# written. A backtick stands in the second parse as a quoted space then an
+# unquoted one, so it ends a word unless single quotes hold it: inside double
+# quotes it opens a command substitution, whose own quotes a parse with the
+# backtick inert would read as closing the double quotes.
 tilde='~'
-operators='$;&|<>()#'
-inert=$'\002\003\004\005\006\007\016\017\020\023'
+operators='$;&|<>()#`*?[{'
+inert=$'\002\003\004\005\006\007\016\017\020\023\024\025\026\027\030'
 split_mark=$'\021 \022'
+backtick_mark="\"$split_mark\"$split_mark"
+# The parameter expansions a line may carry: a name, an array's every element, or
+# a default that holds no quote, escape, substitution or nested brace — so a
+# quote never stands inside one, where the first parse would misread it. The
+# builder's own (`${quotient_mask[@]}`, `${LANG:-C.UTF-8}`, the state
+# directory's) are all of these.
+brace_body='^[A-Za-z_][A-Za-z0-9_]*(\[@\]|:-([^]['"'"'"\\`$(){}]|\$[A-Za-z_][A-Za-z0-9_]*)*)?$'
 
 # Normalisation, for the builder's own line shapes only (the form's guards, the
 # root's assignment, the mask declaration, the secret descriptor's open): quotes
@@ -182,22 +194,36 @@ extract_line() { awk "$bwrap_shape { print; exit }" "$1" >"$2"; }
 
 # The words bash reads from the line $1, one per line. Status 1, with the reason
 # on stdout, when bash would read the line as more than plain words: an operator
-# outside quotes, a backtick, an ANSI-C or locale quote, a control byte, or
-# quoting that does not close. A line it reads otherwise than its words say is
-# refused, never read the way a rule would like.
+# or an expansion outside quotes, a backtick outside single quotes, a command
+# substitution, an arithmetic or unreadable parameter expansion, an escaped `$`
+# or backtick, an ANSI-C or locale quote, a control byte, or quoting that does
+# not close. A line it reads otherwise than its words say is refused, never read
+# the way a rule would like.
 shell_words() { # line
-  local line=$1 one split i c specials=$tilde$operators words count
-  # A backtick substitutes a command; inside double quotes `\$` is a `$`, which
-  # the inert byte standing for it would not be.
+  local line=$1 one split i c specials=$tilde$operators words count rest body
+  # Inside double quotes `\$` is a `$` and `\`` a backtick, which the inert
+  # byte standing for either would not be. A `$(` or a `$[` opens a context
+  # whose quotes the parse below cannot follow; the builder writes neither, and
+  # no `$` stands in a caller's single-quoted text.
   case $line in
-    *'`'*) echo 'a backtick'; return 1 ;;
+    *'\`'*) echo 'an escaped backtick'; return 1 ;;
     *'\$'*) echo 'an escaped $'; return 1 ;;
+    *'$('* | *'$['*) echo 'a command substitution or an arithmetic expansion'; return 1 ;;
   esac
+  rest=$line
+  while [[ $rest == *'${'* ]]; do
+    rest=${rest#*'${'}
+    body=${rest%%\}*}
+    if [ "$body" = "$rest" ] || ! [[ $body =~ $brace_body ]]; then
+      echo "a parameter expansion other than a name or a plain default: \${$body"
+      return 1
+    fi
+  done
   if [ "$(printf '%s' "$line" | LC_ALL=C tr -d '\001-\010\013-\037')" != "$line" ]; then
     echo 'a control byte'
     return 1
   fi
-  one=$line split=$line
+  one=$line split=${line//'`'/"$backtick_mark"}
   for ((i = 0; i < ${#specials}; i++)); do
     c=${specials:i:1}
     one=${one//"$c"/"${inert:i:1}"}
@@ -216,7 +242,7 @@ shell_words() { # line
   words=${words%.}
   count=$( (set -f && set +B && eval "set -- $split" && printf '%s\n' "$#") 2>/dev/null) || count=-1
   if [ "$count" != "$(printf '%s' "$words" | grep -c '')" ]; then
-    echo 'a shell operator or an expansion outside quotes'
+    echo 'a shell operator or an expansion outside quotes, or a backtick outside single quotes'
     return 1
   fi
   printf '%s' "$words" | LC_ALL=C tr "$inert" "$specials"
@@ -344,8 +370,8 @@ option_operand_count() { # line option operand
 # and a trailing slash name nothing, and `..` climbs one segment, so `//tmp`,
 # `/./tmp/`, `/tmp/.` and `/x/../tmp` are all `/tmp`. A path that does not open
 # with `/` is anchored at its first segment (`~`, `$quotient_root`), and a `..`
-# that would climb above that anchor leaves a directory no text names: it reads
-# as `/`, which holds everything.
+# that would climb above that anchor is kept, after it: `~/../x` names a
+# directory no text resolves, which `climbs` tells apart.
 canonical_target() {
   local path=$1 anchor part
   local -a parts=() kept=()
@@ -361,11 +387,10 @@ canonical_target() {
     case $part in
       '' | .) ;;
       ..)
-        if [ "${#kept[@]}" -gt 0 ]; then
+        if [ "${#kept[@]}" -gt 0 ] && [ "${kept[-1]}" != .. ]; then
           unset 'kept[-1]'
         elif [ "$anchor" != / ]; then
-          printf '/\n'
-          return
+          kept+=(..)
         fi
         ;;
       *) kept+=("$part") ;;
@@ -380,28 +405,70 @@ canonical_target() {
   fi
 }
 
+# Whether a canonical path climbs above its anchor, into a directory no text
+# names.
+climbs() { [[ /$1/ == */../* ]]; }
+
+# Whether $1 is one of bwrap's mount operations.
+is_mount_op() {
+  local op
+  for op in "${mount_ops[@]}"; do
+    if [ "$op" = "$1" ]; then return 0; fi
+  done
+  return 1
+}
+
 # The field separator of the records below: a byte no word can hold, since
 # shell_words refuses a line that carries one.
 sep=$'\037'
 
-# Every mount on a bwrap line, one per line as `flag target`: the target of a
-# mount operation is its last operand, which the stream carries at the flag's
-# arity.
-mounts() { # line-file
-  local -a stream=()
+# Every mount on a bwrap line, one record per line, its fields as written and
+# each ended by $sep: the flag, its target — its last operand, which the stream
+# carries at the flag's arity — and the host sources it reads, which are a
+# bind's source, an overlay's upper and work directories, and an
+# `--overlay-src`, which names no target of its own (an empty field). A
+# descriptor bind's source is the descriptor. The other mounts' first operands
+# (a symlink's text, a data descriptor, a mode) name no host path.
+mount_records() { # line-file
+  local -a stream=() fields=() sources=()
   argv_stream "$1" stream
-  local i flag target n op
+  local i n op flag word
   for i in "${!stream[@]}"; do
     if [ "${stream[i]%% *}" != opt ]; then continue; fi
-    flag=${stream[i]#* }
-    for op in "${mount_ops[@]}"; do
-      if [ "$flag" = "$op" ]; then
-        n=$(arity_of "$flag")
-        target=${stream[i + n]-}
-        printf '%s%s%s\n' "$flag" "$sep" "$(canonical_target "${target#* }")"
-      fi
+    flag=${stream[i]#opt }
+    case $flag in
+      --bind | --ro-bind | --bind-try | --ro-bind-try | --dev-bind | --dev-bind-try | \
+        --bind-fd | --ro-bind-fd | --overlay-src) sources=(1) ;;
+      --overlay) sources=(1 2) ;;
+      *) sources=() ;;
+    esac
+    n=$(arity_of "$flag")
+    if [ "$flag" = --overlay-src ]; then
+      fields=("$flag" '')
+    elif is_mount_op "$flag"; then
+      word=${stream[i + n]-}
+      fields=("$flag" "${word#operand }")
+    else
+      continue
+    fi
+    for op in "${sources[@]}"; do
+      word=${stream[i + op]-}
+      fields+=("${word#operand }")
     done
+    printf "%s$sep" "${fields[@]}"
+    printf '\n'
   done
+}
+
+# Every mount on a bwrap line, one per line as `flag target`, the target read
+# as the kernel resolves it.
+mounts() { # line-file
+  local -a record
+  while IFS=$sep read -ra record; do
+    if [ "${record[0]}" != --overlay-src ]; then
+      printf '%s%s%s\n' "${record[0]}" "$sep" "$(canonical_target "${record[1]}")"
+    fi
+  done < <(mount_records "$1")
 }
 
 # The mounts on a bwrap line whose target is $2.
@@ -414,7 +481,7 @@ mounts_to() { mounts "$1" | awk -F "$sep" -v target="$2" '$2 == target { print $
 # bind is a read-write bind, so it is in the set: (f) and (g) are about the
 # permissions a caller ends up with, and the flag's name is no part of that. An
 # overlay is in it too, with its upper and work directories, which it writes on
-# the host.
+# the host, and so is a descriptor bind, whose source is the descriptor.
 bind_words() { # argument-file
   local -a stream=()
   argv_stream "$1" stream
@@ -423,7 +490,8 @@ bind_words() { # argument-file
   for i in "${!stream[@]}"; do
     case ${stream[i]} in
       'opt --bind' | 'opt --ro-bind' | 'opt --bind-try' | 'opt --ro-bind-try' | \
-        'opt --dev-bind' | 'opt --dev-bind-try' | 'opt --overlay') ;;
+        'opt --dev-bind' | 'opt --dev-bind-try' | 'opt --bind-fd' | 'opt --ro-bind-fd' | \
+        'opt --overlay') ;;
       *) continue ;;
     esac
     fields=("${stream[i]#opt }")
@@ -439,10 +507,13 @@ bind_words() { # argument-file
 }
 
 # The host paths a bind set writes, one per line: the source of every
-# read-write bind, and an overlay's upper and work directories.
+# read-write bind, and an overlay's upper and work directories. A read-write
+# descriptor bind writes whatever the descriptor opens, which the text cannot
+# name: it is written as the descriptor, which no exposure path is.
 rw_sources() { # bind-set-file
   awk -F "$sep" '
     $1 ~ /^--(dev-)?bind(-try)?$/ { print $2 }
+    $1 == "--bind-fd" { print "descriptor " $2 }
     $1 == "--overlay" { print $2; print $3 }
   ' "$1"
 }
@@ -483,8 +554,7 @@ check_tail() { # label root line-file
   fi
   start=$((mask + 1))
   while [ "${stream[start]-}" = 'opt --ro-bind' ] &&
-    [[ ${stream[start + 1]-} == 'operand /nix/store/'* ]] &&
-    [[ ${stream[start + 2]-} == 'operand ~/.pi/agent/'* ]]; do
+    pifiles_bind "${stream[start + 1]#operand }" "${stream[start + 2]#operand }"; do
     start=$((start + 3))
   done
   for i in "${!expected[@]}"; do
@@ -499,12 +569,17 @@ check_tail() { # label root line-file
     if [ "$i" -lt "$((start + ${#expected[@]}))" ] || [ "${stream[i]%% *}" != opt ]; then
       continue
     fi
-    for flag in "${mount_ops[@]}"; do
-      if [ "${stream[i]}" = "opt $flag" ]; then
-        fail "$label" "'$flag' at tail position $((i - mask)) is not the root or the session bind"
-      fi
-    done
+    flag=${stream[i]#opt }
+    if is_mount_op "$flag"; then
+      fail "$label" "'$flag' at tail position $((i - mask)) is not the root or the session bind"
+    fi
   done
+}
+
+# Whether a read-only bind is one of the builder's piFiles binds: a store path
+# at a path under ~/.pi/agent, each as the kernel resolves it.
+pifiles_bind() { # source target
+  [[ $(canonical_target "$1") == /nix/store/?* && $(canonical_target "$2") == \~/.pi/agent/?* ]]
 }
 
 ## Protected state bound again elsewhere (j)
@@ -532,52 +607,61 @@ spelled_path() {
 }
 
 # Whether two compared paths overlap: one is the other or lies inside it, and
-# `/` holds everything.
+# `/` holds everything, as does a path that climbs above its anchor, which
+# could be anywhere.
 overlaps() {
-  [ "$1" = "$2" ] || [ "$1" = / ] || [ "$2" = / ] || [[ $2 == "$1"/* ]] || [[ $1 == "$2"/* ]]
+  [ "$1" = "$2" ] || [ "$1" = / ] || [ "$2" = / ] || climbs "$1" || climbs "$2" ||
+    [[ $2 == "$1"/* ]] || [[ $1 == "$2"/* ]]
 }
 
 # Every mount on the line whose source overlaps protected state — the default
 # state directory or a protect path — at a target other than its own path, one
 # per line: the mask covers the path it masks and no other, so such a mount
-# shows the state wherever it lands. A bind's source, an overlay's lower, upper
-# and work directories are sources; an `--overlay-src` names no target of its
-# own and so never mounts at its own path.
+# shows the state wherever it lands. An `--overlay-src` names no target of its
+# own and so never mounts at its own path, and a descriptor bind's source is
+# whatever the descriptor opens, which may be protected state wherever it lands.
+# A climbing path is never its own target: two of them may be any two paths.
 protected_aliases() { # argument-file
-  local -a stream=() protected=() sources=()
-  argv_stream "$1" stream
-  local i n op flag word source target compared protect path
+  local -a protected=() record=()
+  local protect source target compared path
   protected=("$(spelled_path "$state_dir")")
   while IFS= read -r protect; do
     if [ -n "$protect" ]; then protected+=("$(spelled_path "$protect")"); fi
   done <<<"$PROTECT"
-  for i in "${!stream[@]}"; do
-    case ${stream[i]} in
-      'opt --bind' | 'opt --ro-bind' | 'opt --bind-try' | 'opt --ro-bind-try' | \
-        'opt --dev-bind' | 'opt --dev-bind-try' | 'opt --overlay-src') sources=(1) ;;
-      'opt --overlay') sources=(1 2) ;;
-      *) continue ;;
+  while IFS=$sep read -ra record; do
+    case ${record[0]} in
+      --bind-fd | --ro-bind-fd)
+        printf '%s %s\n' "${record[0]}" "${record[2]}"
+        continue
+        ;;
     esac
-    flag=${stream[i]#opt }
-    n=$(arity_of "$flag")
     target=
-    if [ "$flag" != --overlay-src ]; then
-      word=${stream[i + n]-}
-      target=$(spelled_path "${word#operand }")
-    fi
-    for op in "${sources[@]}"; do
-      word=${stream[i + op]-}
-      source=${word#operand }
+    if [ "${record[0]}" != --overlay-src ]; then target=$(spelled_path "${record[1]}"); fi
+    for source in "${record[@]:2}"; do
       compared=$(spelled_path "$source")
-      if [ "$compared" = "$target" ]; then continue; fi
+      if [ "$compared" = "$target" ] && ! climbs "$compared"; then continue; fi
       for path in "${protected[@]}"; do
         if overlaps "$compared" "$path"; then
-          printf '%s %s\n' "$flag" "$source"
+          printf '%s %s\n' "${record[0]}" "$source"
           break
         fi
       done
     done
-  done
+  done < <(mount_records "$1")
+}
+
+# Every mount path on the line that climbs above its anchor, one per line as
+# `flag path`: such a mount lands in, or reads, a directory no text names.
+climbing_mounts() { # argument-file
+  local -a record=()
+  local path
+  while IFS=$sep read -ra record; do
+    for path in "${record[@]:1}"; do
+      if [ -n "$path" ] && climbs "$(spelled_path "$path")"; then
+        printf '%s %s\n' "${record[0]}" "$path"
+      fi
+    done
+  done < <(mount_records "$1")
 }
 
 ## One capability: the form, then the launcher it execs
@@ -701,6 +785,10 @@ check_capability() {
     fail "$c" "a quotient_mask append is not in one of the builder's mask shapes: $append"
   done < <(grep -F -- 'quotient_mask+=' "$raw" | grep -vE -- "$mask_plain|$mask_guarded")
   check_tail "$c" "$root" "$line"
+  local climbing
+  while IFS= read -r climbing; do
+    fail "$c" "'$climbing' climbs above the path it is anchored at, into a directory no text names"
+  done < <(climbing_mounts "$line")
 
   # (d) The jail's own isolation: it dies with its parent, has no environment of
   # the server's, and mounts nothing of the host's /tmp — a mount's target read

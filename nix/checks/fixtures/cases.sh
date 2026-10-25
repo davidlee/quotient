@@ -122,6 +122,41 @@ edit launcher-read '--clearenv' '--clearenv --setenv NOTE "a\$b"'
 fixture line-ansi-quote default 'refuse:(c)'
 edit launcher-read '--clearenv' "--clearenv --setenv NOTE \$'x'"
 
+# An unquoted glob or brace is expanded at launch against a filesystem the text
+# cannot see, and inside double quotes `\`` is a backtick, which the inert byte
+# standing for it would not be: each is refused.
+fixture line-unquoted-glob-question default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE quotien?'
+
+fixture line-unquoted-glob-star default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE quotien*'
+
+fixture line-unquoted-glob-bracket default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE quotien[t]'
+
+fixture line-unquoted-brace default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE {a,b}'
+
+fixture line-escaped-backtick default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE "a\`b"'
+
+# Inside double quotes a command substitution, an arithmetic expansion or a
+# parameter expansion's default opens a quoting context of its own, which a
+# parse with every `$` and backtick inert cannot follow: a quote within one ends
+# the double quotes to that parse alone, and the bind after it would be a word
+# no rule reads. Each is refused, and so is every `$(` and `$[`.
+fixture line-quoted-backtick-nested default 'refuse:(c)'
+edit launcher-read '--clearenv' "--clearenv --setenv NOTE \"a\`echo '\"'\`\" --bind /etc /visible \"\`echo '\"'\`b\""
+
+fixture line-quoted-substitution-nested default 'refuse:(c)'
+edit launcher-read '--clearenv' "--clearenv --setenv NOTE \"a\$(echo '\"')\" --bind /etc /visible \"\$(echo '\"')b\""
+
+fixture line-quoted-default-nested default 'refuse:(c)'
+edit launcher-read '--clearenv' "--clearenv --setenv NOTE \"\${X:-'\"'}\" --bind /etc /visible \"\${X:-'\"'}\""
+
+fixture line-quoted-arithmetic default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv --setenv NOTE "$[1]"'
+
 # Quoted, the same characters are a word's text, and an empty argument is an
 # argument: each is read as the one word it is.
 fixture line-quoted-operator default pass
@@ -442,6 +477,10 @@ fixture raw-empty-bind rawempty 'refuse:(g)'
 
 # A value that spells a flag is a value, and an apostrophe is part of a path.
 fixture multiword-env-value multiword pass
+
+# A single-quoted backtick, glob or brace is text: the builder quotes such a
+# value, and it is the one word it spells.
+fixture quoted-specials quotedspecials pass
 fixture apostrophe-exposure apostrophe pass
 
 ## (g) overlays
@@ -457,6 +496,18 @@ fixture alias-host-root aliasroot 'refuse:(j)'
 
 # A `..` segment names the directory it climbs to, as the kernel reads it.
 fixture alias-dotdot aliasdotdot 'refuse:(j)'
+
+# A `..` that climbs above the path's anchor lands in a directory no text names:
+# (c) refuses the mount, and (j) reads it as overlapping everything, so two such
+# paths are never one path at its own target.
+fixture mount-climb aliasclimb 'refuse:(c)'
+fixture alias-climb aliasclimb 'refuse:(j)'
+
+# A descriptor bind's source is whatever the descriptor opens, which the text
+# cannot name: written, it is no exposure path, and read, it may be protected
+# state.
+fixture fd-bind-unexposed fdbind 'refuse:(g)'
+fixture alias-fd-bind rofdbind 'refuse:(j)'
 
 ## (g) a source holding a tab
 
@@ -477,6 +528,14 @@ edit launcher-read '"${quotient_mask[@]}"' '"${quotient_mask[@]}" --ro-bind /etc
 
 fixture tail-pifiles-host-source default 'refuse:(c)'
 edit launcher-read '"${quotient_mask[@]}"' '"${quotient_mask[@]}" --ro-bind /etc/hostname ~/.pi/agent/settings.json'
+
+# Each is read as the kernel resolves it: a source that climbs out of the store
+# is a host path, and a target that climbs out of ~/.pi/agent is not under it.
+fixture tail-pifiles-source-climb default 'refuse:(c)'
+edit launcher-read '"${quotient_mask[@]}"' '"${quotient_mask[@]}" --ro-bind /nix/store/../etc ~/.pi/agent/settings.json'
+
+fixture tail-pifiles-target-climb default 'refuse:(c)'
+edit launcher-read '"${quotient_mask[@]}"' '"${quotient_mask[@]}" --ro-bind /nix/store/00000000000000000000000000000000-x ~/.pi/agent/../visible'
 
 ## (e) a QUOTIENT_ name on the secret descriptor
 

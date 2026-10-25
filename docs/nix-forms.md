@@ -228,6 +228,14 @@ mkFormFamily: env values and protect paths cannot contain $: env <NAME>
 
 A value that needs expanding at launch belongs in `secretEnv`.
 
+Nor may a value, or a `persistHome`, `exposure` or `protect` path, contain a
+newline. The form-family check reads the launcher a line at a time, so the
+builder refuses it by name:
+
+```
+mkFormFamily: env values and host paths cannot contain a newline: env <NAME>
+```
+
 ### `secretEnv` (default `{ }`)
 
 `VAR = "<shell expression>"` pairs, evaluated in the launcher at launch, outside

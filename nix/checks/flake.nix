@@ -278,6 +278,18 @@
           args.env.NOTE = "a$b";
           message = "mkFormFamily: env values and protect paths cannot contain $: env NOTE";
         };
+        # The check reads the launcher a line at a time, so a value or a host path
+        # holding a newline is refused at the call, by name. A host path's
+        # message is matched up to the argument it names: the path itself would
+        # carry the newline into the message table.
+        env-newline = {
+          args.env.NOTE = "first\nsecond";
+          message = "mkFormFamily: env values and host paths cannot contain a newline: env NOTE";
+        };
+        exposure-newline = {
+          args.exposure = [ "/srv/first\nsecond" ];
+          message = "mkFormFamily: env values and host paths cannot contain a newline: exposure";
+        };
         protect-dollar = {
           args.protect = [ "/srv/$x" ];
           message = "mkFormFamily: env values and protect paths cannot contain $: protect \"/srv/$x\"";
@@ -355,6 +367,9 @@
             }
           );
           apostrophe = family (sampleBase pkgs // { exposure = [ "${samplePaths.extra}/it's" ]; });
+          # A value holding a backtick, a glob and a brace, which the builder
+          # single-quotes.
+          quotedspecials = family (sampleBase pkgs // { env.NOTE = "a`b{c,d}*?[e]"; });
           # A raw empty argument ahead of an undeclared rw bind.
           rawempty = family (
             sampleBase pkgs
@@ -395,6 +410,23 @@
               options =
                 c: (callerOptions c) ++ [ (c.ro-bind "${samplePaths.extra}/../protect" "/visible-protect") ];
             }
+          );
+          # The state directory reached by climbing above the home and back, at a
+          # target that climbs the same way: two directories no text names.
+          aliasclimb = family (
+            sampleBase pkgs
+            // {
+              options = c: [
+                (c.ro-bind (c.noescape "~/../david/.local/state/quotient") (c.noescape "~/../david/visible"))
+              ];
+            }
+          );
+          # Binds through a descriptor, whose source the text cannot name.
+          fdbind = family (
+            sampleBase pkgs // { options = c: [ (c.unsafe-add-raw-args "--bind-fd 3 /visible") ]; }
+          );
+          rofdbind = family (
+            sampleBase pkgs // { options = c: [ (c.unsafe-add-raw-args "--ro-bind-fd 3 /visible") ]; }
           );
           # A bind source holding a tab, whose first part is a declared exposure
           # path: the source is another path, and undeclared.
