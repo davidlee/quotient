@@ -274,6 +274,58 @@
           duplicate = family (
             full // { protect = [ samplePaths.protect samplePaths.protect ]; }
           );
+          # Ordinary arguments whose text a quote-stripping read gets wrong: an
+          # empty env value, a value that spells a flag, a path holding an
+          # apostrophe. The first hides the QUOTIENT_ name after it.
+          emptyenv = family (
+            sampleBase pkgs
+            // {
+              env = {
+                S_EMPTY = "";
+                QUOTIENT_DEBUG = "1";
+              };
+            }
+          );
+          multiword = family (
+            sampleBase pkgs
+            // {
+              network = false;
+              env.NOTE = "ordinary --share-net";
+            }
+          );
+          apostrophe = family (sampleBase pkgs // { exposure = [ "${samplePaths.extra}/it's" ]; });
+          # A raw empty argument ahead of an undeclared rw bind.
+          rawempty = family (
+            sampleBase pkgs
+            // {
+              options = c: [
+                (c.unsafe-add-raw-args "--setenv NOTE '' --bind ${samplePaths.extra} ${samplePaths.extra}")
+              ];
+            }
+          );
+          # An overlay writes to its upper and work directories on the host.
+          overlay = family (
+            sampleBase pkgs
+            // {
+              options = c: [
+                (c.overlay-rw [ samplePaths.world ] samplePaths.extra "${samplePaths.extra}-work" "/overlay")
+              ];
+            }
+          );
+          # Protected state bound again at another path, where the mask does not reach.
+          aliasstate = family (
+            sampleBase pkgs
+            // {
+              options = c: [ (c.ro-bind (c.noescape "~/.local/state/quotient") "/visible-state") ];
+            }
+          );
+          aliasprotect = family (
+            full
+            // {
+              options = c: (callerOptions c) ++ [ (c.ro-bind samplePaths.protect "/visible-protect") ];
+            }
+          );
+          aliasroot = family (sampleBase pkgs // { options = c: [ (c.ro-bind "/" "/host") ]; });
         };
     in
     {

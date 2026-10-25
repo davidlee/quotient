@@ -31,7 +31,7 @@ EXPOSURE=${EXPOSURE-}
 SECRET_ENV_NAMES=${SECRET_ENV_NAMES-}
 PROTECT=${PROTECT-}
 
-# The words the rules read, in the normalised (quote-stripped) form: the session
+# The words the rules read, each as bash reads it: the session
 # variable the form exports, the mask token that opens the builder's tail, the
 # secret descriptor, the builder's default state directory, and bwrap's mount
 # operations — every flag that puts something in the jail, with the operands it
@@ -42,8 +42,8 @@ mask_token="\${quotient_mask[@]}"
 secret_fd="\$quotient_secret_fd"
 state_dir='${XDG_STATE_HOME:-$HOME/.local/state}/quotient'
 # That directory's mask line as the builder writes it: (i) compares the line's
-# raw text with this one, since the normalised read cannot tell a quoted
-# expression from the literal path that spells the same characters.
+# raw text with this one, since a word read by bash cannot tell a quoted
+# expression from the single-quoted literal that spells the same characters.
 state_line="[ -e \"$state_dir\" ] && quotient_mask+=(--tmpfs \"$state_dir\")"
 # Every flag that puts something in the jail — every mount operation — so a
 # caller's flag is read wherever it appears and a form that names one has taken
@@ -82,17 +82,29 @@ secret_open='^exec \{quotient_secret_fd\}<'
 # reads them to forbid every other append and (i) to parse the mask. The plain
 # shape is the default state directory's alone; a protect path's append sits
 # behind a directory test naming the same path, so an existing file fails the
-# launch instead of becoming a mount. Both are written against the normalised
-# text, so the printf format's own quotes are not in the line they match.
+# launch instead of becoming a mount. Both match the raw text, and each word
+# they capture is a shell word, read by `one_word` as bash reads it.
 mask_plain='^\[ -e (.+) \] && quotient_mask\+=\(--tmpfs (.+)\)$'
-mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf quotient: protect path %s is not a directory\\n (.+) >&2; exit 1; \}; quotient_mask\+=\(--tmpfs (.+)\); \}$'
+mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf '\''quotient: protect path %s is not a directory\\n'\'' (.+) >&2; exit 1; \}; quotient_mask\+=\(--tmpfs (.+)\); \}$'
 
-# Normalisation, once per launcher (sec-3): quotes of either kind stripped, so a
-# caller's raw argument and a jail.nix-rendered one read alike; every run of
-# whitespace — a tab among them — reduced to one separator, which is how bwrap
-# reads its arguments; store hashes folded, so a nixpkgs or jail.nix bump is not
-# drift. A value the wrapper names is read by the same steps, so a protect path
-# and the mask line that mounts it are compared normalised alike.
+# Reading a line as bash does (DEC-029). The characters that make a line more
+# than words: the two expansions (`$`, `~`), then every character that can end a
+# word or start an operator — a command boundary, a redirection, a subshell, a
+# comment. Each has an inert control byte of its own, at the same position, so
+# bash parses the quoting of a line in which nothing can expand or run, and the
+# bytes map back after: `"$quotient_root"` is the word `$quotient_root`, a
+# symbol a rule can name. An operator in the second parse is two inert bytes
+# around a space: quoted, the space is part of the word; unquoted, it ends one.
+expanders='$~'
+operators=';&|<>()#'
+inert=$'\001\002\003\004\005\006\007\016\017\020'
+split_mark=$'\021 \022'
+
+# Normalisation, for the builder's own line shapes only (the form's guards, the
+# root's assignment, the mask declaration, the secret descriptor's open): quotes
+# of either kind stripped, every run of whitespace reduced to one separator,
+# store hashes folded so a nixpkgs or jail.nix bump is not drift. The bwrap line
+# and the mask lines' words are read by bash instead, above.
 strip_quotes='s/["'\'']//g'
 squeeze='s/[[:space:]]+/ /g'
 fold_store='s|/nix/store/[a-z0-9]{32}-|/nix/store/*-|g'
@@ -145,7 +157,7 @@ normalise() { sed -E "${normalise_expr[@]}" "$1"; }
 # only found `$BWRAP` lines could never fail (b)).
 bwrap_shape='/^exec / && $2 !~ /^([0-9]+|\{[^}]*\})?(<|>|&>)/'
 
-# A launcher's text as every rule reads it: normalised once (sec-3), then reduced
+# A launcher's text as the line-shape rules read it: normalised once, then reduced
 # to its executable lines.
 launcher_text() { normalise "$1" | code /dev/stdin; }
 
@@ -162,9 +174,68 @@ refuse_continuation() { # label line-file
   fi
 }
 
-# That line, written to the file $2; its tokens are read as an ordered array, so
-# the order rules can read positions in it.
+# That line, written to the file $2.
 extract_line() { awk "$bwrap_shape { print; exit }" "$1" >"$2"; }
+
+# The words bash reads from the line $1, one per line. Status 1, with the reason
+# on stdout, when bash would read the line as more than plain words: an operator
+# outside quotes, a backtick, an ANSI-C or locale quote, a control byte, or
+# quoting that does not close. A line it reads otherwise than its words say is
+# refused, never read the way a rule would like.
+shell_words() { # line
+  local line=$1 one split i c specials=$expanders$operators words count
+  case $line in
+    *'`'*) echo 'a backtick'; return 1 ;;
+    *"\$'"* | *'$"'*) echo "an ANSI-C or locale quote"; return 1 ;;
+  esac
+  if [ "$(printf '%s' "$line" | LC_ALL=C tr -d '\001-\010\013-\037')" != "$line" ]; then
+    echo 'a control byte'
+    return 1
+  fi
+  one=$line split=$line
+  for ((i = 0; i < ${#specials}; i++)); do
+    c=${specials:i:1}
+    one=${one//"$c"/"${inert:i:1}"}
+    if ((i < ${#expanders})); then
+      split=${split//"$c"/"${inert:i:1}"}
+    else
+      split=${split//"$c"/"$split_mark"}
+    fi
+  done
+  # The trailing `.` keeps a last empty word, which command substitution would
+  # otherwise strip with its newline.
+  if ! words=$( (set -f +B && eval "set -- $one" && printf '%s\n' "$@" && printf .) 2>/dev/null); then
+    echo 'quoting that does not close'
+    return 1
+  fi
+  words=${words%.}
+  count=$( (set -f +B && eval "set -- $split" && printf '%s\n' "$#") 2>/dev/null) || count=-1
+  if [ "$count" != "$(printf '%s' "$words" | grep -c '')" ]; then
+    echo 'a shell operator outside quotes'
+    return 1
+  fi
+  printf '%s' "$words" | LC_ALL=C tr "$inert" "$specials"
+}
+
+# The one word bash reads from $1, or status 1.
+one_word() {
+  local words
+  words=$(shell_words "$1") || return 1
+  [ "$(printf '%s\n' "$words" | grep -c '')" -eq 1 ] || return 1
+  printf '%s\n' "$words"
+}
+
+# The bwrap line's arguments, one per line, into the file $2: its words after
+# `exec <bwrap>`. Status 1, with the reason on stdout, when the line is not
+# plain words.
+bwrap_args() { # raw-line-file out-file
+  if ! shell_words "$(<"$1")" >"$2.words"; then
+    cat "$2.words"
+    : >"$2"
+    return 1
+  fi
+  sed '1,2d' "$2.words" >"$2"
+}
 
 # Its line number in the launcher, for (h)'s opening-before-bwrap read.
 bwrap_line_no() { awk "$bwrap_shape { print NR; exit }" "$1"; }
@@ -188,9 +259,9 @@ line_no_of() { # file pattern [F|E] [last]
 # scan feeds every rule about flags, operands and the tail's order, so neither a
 # value nor an application argument that spells a flag is read as that flag, and
 # what pi receives after the `--` is no word here at all.
-argv_scan() { # line
+argv_scan() { # argument-file
   local -a words=()
-  read -ra words <<<"$(<"$1")"
+  mapfile -t words <"$1"
   local i=0 j n
   while [ "$i" -lt "${#words[@]}" ] && [ "${words[i]}" != -- ]; do
     printf 'opt %s\n' "${words[i]}"
@@ -301,28 +372,44 @@ mounts() { # line-file
 # The mounts on a bwrap line whose target is $2.
 mounts_to() { mounts "$1" | awk -v target="$2" '$NF == target'; }
 
-# Every bind triple on a bwrap line, sorted and unique (lifted from satan): the
-# form's set minus the baseline's is the residue (f) reads. Read from the option
+# Every bind on a bwrap line, sorted and unique (lifted from satan), one per
+# line with its fields tab-separated, since a word may hold a space: the form's
+# set minus the baseline's is the residue (f) reads. Read from the option
 # stream, so a word after the `--` that spells a bind names no mount. A device
 # bind is a read-write bind, so it is in the set: (f) and (g) are about the
-# permissions a caller ends up with, and the flag's name is no part of that.
-bind_words() { # line-file
+# permissions a caller ends up with, and the flag's name is no part of that. An
+# overlay is in it too, with its upper and work directories, which it writes on
+# the host (DEC-030).
+bind_words() { # argument-file
   local -a stream=()
   argv_stream "$1" stream
-  local i flag source target
+  local i n op word
+  local -a fields
   for i in "${!stream[@]}"; do
     case ${stream[i]} in
       'opt --bind' | 'opt --ro-bind' | 'opt --bind-try' | 'opt --ro-bind-try' | \
-        'opt --dev-bind' | 'opt --dev-bind-try') ;;
+        'opt --dev-bind' | 'opt --dev-bind-try' | 'opt --overlay') ;;
       *) continue ;;
     esac
-    flag=${stream[i]#opt }
-    source=${stream[i + 1]-}
-    target=${stream[i + 2]-}
-    printf '%s %s %s\n' "$flag" "${source#operand }" "${target#operand }"
+    fields=("${stream[i]#opt }")
+    n=$(arity_of "${fields[0]}")
+    for ((op = 1; op <= n; op++)); do
+      word=${stream[i + op]-}
+      fields+=("${word#operand }")
+    done
+    (IFS=$'\t' && printf '%s\n' "${fields[*]}")
   done |
     sed -E "$fold_store" |
     sort -u
+}
+
+# The host paths a bind set writes, one per line: the source of every
+# read-write bind, and an overlay's upper and work directories.
+rw_sources() { # bind-set-file
+  awk -F'\t' '
+    $1 ~ /^--(dev-)?bind(-try)?$/ { print $2 }
+    $1 == "--overlay" { print $2; print $3 }
+  ' "$1"
 }
 
 # The index of the first token of the array named $1 that equals $2.
@@ -374,6 +461,79 @@ check_tail() { # label root line-file
       if [ "${stream[i]}" = "opt $flag" ]; then
         fail "$label" "'$flag' at tail position $((i - mask)) is not the root or the session bind"
       fi
+    done
+  done
+}
+
+## Protected state bound again elsewhere ((j), DEC-031)
+
+# A path as (j) compares it: the home's spellings (`$HOME`, `${HOME}`) read as
+# `~`, the state home's (`$XDG_STATE_HOME`, `${XDG_STATE_HOME}`, the builder's
+# defaulting expression) as its default `~/.local/state`, then slashes as the
+# kernel reads them. The real home is unknown here, so a literal path into it
+# compares as itself: a residue.
+spelled_path() {
+  local path=$1 spelling home
+  for spelling in \
+    '${XDG_STATE_HOME:-$HOME/.local/state}=~/.local/state' \
+    '${XDG_STATE_HOME}=~/.local/state' '$XDG_STATE_HOME=~/.local/state' \
+    '${HOME}=~' '$HOME=~'; do
+    home=${spelling%%=*}
+    case $path in
+      "$home" | "$home"/*)
+        path=${spelling#*=}${path#"$home"}
+        break
+        ;;
+    esac
+  done
+  canonical_target "$path"
+}
+
+# Whether two compared paths overlap: one is the other or lies inside it, and
+# `/` holds everything.
+overlaps() {
+  [ "$1" = "$2" ] || [ "$1" = / ] || [ "$2" = / ] || [[ $2 == "$1"/* ]] || [[ $1 == "$2"/* ]]
+}
+
+# Every mount on the line whose source overlaps protected state — the default
+# state directory or a protect path — at a target other than its own path, one
+# per line: the mask covers the path it masks and no other, so such a mount
+# shows the state wherever it lands. A bind's source, an overlay's lower, upper
+# and work directories are sources; an `--overlay-src` names no target of its
+# own and so never mounts at its own path.
+protected_aliases() { # argument-file
+  local -a stream=() protected=() sources=()
+  argv_stream "$1" stream
+  local i n op flag word source target compared protect path
+  protected=("$(spelled_path "$state_dir")")
+  while IFS= read -r protect; do
+    if [ -n "$protect" ]; then protected+=("$(spelled_path "$protect")"); fi
+  done <<<"$PROTECT"
+  for i in "${!stream[@]}"; do
+    case ${stream[i]} in
+      'opt --bind' | 'opt --ro-bind' | 'opt --bind-try' | 'opt --ro-bind-try' | \
+        'opt --dev-bind' | 'opt --dev-bind-try' | 'opt --overlay-src') sources=(1) ;;
+      'opt --overlay') sources=(1 2) ;;
+      *) continue ;;
+    esac
+    flag=${stream[i]#opt }
+    n=$(arity_of "$flag")
+    target=
+    if [ "$flag" != --overlay-src ]; then
+      word=${stream[i + n]-}
+      target=$(spelled_path "${word#operand }")
+    fi
+    for op in "${sources[@]}"; do
+      word=${stream[i + op]-}
+      source=${word#operand }
+      compared=$(spelled_path "$source")
+      if [ "$compared" = "$target" ]; then continue; fi
+      for path in "${protected[@]}"; do
+        if overlaps "$compared" "$path"; then
+          printf '%s %s\n' "$flag" "$source"
+          break
+        fi
+      done
     done
   done
 }
@@ -437,15 +597,17 @@ check_capability() {
     fail "$a" "the form's exec line is '$exec_line', want 'exec <launcher> \"\$@\"'"
   fi
 
-  # The launcher's text as every rule reads it, the bwrap line, and that line's
-  # number, which (h)'s open and (i)'s append order are read against.
+  # The launcher's normalised text, which the builder's own line shapes are read
+  # from; its raw executable text; the bwrap line, raw; and that line's
+  # arguments as bash reads them, which every bwrap-line rule reads. The line's
+  # number is the one (h)'s open and (i)'s append order are read against.
   local text=$work/$cap-launcher line=$work/$cap-line bwrap_at raw=$work/$cap-raw
-  local raw_line=$work/$cap-raw-line
+  local raw_line=$work/$cap-raw-line unread
   launcher_text "$launcher" >"$text"
-  extract_line "$text" "$line"
   bwrap_at=$(bwrap_line_no "$text")
   code "$launcher" >"$raw"
-  refuse_continuation "$c" "$line"
+  extract_line "$raw" "$raw_line"
+  refuse_continuation "$c" "$raw_line"
 
   # (b) The launcher execs the family's empty-environment bwrap. The target is
   # compared unfolded: folding would read any `bwrap` in the store — a caller's
@@ -456,11 +618,22 @@ check_capability() {
     fail "$b" "the launcher execs '${target:-nothing}', not $BWRAP"
   fi
 
+  # A bwrap line bash would read as more than its words says nothing the rules
+  # could rely on: refuse it, and read no rule over it.
+  if ! unread=$(bwrap_args "$raw_line" "$line"); then
+    fail "$c" "the bwrap line is not plain words: $unread"
+    return
+  fi
+
   # (c) This capability's root flag, and only it; one assignment to the root and
   # one mask declaration, so no caller runtime code can reassign either.
-  must "$c" "$line" "$root \$quotient_root \$quotient_root"
+  if [ "$(option_operand_count "$line" "$root" '$quotient_root')" -eq 0 ]; then
+    fail "$c" "missing '$root \$quotient_root \$quotient_root'"
+  fi
   for flag in "${other_flags[@]}"; do
-    must_not "$c" "$line" "$flag \$quotient_root"
+    if [ "$(option_operand_count "$line" "$flag" '$quotient_root')" -ne 0 ]; then
+      fail "$c" "unexpected '$flag \$quotient_root'"
+    fi
   done
   local roots masks append
   roots=$(grep -F -- 'quotient_root=' "$text" || true)
@@ -471,11 +644,10 @@ check_capability() {
   # the session bind's two and the chdir's one. Single-quoted, one of them is
   # the literal that spells it and the mount it asks for is a path of the jail's
   # making, so they are read as the builder writes them, from the raw line: the
-  # normalised read has already dropped the quotes. Only these operands are read
+  # words bash reads have already lost the quotes. Only these operands are read
   # this way — a caller's env value or protect path may spell the same
   # characters, and the builder escapes them as the literals they are — and the
   # state line's own text is (i)'s.
-  extract_line "$raw" "$raw_line"
   must "$c" "$raw_line" "$root \"\$quotient_root\" \"\$quotient_root\""
   must "$c" "$raw_line" "--bind \"$session_var\" \"$session_var\""
   must "$c" "$raw_line" "--chdir \"\$quotient_root\""
@@ -485,7 +657,7 @@ check_capability() {
   fi
   while IFS= read -r append; do
     fail "$c" "a quotient_mask append is not in one of the builder's mask shapes: $append"
-  done < <(grep -F -- 'quotient_mask+=' "$text" | grep -vE -- "$mask_plain|$mask_guarded")
+  done < <(grep -F -- 'quotient_mask+=' "$raw" | grep -vE -- "$mask_plain|$mask_guarded")
   check_tail "$c" "$root" "$line"
 
   # (d) The jail's own isolation: it dies with its parent, has no environment of
@@ -533,7 +705,7 @@ check_capability() {
   # permission has moved between the form and its baseline.
   bind_words "$line" >"$work/$cap-binds"
   # The expected set is written here, not read from a launcher: it needs no scan.
-  printf '%s\n' "$root \$quotient_root \$quotient_root" "--bind $session_var $session_var" |
+  printf '%s\t%s\t%s\n' "$root" '$quotient_root' '$quotient_root' --bind "$session_var" "$session_var" |
     sed -E "$fold_store" | sort -u >"$work/$cap-expected-set"
   comm -13 "$work/baseline-binds" "$work/$cap-binds" >"$work/$cap-added"
   comm -23 "$work/baseline-binds" "$work/$cap-binds" >"$work/$cap-dropped"
@@ -578,12 +750,27 @@ check_capability() {
   # policy names the protect paths, and each of them has exactly one such line:
   # a path without its line is left unmasked, and a line the policy does not
   # name is a mask the builder never writes.
-  local appends parsed=0 state=0 guarded=0
+  local appends parsed=0 state=0 guarded=0 raw_word word unreadable
   local kind test_word mount_word dir_word printf_word declared first_append last_append
   : >"$work/protect-masked"
-  appends=$(grep -cF -- 'quotient_mask+=' "$text" || true)
+  appends=$(grep -cF -- 'quotient_mask+=' "$raw" || true)
   while IFS=$'\t' read -r kind test_word mount_word dir_word printf_word; do
     parsed=$((parsed + 1))
+    # Each captured word as bash reads it, so a protect path compares exactly
+    # as the policy names it, an apostrophe or a space included.
+    unreadable=
+    for raw_word in test_word mount_word dir_word printf_word; do
+      if [ -z "${!raw_word}" ]; then continue; fi
+      if word=$(one_word "${!raw_word}"); then
+        printf -v "$raw_word" '%s' "$word"
+      else
+        unreadable=1
+      fi
+    done
+    if [ -n "$unreadable" ]; then
+      fail "$i" "a mask line's word is not one plain shell word"
+      continue
+    fi
     if [ "$test_word" != "$mount_word" ]; then
       fail "$i" "the mask tests '$test_word' but mounts '$mount_word'"
     fi
@@ -604,7 +791,7 @@ check_capability() {
       guarded=$((guarded + 1))
     fi
   done < <(sed -nE -e "s@$mask_plain@plain\t\1\t\2@p" \
-    -e "s@$mask_guarded@guarded\t\1\t\4\t\2\t\3@p" "$text")
+    -e "s@$mask_guarded@guarded\t\1\t\4\t\2\t\3@p" "$raw")
   if [ "$appends" -eq 0 ]; then
     fail "$i" "the launcher masks nothing"
   fi
@@ -615,16 +802,16 @@ check_capability() {
     fail "$i" "the mask names the default state directory $state times, want once"
   fi
   # The state directory's line is the builder's own text, compared as written: a
-  # quoted-to-a-literal expression reads the same normalised, and only the raw
+  # single-quoted expression is the same word to bash, and only the raw
   # line tells the expression from the path that spells it.
   local state_raw
   state_raw=$(grep -F -- 'quotient_mask+=' "$raw" | grep -F -- "$state_dir" || true)
   if [ "$state_raw" != "$state_line" ]; then
     fail "$i" "the default state directory's mask line is not the builder's: $(single_line "$state_raw")"
   fi
-  # The policy's protect paths, normalised as the launcher text is, against the
+  # The policy's protect paths, as the policy names them, against the
   # guarded lines this launcher carries.
-  printf '%s\n' "$PROTECT" | sed -E "${normalise_expr[@]}" -e '/^$/d' >"$work/protect-policy"
+  printf '%s\n' "$PROTECT" | sed -e '/^$/d' >"$work/protect-policy"
   local path masked protect_paths
   while IFS= read -r path; do
     masked=$(grep -cxF -- "$path" "$work/protect-masked" || true)
@@ -650,6 +837,15 @@ check_capability() {
   if [ "$mask_expansions" -ne 1 ]; then
     fail "$i" "the bwrap line expands the mask $mask_expansions times, want once"
   fi
+
+  # (j) No mount shows protected state at a path of its own (DEC-031): the mask
+  # covers the default state directory and each protect path where they are,
+  # so a caller's bind of one, of a directory holding one, or of `/`, at any
+  # other target shows every session and the run evidence there.
+  local alias
+  while IFS= read -r alias; do
+    fail "(j) $cap" "'$alias' mounts protected state at a path the mask does not cover"
+  done < <(protected_aliases "$line")
 }
 
 ## The baseline
@@ -658,15 +854,18 @@ check_capability() {
 # own tail, no bind of the root the tail computes, and no rw bind the policy
 # does not call exposed. Its bind set is read once, before the forms.
 check_baseline() {
-  local text=$work/baseline-launcher line=$work/baseline-line
+  local raw=$work/baseline-raw raw_line=$work/baseline-raw-line line=$work/baseline-line unread
   if [ ! -f "$BASELINE" ]; then
     fail "(e) baseline" "no baseline at $BASELINE"
     printf '' >"$work/baseline-binds"
     return
   fi
-  launcher_text "$BASELINE" >"$text"
-  extract_line "$text" "$line"
-  refuse_continuation "(e) baseline" "$line"
+  code "$BASELINE" >"$raw"
+  extract_line "$raw" "$raw_line"
+  refuse_continuation "(e) baseline" "$raw_line"
+  if ! unread=$(bwrap_args "$raw_line" "$line"); then
+    fail "(e) baseline" "the bwrap line is not plain words: $unread"
+  fi
   bind_words "$line" >"$work/baseline-binds"
 
   local root_binds
@@ -675,16 +874,17 @@ check_baseline() {
     fail "(e) baseline" "the baseline binds \$quotient_root: $(single_line "$root_binds")"
   fi
 
-  local spec source
+  # (g) Every host path the baseline writes is one the policy calls exposed: a
+  # read-write bind's source, the device flags among them, and an overlay's
+  # upper and work directories (DEC-030). Both sides as written, store hashes
+  # folded alike.
+  local source
   printf '%s\n' "$EXPOSURE" | sed -E "$fold_store" >"$work/exposure"
-  # Every rw bind, the device flags among them: `bind_words` keeps both kinds,
-  # since a device bind is a read-write mount too.
-  while IFS= read -r spec; do
-    source=$(printf '%s\n' "$spec" | awk '{ print $2 }')
+  while IFS= read -r source; do
     if ! grep -qxF -- "$source" "$work/exposure"; then
-      fail "(g) baseline" "the baseline binds '$source' read-write, which EXPOSURE does not list"
+      fail "(g) baseline" "the baseline writes '$source' on the host, which EXPOSURE does not list"
     fi
-  done < <(grep -E -- '^--(dev-)?bind(-try)? ' "$work/baseline-binds" || true)
+  done < <(rw_sources "$work/baseline-binds")
 }
 
 ## The report
@@ -712,8 +912,8 @@ residues() {
   cat <<'EOF'
 residue: this text check cannot see
 residue:   binds delivered at runtime, through a caller's --args descriptor or a caller appended to RUNTIME_ARGS
-residue:   mounts whose source or target holds a space or a command substitution, which no token rule catches
-residue:   an environment value that spans several words, which the normalised read splits into arguments either side of it
+residue:   mounts whose source or target is computed at launch — a command substitution or a variable — which the text names but does not resolve
+residue:   protected state bound again through a literal path into the real home, which (j) cannot tell from any other path
 residue:   whether the mounts behave as the text says — the runtime probe's subject
 EOF
 }

@@ -90,6 +90,38 @@ continued_tail=$'"$@" \\\n'"$continuation_line"
 fixture continuation default 'refuse:(c)'
 edit launcher-read '"$@"' "$continued_tail"
 
+# The bwrap line is read as bash reads it, and a line bash would read as more
+# than plain words is refused rather than read: an operator outside quotes, a
+# command substitution, a comment, a backtick, an ANSI-C quote.
+fixture line-semicolon default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv ; true'
+
+fixture line-and default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv && true'
+
+fixture line-pipe default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv | true'
+
+fixture line-comment default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv # --unshare-pid'
+
+fixture line-command-substitution default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv $(true)'
+
+fixture line-backtick default 'refuse:(c)'
+edit launcher-read '--clearenv' '--clearenv `true`'
+
+fixture line-ansi-quote default 'refuse:(c)'
+edit launcher-read '--clearenv' "--clearenv --setenv NOTE \$'x'"
+
+# Quoted, the same characters are a word's text, and an empty argument is an
+# argument: each is read as the one word it is.
+fixture line-quoted-operator default pass
+edit launcher-read '--clearenv' "--clearenv --setenv NOTE ';' --setenv NOTE2 '&&'"
+
+fixture line-empty-argument default pass
+edit launcher-read '--clearenv' "--clearenv --setenv NOTE ''"
+
 # A descriptor-only exec before the bwrap line is not the bwrap line.
 fixture fd-exec default pass
 edit launcher-read 'exec @BWRAP ' $'exec 3</dev/null\nexec @BWRAP '
@@ -276,9 +308,10 @@ edit launcher-write '--tmpfs ~' "$exposed_mount"
 edit baseline '--tmpfs ~' "$exposed_mount"
 
 # A report quotes bind paths the caller controls, so a path spelling a label must
-# not read as a refusal by it: this binds `(i)` and is refused by (g) alone.
+# not read as a refusal by it: this binds `(i)` and is refused by (g) alone. The
+# path is quoted, as a caller's would have to be: unquoted, `(` is bash syntax.
 fixture label-quoted full 'refuse:(g)' 'absent=(i)'
-edit baseline '--tmpfs ~' '--tmpfs ~ --bind /tmp/quotient-checks/(i) /tmp/quotient-checks/(i)'
+edit baseline '--tmpfs ~' "--tmpfs ~ --bind '/tmp/quotient-checks/(i)' '/tmp/quotient-checks/(i)'"
 
 ## (h) the secret descriptor
 
@@ -388,4 +421,28 @@ fixture duplicate-protect duplicate pass
 
 # The runner's completion marker: a table that returns or fails early never
 # reaches it, and the runner refuses a corpus that did not set it.
+## Argument boundaries: the bwrap line read as bash reads it
+
+# An empty env value is an argument of its own: read away, the scan takes the
+# next `--setenv` as its value and never sees the QUOTIENT_ name after it.
+fixture empty-env-quotient emptyenv 'refuse:(e)'
+
+# The same erasure in a caller's raw arguments hides a bind from (g).
+fixture raw-empty-bind rawempty 'refuse:(g)'
+
+# A value that spells a flag is a value, and an apostrophe is part of a path.
+fixture multiword-env-value multiword pass
+fixture apostrophe-exposure apostrophe pass
+
+## (g) overlays
+
+# An overlay's upper and work directories are written on the host.
+fixture overlay-unexposed overlay 'refuse:(g)'
+
+## (j) protected state bound again elsewhere
+
+fixture alias-state-dir aliasstate 'refuse:(j)'
+fixture alias-protect aliasprotect 'refuse:(j)'
+fixture alias-host-root aliasroot 'refuse:(j)'
+
 table_complete
