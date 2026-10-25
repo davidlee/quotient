@@ -450,5 +450,109 @@ Observed: :188-190 "Step 8 compares the child's writable view, which is the root
 act = "raise"
 role = "raiser"
 
+[[finding]]
+id = "F-18"
+status = "open"
+severity = "major"
+title = 'check.sh parser should match bash or refuse; observed: unquoted $, \\$ and \\001 misread (fixed 3f50a48)'
+detail = '''
+Found by the responder during the round-2 wait (2026-10-26), fixed in 3f50a48: an unquoted `$var` (split by bash at launch) read as one symbol; `"a\$b"` kept its backslash where bash reads `$`; a quote-blind `$'`/`$"` test refused quoted literals; `\001` (bash's internal CTLESC) was an inert byte. Now: `$` is a split operator (unquoted refused, quoted symbolic), `\$` refused, no `\001`. Fixtures line-unquoted-expansion, line-escaped-dollar; secret-in-env-value quoted its expansion.
+'''
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-19"
+status = "open"
+severity = "major"
+title = "(j) and (g) should see .. segments and tabs in paths; observed: alias via .., tab truncated the compared source (fixed 701c96d)"
+detail = '''
+Codex round 2 (partial run, cut by its content filter), reproduced by fixtures alias-dotdot (`${extra}/../protect` bound at /visible-protect passed) and tab-in-source (exposure `extra`, rw-bind `extra<TAB>x` passed). Fixed 701c96d: canonical_target resolves `.`/`..` lexically; records use \037, which shell_words refuses in any line.
+'''
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-20"
+status = "open"
+severity = "major"
+title = "parser should refuse unquoted glob and brace syntax; observed: quotien? and {a,b} read literally, expanded by bash"
+detail = """
+Codex round 2 (gpt-6.1-sol, 701c96d), verified by Codex with a builder family: `--ro-bind ~/.local/state/quotien? /visible` passes (bash globs it to the state dir; (j) never sees it); `--setenv NOTE {a,b}` is one word to the checker, two to bash. shell_words sets -f/+B for its own parse but the launcher does not.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-21"
+status = "open"
+severity = "major"
+title = "(j) should not exempt two different unresolved paths as equal; observed: ~/../x and ~/../y both read as /"
+detail = """
+Codex round 2: `--ro-bind ~/../david/.local/state/quotient ~/../david/visible` — canonical_target returns `/` for any climb above the anchor, so source and target compare equal and the at-its-own-path exemption fires; the default state dir is aliased. Verified by Codex with a builder family.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-22"
+status = "open"
+severity = "major"
+title = "check_tail's piFiles admission should test canonical containment; observed: /nix/store/../../etc admitted"
+detail = """
+Codex round 2: inserting `--ro-bind /nix/store/../../etc ~/.pi/agent/../../../visible` between mask and root (in form and baseline) passes; check_tail matches raw prefixes `/nix/store/` and `~/.pi/agent/`. Verified by Codex.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-23"
+status = "open"
+severity = "major"
+title = "rw accounting should cover --bind-fd; observed: an fd bind writes the host with empty EXPOSURE"
+detail = """
+Codex round 2: a family opening `exec 3</tmp/dir` and adding `--bind-fd 3 /visible` passes with EXPOSURE empty; a scratch bwrap run showed writes through it reach the host. bind_words/rw_sources omit --bind-fd and --ro-bind-fd; their source is a descriptor the text cannot name.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-24"
+status = "open"
+severity = "minor"
+title = "a single-quoted backtick should read as text; observed: refused"
+detail = """
+Codex round 2: `env.NOTE = "a`b"` builds (jail.nix single-quotes it) and the check refuses it: shell_words refuses any backtick, quoted or not.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-25"
+status = "open"
+severity = "minor"
+title = "a multi-line env literal should be read or refused clearly; observed: 'quoting that does not close'"
+detail = '''
+Codex round 2: `env.NOTE = "first\nsecond"` builds; the single-quoted argument spans two physical lines; extract_line takes one, so the check refuses with a misleading reason. Fails closed.
+'''
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
 # Findings are append-only `[[finding]]` tables, added by `review raise`.
 # Empty here at creation — a fresh review is Active, awaiting the raiser.
