@@ -5,7 +5,7 @@ id = 1
 slug = "form-builder-literal-dollar"
 title = "Should mkFormFamily accept a literal $ in an env value or protect path?"
 record_kind = "question"
-status = "open"
+status = "answered"
 created = "2026-10-25"
 updated = "2026-10-25"
 tags = []
@@ -13,9 +13,9 @@ tags = []
 [facet]                         # every field typed; seeded empty (captured later)
 question    = ""
 why_matters = ""
-answer      = ""
-answered_by = ""
-answered_on = ""
+answer = "Refuse at evaluation with a message naming the value, and document the limit (DEC-036). Lifting it is a backlog idea."
+answered_by = "operator, 2026-10-26 (RV-011 D8 'agreed')"
+answered_on = "2026-10-25"
 
 [evidence]                      # free-text citations (supports / contradicts / notes)
 supports    = []

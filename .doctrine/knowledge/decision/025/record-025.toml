@@ -5,9 +5,9 @@ id = 25
 slug = "check-normalise-quotes-whitespace"
 title = "check.sh normalises single quotes and whitespace"
 record_kind = "decision"
-status = "accepted"
+status = "superseded"
 created = "2026-10-24"
-updated = "2026-10-24"
+updated = "2026-10-25"
 tags = []
 
 [facet]                         # every field typed; seeded empty (captured later)
@@ -26,7 +26,7 @@ notes       = []
 
 [relationships]                 # verb-written edges (set by doctrine supersede)
 supersedes    = []   # record ids this one replaces (set by doctrine supersede)
-superseded_by = []   # set on superseded predecessor (verb-written)
+superseded_by = ["DEC-029"]   # set on superseded predecessor (verb-written)
 
 [[relation]]
 label = "shapes"
