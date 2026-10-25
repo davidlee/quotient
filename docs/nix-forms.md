@@ -370,17 +370,19 @@ What you add is yours to get right.
   a path included — but not what it expands at launch. Mounts delivered from a
   file descriptor (`--args`) or appended to bwrap's runtime list by
   `add-runtime` code are invisible to it, and so is the value of a source or
-  target computed at launch (a variable or a command substitution inside
-  quotes). The runtime arguments are expanded last, after the builder's root and
+  target that is a variable inside double quotes. The runtime arguments are expanded last, after the builder's root and
   session binds, so a bind added there can cover them. Nothing stops you, and
   nothing checks you either.
 - **The bwrap line must be plain words.** The check refuses a line bash would
   read as more than one command of words, or as words it cannot know until
   launch: an unquoted `;`, `&`, `|`, `<`, `>`, `(`, `)` or `#`, an unquoted `$`
-  (an expansion bash would split, an ANSI-C or locale quote), a `\$`, or a
-  backtick. jail.nix quotes everything it writes, so this meets only raw
-  arguments of your own; quote them, and do not escape an operator with a
-  backslash, which the check also refuses.
+  (an expansion bash would split, an ANSI-C or locale quote), an unquoted glob
+  (`*`, `?`, `[`) or brace (`{`), a backtick outside single quotes, a `$(` or
+  `$[` anywhere, a `${…}` that is more than a name, `name[@]` or a plain
+  `name:-default`, and a `\$` or `` \` ``. Nor may a mount's path climb with
+  `..` above `~` or a variable it starts from. jail.nix quotes everything it
+  writes, so this meets only raw arguments of your own; single-quote them, and
+  do not escape an operator with a backslash, which the check also refuses.
 - **`/tmp` belongs to the jail.** The check refuses a mount at exactly `/tmp`,
   because a shared host `/tmp` would leak between runs. Binds below `/tmp` (an
   X11 socket, say) are allowed. A temporary directory that should survive a run,
@@ -505,9 +507,9 @@ What these do not prove:
   written is untested by it; only a launch shows that, and only on the host that
   launches.
 - **It cannot see runtime binds.** Binds delivered through `--args` or
-  `add-runtime` code, a mount whose path is computed at launch, and protected
-  state bound again through a literal path into your home are printed as
-  residues and otherwise unchecked.
+  `add-runtime` code, a mount whose path is a variable expanded at launch, and
+  protected state bound again through a literal path into your home are printed
+  as residues and otherwise unchecked.
 - **One audit is one sample.** `hostile-audit` tests one protected store — the
   run's audit ledger — with one model, once. It is not a conformance test, and
   passing it does not establish the rest of the contract; the guarantees

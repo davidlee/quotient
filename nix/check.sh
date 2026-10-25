@@ -1049,7 +1049,7 @@ residues() {
   cat <<'EOF'
 residue: this text check cannot see
 residue:   binds delivered at runtime, through a caller's --args descriptor or a caller appended to RUNTIME_ARGS
-residue:   mounts whose source or target is computed at launch — a command substitution or a variable — which the text names but does not resolve
+residue:   mounts whose source or target is a variable expanded at launch, which the text names but does not resolve
 residue:   protected state bound again through a literal path into the real home, which (j) cannot tell from any other path
 residue:   whether the mounts behave as the text says — the runtime probe's subject
 EOF
