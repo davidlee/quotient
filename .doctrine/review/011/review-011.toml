@@ -1,0 +1,238 @@
+id    = 11
+slug  = "reconciliation-review-of-sl-003"
+title = "reconciliation review of SL-003"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "reconciliation"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-003"
+
+[[finding]]
+id = "F-1"
+status = "open"
+severity = "major"
+title = "design.md sec-2/sec-3 should carry DEC-023..028; observed: unamended text"
+detail = """
+Expected: design.md (canonical) describes the builder and check as built.
+Observed: DEC-023 (protect must be a directory, launch fails otherwise), DEC-024 (secretEnv values must contain `$`, refused at evaluation), DEC-025 (check strips single quotes, folds whitespace runs), DEC-026 (--dev-bind/--dev-bind-try are rw binds in bind_words), DEC-027 (PROTECT input; family exposes `protect`; one existence- and directory-tested mask line per protect path), DEC-028 (committed check-fixtures derivation) all amend sec-2/sec-3, and none is folded in. Specific stale text: sec-2 Interface return set lacks `protect`; sec-2 mask snippet lacks the directory test; sec-2 Environment lacks the `$` refusal; sec-3 "Reading a launcher" step 1 says double quotes only; sec-3 bind_words list lacks --dev-bind; sec-3 input table lacks PROTECT; sec-5 test flake lacks check-fixtures.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-2"
+status = "open"
+severity = "major"
+title = "docs/nix-forms.md says a read root is never compared to protected stores; server refuses one containing sessions or run evidence"
+detail = """
+Expected: shipped docs describe the server's child-view check as implemented.
+Observed: docs/nix-forms.md:348-355: "The server refuses only a *write* view … a read root is never compared … A read root at `$HOME` therefore shows the delegate `~/.local/state/quotient` — every other session, the run evidence, the forms — read-only."
+Code: src/server/childview.ts:111-121 gives run-evidence, attempts-ledger and session-home tolerance `unreachable`; :184-186 `refuses()` returns true for `unreachable` at any exposure; childViewMembers (:89-95) includes the root at read-only exposure. So a read root containing the session home or run directory is refused `view-overlaps-protected`. Only never-writable stores (policy file, approvals, layers) and non-store paths (e.g. `forms/`) are readable through a read root. Corroborates the PHASE-02 review rejection #3 ("the server's child-view check refuses a root containing an evidence store").
+Impact: errs toward caution, but it is false security text that ships in the npm package (pack delta: + docs/nix-forms.md).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-3"
+status = "open"
+severity = "minor"
+title = "sec-3 residue list should match what check.sh prints; observed: multi-word env value residue undeclared in design"
+detail = """
+Expected: design sec-3 "Residues and what the check cannot see" lists every residue the check prints.
+Observed: checkFormFamily prints (nix flake check, VH-1 family, 2026-10-26): "residue: an environment value that spans several words, which the normalised read splits into arguments either side of it" — the PHASE-04 N1 residue. sec-3 lists only --args/add-runtime binds, mounts with spaces or command substitution, and runtime behaviour.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-4"
+status = "open"
+severity = "minor"
+title = "a literal $ in an env value or protect path should be refused clearly or supported; observed: build fails at shellcheck SC2016, undocumented"
+detail = """
+Expected: a caller argument the builder cannot emit is refused at evaluation with a message naming it (the DEC-024 pattern), or is supported; docs state the limit.
+Observed: PHASE-04 F-28 (phase-04.md:1204-1214, forms-check-r5): form-family.nix single-quotes env values and protect paths; writeShellApplication's shellcheck flags each single-quoted `$` (SC2016) and the derivation fails. Fails closed, with an opaque error. docs/nix-forms.md does not mention it. Open as QUE-001.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-5"
+status = "open"
+severity = "nit"
+title = "docs name only .local/state/quotient as a persisted-home mount point; observed: piFiles leave empty placeholders too"
+detail = """
+Expected: docs/nix-forms.md:345-347 names what a persisted home gains on the host.
+Observed (host, 2026-10-26): VH-1 family + persistHome, one launch (`vh1-read <sess> --version`, exit 0). Persisted home afterwards: empty dir `.local/state/quotient` (claim confirmed) and an empty read-only file `.pi/agent/models.json` (the piFiles bind's mount point), which the docs do not mention.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-6"
+status = "open"
+severity = "minor"
+title = "verification should cover the platforms the builder accepts; observed: x86_64-linux only"
+detail = """
+Expected: the builder asserts Linux (any arch); evidence covers what it accepts.
+Observed: gate, probe, check fixtures and VH-1 ran on x86_64-linux only. aarch64-linux evaluates (isLinux) but is unexercised: jail.nix rendering and bwrap behaviour there are unverified.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-7"
+status = "open"
+severity = "blocker"
+title = "check.sh should read bwrap arguments as bwrap receives them; observed: quote stripping drops empty args and shifts the scan"
+detail = """
+Source: Codex (gpt-6.1-sol) adversarial pass, 2026-10-26; reproduced by a real checkFormFamily build (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attr `empty`).
+Expected: (e) refuses a QUOTIENT_ variable set through env (sec-3 (e); neg-quotient-env).
+Observed: `env = { S_EMPTY = ""; QUOTIENT_DEBUG = "1"; }` — the launcher emits `--setenv S_EMPTY '' --setenv QUOTIENT_DEBUG 1`; check.sh's normalisation (nix/check.sh:96, :193; DEC-025 strips both quote kinds) erases the empty argument, so the arity scan consumes `--setenv` as S_EMPTY's value and never sees QUOTIENT_DEBUG. checkFormFamily ACCEPTS. Same mechanism hides a raw `--bind` from (g) (Codex: `--setenv NOTE '' --bind /srv/data /srv/data`).
+Ordinary arguments, no raw args: the check passes a family that hands pi a QUOTIENT_* variable.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-8"
+status = "open"
+severity = "major"
+title = "check.sh should not refuse valid builder output; observed: false refusals on a multi-word env value and an apostrophe in a path"
+detail = '''
+Source: Codex pass; reproduced (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attrs `multiword`, `apostrophe`).
+- `network = false; env.NOTE = "ordinary --share-net";` → FAIL (d) read/write: unexpected option '--share-net' (value text read as an option).
+- `exposure = [ "/srv/it's" ];` → FAIL (g): "the baseline binds '/srv/it\s' read-write, which EXPOSURE does not list".
+Neither value contains a space-in-path or command substitution (the declared residue). Same root cause as the blocker: normalisation discards shell argument boundaries.
+'''
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-9"
+status = "open"
+severity = "major"
+title = "G5 rw-bind accounting should cover every host-writable mount; observed: overlay upper/work dirs unchecked"
+detail = """
+Source: Codex pass; reproduced (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attr `overlay`).
+Expected: (g) every rw bind source in the baseline is in EXPOSURE (G5: host writes only to declared locations).
+Observed: `options = c: [ (c.overlay-rw [ "/srv/lower" ] "/srv/upper" "/srv/work" "/srv/view") ]` with exposure = [] — checkFormFamily ACCEPTS. bind_words (nix/check.sh ~:315) lists --bind/--ro-bind/--bind-try/--dev-bind only; /srv/upper (persists writes) and /srv/work are host-writable and undeclared, so the server's protected-store check never sees them.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-10"
+status = "open"
+severity = "major"
+title = "G6 mask should hide protected state whatever the caller binds; observed: a caller bind of the state dir at another path passes"
+detail = """
+Source: Codex pass; reproduced (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attrs `alias`, `aliasDefault`).
+Expected: sec-2 G6 bullet — the mask hides the default session home and run directory "whatever the caller has bound in steps 1–4".
+Observed: `options = c: [ (c.ro-bind (c.noescape "~/.local/state/quotient") "/visible-state") ]` (and the same for a `protect` path) — checkFormFamily ACCEPTS; the mask covers the source path only, so every session and the run evidence are readable at /visible-state. Both paths are literal in the launcher text.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-11"
+status = "open"
+severity = "minor"
+title = "caller binds should not cover piFiles; observed: a caller defer lands after them"
+detail = """
+Source: Codex pass; reproduced (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attr `deferPi`) and by reading nix/form-family.nix:183-191.
+Expected: sec-2 row 4 / Home and pi configuration — piFiles bind "after the home and caller binds, so neither a persisted home nor a caller bind can replace them".
+Observed: piFiles are part of callerPermissions; `options = c: [ (c.defer (c.ro-bind "/srv/config" (c.noescape "~/.pi/agent"))) ]` renders after them and covers ~/.pi/agent. checkFormFamily ACCEPTS.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-12"
+status = "open"
+severity = "minor"
+title = "piFiles sources should be store paths (G10); observed: toString keeps a host path outside a flake"
+detail = """
+Source: Codex pass (evaluated); confirmed by reading nix/form-family.nix:181 (`toString source`).
+Expected: sec-2 G10 — piFiles sources are store paths.
+Observed: a path literal evaluated outside flake source (non-flake import, or --impure) stays a host path: Codex's evaluation emitted `--ro-bind /tmp/…/settings.json ~/.pi/agent/settings.json`. A string source is never copied. Interpolation (`"${source}"`) would import path values into the store; string sources need a stated rule.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-13"
+status = "open"
+severity = "minor"
+title = "pi should see no QUOTIENT_* variable; observed: secretEnv.QUOTIENT_* passes builder and check"
+detail = """
+Source: Codex pass; reproduced (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attr `secretQ`).
+Observed: `secretEnv.QUOTIENT_DEBUG = "$DEBUG"` builds and checkFormFamily ACCEPTS; the builder writes `--setenv QUOTIENT_DEBUG` into the secret descriptor. (e) inspects only the bwrap line. The names are known (SECRET_ENV_NAMES), so this is not the declared --args residue.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-14"
+status = "open"
+severity = "minor"
+title = "HOME should stay forwarded (sec-2 Environment table); observed: env.HOME overrides it"
+detail = """
+Source: Codex pass; reproduced (/tmp/claude-1000/-home-david-dev-quotient/e0b163bc-7ade-4553-b71b-c0bcc49280e1/scratchpad/repro/flake.nix, attr `home`).
+Observed: `env.HOME = "/srv/other-home"` emits `--setenv HOME /srv/other-home`, checkFormFamily ACCEPTS. Home mounts and piFiles still target the launcher's host $HOME, so pi's HOME and its mounted home diverge.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding]]
+id = "F-15"
+status = "open"
+severity = "nit"
+title = "builder should refuse jail.nix options incompatible with the exec chain; observed: add-cleanup accepted, then check (b) fails"
+detail = """
+Source: Codex pass (evaluated and ran check.sh on the emitted text; not reproduced here).
+Observed: `options = c: [ (c.add-cleanup "true") ]` — jail.nix installs an EXIT trap and runs bwrap without exec; check (b) refuses with cascading failures. Fails closed; the message does not name the cause.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.
