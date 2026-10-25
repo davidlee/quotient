@@ -653,6 +653,27 @@
 
           check-fixtures = import ./fixtures.nix { inherit pkgs families; };
 
+          # The docs' nix examples, each a file the docs quote verbatim (a drift
+          # test holds the two equal): the consumer flake's own check, and each
+          # argument example in a family checkFormFamily passes.
+          example-consumer =
+            let
+              consumer = (import ./examples/consumer.nix).outputs {
+                self = { };
+                inherit nixpkgs quotient jail-nix;
+                pi.packages.${system}.default = (sampleBase pkgs).pi;
+              };
+            in
+            consumer.checks.${system}.quotient-forms or (pkgs.runCommand "example-consumer-unsupported" { } "touch $out");
+          example-credentials = quotient.lib.checkFormFamily {
+            inherit pkgs;
+            family = quotient.lib.mkFormFamily (sampleBase pkgs // import ./examples/credentials.nix);
+          };
+          example-tmpdir = quotient.lib.checkFormFamily {
+            inherit pkgs;
+            family = quotient.lib.mkFormFamily (sampleBase pkgs // import ./examples/tmpdir.nix);
+          };
+
           # Every evalRefusals entry fails to evaluate. tryEval sees that it
           # failed, not why: the message is scripts/form-probe's to assert.
           eval-refusals =

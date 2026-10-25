@@ -10,6 +10,8 @@
 //   policy             every accepted policy key and env var is documented; every
 //                      ```json block is a policy validatePolicy admits
 //   no doctrine ids    no shipped text cites an id from the repo it was extracted from
+//   nix examples       every ```nix block in docs/nix-forms.md is a file the
+//                      test flake builds and checks
 //
 // The fixture results are built offline by the real reducer and the server's own
 // builders (`resultFor`, `failedResult`, `refusedResult`): the functions every
@@ -325,6 +327,42 @@ function embeddedPolicyViolations(text: string, label: string): { found: number;
 
 // ── No doctrine ids ────────────────────────────────────────────────────────
 
+const NIX_FORMS = 'docs/nix-forms.md';
+const NIX_EXAMPLES = 'nix/checks/examples';
+
+/** Every ```nix block in TEXT that is not tagged `<!-- example: NAME -->` on the
+ *  line before it, or whose text — dedented by its fence's indent — is not the
+ *  file NAME.nix that EXAMPLE returns. The test flake builds and checks each of
+ *  those files, so a docs example the reader copies is one the gate ran. */
+function exampleViolations(text: string, example: (name: string) => string | undefined): string[] {
+  const lines = text.split('\n');
+  const violations: string[] = [];
+  lines.forEach((line, index) => {
+    const fence = /^( *)```nix$/.exec(line);
+    if (fence === null) {return;}
+    const indent = fence[1].length;
+    const tag = /^ *<!-- example: ([a-z-]+) -->$/.exec(lines[index - 1] ?? '');
+    if (tag === null) {
+      violations.push(`line ${String(index + 1)}: a nix block with no example tag`);
+      return;
+    }
+    const end = lines.findIndex((candidate, at) => at > index && candidate === `${' '.repeat(indent)}\`\`\``);
+    const block = lines.slice(index + 1, end).map((body) => body.slice(indent)).join('\n') + '\n';
+    const file = example(tag[1]);
+    if (file === undefined) {
+      violations.push(`example ${tag[1]}: no ${NIX_EXAMPLES}/${tag[1]}.nix`);
+    } else if (file !== block) {
+      violations.push(`example ${tag[1]}: the docs block differs from ${NIX_EXAMPLES}/${tag[1]}.nix`);
+    }
+  });
+  return violations;
+}
+
+const exampleFile = (name: string): string | undefined => {
+  const path = `${NIX_EXAMPLES}/${name}.nix`;
+  return existsSync(repo(path)) ? read(path) : undefined;
+};
+
 const DOCTRINE_ID = /\b(?:SL|DEC|RV|ADR|REQ|POL|IMP|ISS|SPEC|RFC|REV|CHR|IDE|RSK)-\d{3}\b/g;
 
 /** Every file under PATH (a file or a directory), recursively. */
@@ -412,7 +450,19 @@ test('no doctrine ids: nothing under docs/, examples/, help/, the README, flake.
   assert.deepEqual(doctrineIdViolations(files), []);
 });
 
+test('nix examples: every nix block in docs/nix-forms.md is tagged and equals its file under nix/checks/examples', () => {
+  const doc = read(NIX_FORMS);
+  assert.ok((doc.match(/^ *```nix$/gm) ?? []).length >= 3, 'the scan finds the doc\'s nix blocks');
+  assert.deepEqual(exampleViolations(doc, exampleFile), []);
+});
+
 // ── Negative controls: each check fails on a doctored contract ─────────────
+
+test('negative control: a docs nix example doctored away from its file fails the nix examples check', () => {
+  const doctored = doctor(read(NIX_FORMS), 'inherit pkgs jail-nix;', 'inherit pkgs jail-nix; prefix = "doctored";');
+  const violations = exampleViolations(doctored, exampleFile);
+  assert.ok(violations.some((line) => line.includes('the docs block differs')), violations.join('\n'));
+});
 
 test('negative control: an approvals block doctored with an unknown key fails the approvals contract check', () => {
   const doctored = doctor(

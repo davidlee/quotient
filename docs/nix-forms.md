@@ -44,6 +44,7 @@ is not a weaker form to fall back on.
 
 ## 2. A minimal consumer
 
+<!-- example: consumer -->
 ```nix
 {
   inputs = {
@@ -98,11 +99,11 @@ nix build -o ~/.local/state/quotient/forms/write .#quotient-write
 
 Each `-o` link points at a store path, so the executable is
 `~/.local/state/quotient/forms/write/bin/quotient-write`. The state directory
-is a *protected store*, one of the paths a delegate may not write
+holds the server's *protected stores*
 ([`quotient-policy-2.md`](contract/quotient-policy-2.md), Protected stores): the
-jail masks it (see 5), and the server refuses a write view — the root under a
-write profile, the session directory, an `exposure` path — that contains it, so
-a write delegate neither sees nor replaces the forms it runs under.
+jail masks it (see 5), and the server refuses a call whose root contains the
+session home or the run directory, which live in it, so a delegate neither sees
+nor replaces the forms it runs under.
 
 ## 3. Pointing a policy at it
 
@@ -189,8 +190,15 @@ builder's own permissions go in one `defer`, which lands after every option of
 yours — including one you defer yourself — so nothing you add here can cover the
 root bind, the session bind or the state mask. `ro-bind`, `rw-bind` and `tmpfs`
 are the ordinary ones. `set-env` and `unsafe-add-raw-args` write words onto
-bwrap's line where they sit, and the check reads them there; `add-runtime` runs
-shell code at launch, which the check cannot read. 6 says what is unchecked.
+bwrap's line where they sit, and the check reads them there, as bash would;
+`add-runtime` runs shell code at launch, which the check cannot read. 6 says
+what is unchecked. `add-cleanup` is refused at evaluation: a cleanup hook makes
+jail.nix run bwrap under a trap instead of exec'ing it, and the form must exec
+it so the child dies with the server.
+
+```
+mkFormFamily: options cannot use add-cleanup: …
+```
 
 ### `env` (default `{ }`)
 
@@ -201,6 +209,24 @@ credentials. The builder sets `LANG` (`${LANG:-C.UTF-8}`) and `TERM` (`dumb`)
 ahead of your entries, which replaces the jail.nix base's forwarding of the two
 and is what lets a server started without a terminal launch at all. A name you
 set here replaces the builder's.
+
+Two names are not yours: `HOME`, which is forwarded from the server and is where
+the jail builds the home, and any `QUOTIENT_*` variable, which is the server's
+namespace. Either, in `env` or `secretEnv`, fails evaluation:
+
+```
+mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: <NAME>
+```
+
+A value may not contain `$`. The launcher writes it as a single-quoted literal,
+where a `$` is almost always a mistake, so the builder refuses it by name rather
+than leave the build to fail on the generated script:
+
+```
+mkFormFamily: env values and protect paths cannot contain $: env <NAME>
+```
+
+A value that needs expanding at launch belongs in `secretEnv`.
 
 ### `secretEnv` (default `{ }`)
 
@@ -248,15 +274,25 @@ quotient: protect path <path> is not a directory
 A path that does not exist on the host at launch is skipped — there is nothing
 to reveal — so the same family launches on hosts where the path is absent.
 `protect` has no effect inside the root: the mask is applied before the root is
-bound, and the later bind at the root shows the real directory again.
+bound, and the later bind at the root shows the real directory again. A path
+may not contain `$`, for the reason `env` values may not.
 
 ### `piFiles` (default `{ }`)
 
 `"<path under ~/.pi/agent>" = <file or directory>`; each is bound read-only in
-the jail, after the home, so neither a persisted home nor an option of yours can
-replace it. Keys are relative and may not climb out (`..`), or evaluation fails.
-This is how pi's `settings.json` and `models.json` reach the delegate without
-being writable by it.
+the jail, after the state mask and after every option of yours, a deferred one
+included, so neither a persisted home nor an option can cover it. Keys are
+relative and may not climb out (`..`), or evaluation fails. This is how pi's
+`settings.json` and `models.json` reach the delegate without being writable by
+it.
+
+A value is a Nix path (copied into the store), a derivation, or a string naming
+a path in the store (`"${drv}/share/models.json"`). A plain string naming a host
+path would be read from the host at every launch, so it is refused:
+
+```
+mkFormFamily: piFiles <key> must be a path or a derivation (or a string naming one in the store), …
+```
 
 ### `persistHome` (default `null`)
 
@@ -284,7 +320,7 @@ These hold for every family, and no argument removes them:
   first, and the builder's permissions come after them.
 - **This call's session directory is writable at its own path**, in both
   capabilities. Every other session is masked with the state directory it lives
-  in; a root that contains that directory is the exception 6 names.
+  in, and the server refuses a root that contains the session home (6).
 - **The working directory is the root**, so a form's `cwd` is always the
   directory the call was admitted for.
 - **The child dies with its parent** (`--die-with-parent`), so a killed server
@@ -300,19 +336,21 @@ These hold for every family, and no argument removes them:
 - **The state mask.** A private tmpfs over
   `${XDG_STATE_HOME:-$HOME/.local/state}/quotient` and over each `protect` path
   that exists at launch, applied before the root bind, so other sessions and run
-  evidence are unreadable whatever you bind in your options. It stops at the
-  root: a root that contains the state directory shows it, read-only under
-  `read`. Part 6 says what that costs and who refuses it.
-- **The mask, the root bind, the session bind and the working directory are the
-  last mounts the launcher makes.** They are emitted after your options and
-  `piFiles`, so no option of yours can cover them. Only arguments delivered at
-  runtime follow them, and those are yours to control (see 6).
+  evidence are unreadable whatever you bind in your options at their own path —
+  and the check refuses a bind of them at any other (6). It stops at the root,
+  which is why the server refuses a root that contains the session home or the
+  run directory (6).
+- **The mask, `piFiles`, the root bind, the session bind and the working
+  directory are the last mounts the launcher makes.** They are emitted after
+  every option of yours, a deferred one included, so no option can cover them.
+  Only arguments delivered at runtime follow them, and those are yours to
+  control (see 6).
 
 The catalog of the launcher's argument order is worth one read, because it is
 what makes the guarantees hold: jail.nix's base, then `LANG` and `TERM`, then a
-persisted home, then the network, then your packages, options, environment,
-exposure and `piFiles`, then the mask, then the root bind, the session bind and
-the working directory.
+persisted home, then the network, then your packages, options, environment and
+exposure, then the mask, then `piFiles`, then the root bind, the session bind
+and the working directory.
 
 ## 6. The caller's responsibilities
 
@@ -320,23 +358,33 @@ The builder is a guard against mistakes, not against you: you are the operator.
 What you add is yours to get right.
 
 - **What your options add at runtime is unchecked.** The check reads the
-  launcher, not what it expands at launch. Mounts delivered from a file
-  descriptor (`--args`) or appended to bwrap's runtime list by `add-runtime` code
-  are invisible to it, and so are a mount whose source or target holds a space
-  or a command substitution and an environment value that spans several words,
-  whether written by `set-env`, `unsafe-add-raw-args` or a plain bind. The runtime
-  arguments are expanded last, after the builder's root and session binds, so a
-  bind added there can cover them. Nothing stops you, and nothing checks you
-  either.
+  launcher's bwrap line as bash reads it — quotes, empty arguments and spaces in
+  a path included — but not what it expands at launch. Mounts delivered from a
+  file descriptor (`--args`) or appended to bwrap's runtime list by
+  `add-runtime` code are invisible to it, and so is the value of a source or
+  target computed at launch (a variable or a command substitution inside
+  quotes). The runtime arguments are expanded last, after the builder's root and
+  session binds, so a bind added there can cover them. Nothing stops you, and
+  nothing checks you either.
+- **The bwrap line must be plain words.** The check refuses a line bash would
+  read as more than one command of words: an unquoted `;`, `&`, `|`, `<`, `>`,
+  `(`, `)` or `#`, a backtick, or an ANSI-C quote (`$'…'`). jail.nix quotes
+  everything it writes, so this meets only raw arguments of your own; quote
+  them, and do not escape an operator with a backslash, which the check also
+  refuses.
 - **`/tmp` belongs to the jail.** The check refuses a mount at exactly `/tmp`,
   because a shared host `/tmp` would leak between runs. Binds below `/tmp` (an
   X11 socket, say) are allowed. A temporary directory that should survive a run,
   or be shared by the read and write delegates, is an `exposure` path bound
-  beside `/tmp` with `env.TMPDIR` pointing at it:
+  beside `/tmp` with `env.TMPDIR` pointing at it. These are `mkFormFamily`
+  arguments, merged with the rest of yours:
 
+  <!-- example: tmpdir -->
   ```nix
-  exposure = [ "/var/tmp/quotient-delegates" ];
-  env = { TMPDIR = "/var/tmp/quotient-delegates"; };
+  {
+    exposure = [ "/var/tmp/quotient-delegates" ];
+    env = { TMPDIR = "/var/tmp/quotient-delegates"; };
+  }
   ```
 
 - **A persisted home is a channel.** One `persistHome` serves both capabilities
@@ -344,15 +392,20 @@ What you add is yours to get right.
   run and is visible to the other capability. Under the default private home,
   that state is discarded instead. Mount points the jail needs are created in
   whatever lies beneath the home, so with a persisted home you will see an empty
-  `.local/state/quotient` appear there on the host.
-- **A read root must not contain the quotient state directory.** The server
-  refuses only a *write* view — a root under a write profile, this call's session
-  directory, an `exposure` path — that reaches a protected store
-  ([`quotient-policy-2.md`](contract/quotient-policy-2.md), Protected stores); a
-  read root is never compared. And the mask lands before the root bind, so it
-  does nothing inside the root. A read root at `$HOME` therefore shows the
-  delegate `~/.local/state/quotient` — every other session, the run evidence,
-  the forms — read-only. Keep roots clear of the state directory.
+  `.local/state/quotient` directory and an empty, read-only placeholder for each
+  `piFiles` entry (`.pi/agent/models.json`, say) appear there on the host.
+- **A root must not contain the session home or the run directory.** The server
+  refuses any root, read or write, that contains one
+  ([`quotient-policy-2.md`](contract/quotient-policy-2.md), Protected stores), and
+  both live in the state directory by default (`quotient/sessions`,
+  `quotient/runs`), so a read root at `$HOME` is refused with
+  `view-overlaps-protected`. What a read root may still contain is what a
+  delegate may read anyway — the policy, the profile and help directories, the
+  approvals store — and anything else in the state directory, such as the forms
+  you installed there. The mask lands before the root bind and does nothing
+  inside the root, so if you move the session home and run directory and root a
+  read profile above the state directory, the delegate reads what is left there,
+  read-only.
 - **`protect` follows the state directory only.** The mask covers
   `${XDG_STATE_HOME:-$HOME/.local/state}/quotient`, expanded at launch from the
   server's environment, so `XDG_STATE_HOME` is followed. A policy that moves the
@@ -363,7 +416,15 @@ What you add is yours to get right.
 - **Every read-write bind must be declared.** The check reads the baseline's
   binds and refuses one the family's `exposure` does not list. That includes
   `--dev-bind` and `--dev-bind-try`: a device bind is a read-write mount, and
-  belongs in `exposure` like any other.
+  belongs in `exposure` like any other. A writable overlay (`overlay-rw`) writes
+  to its upper and work directories on the host, so both belong in `exposure`.
+- **Protected state stays where the mask is.** The mask covers the state
+  directory and each `protect` path at their own paths. The check refuses a bind
+  or overlay whose source is one of them, lies inside one, or contains one — `/`
+  and `~` among them — at any other target, because the delegate would read
+  every session and the run evidence there. It compares the paths as written,
+  with `~`, `$HOME` and `$XDG_STATE_HOME` read as the home and the state home;
+  a literal absolute path into your home is beyond it, and yours to avoid.
 - **The jail is a host facility.** The forms need bubblewrap on the host and
   unprivileged user namespaces. Where those are missing a launch fails and the
   delegate never starts — and the text check still passes, because it launches
@@ -374,12 +435,15 @@ What you add is yours to get right.
 ## 7. Credentials
 
 The builder has no notion of a provider or a gateway. A gateway that needs a key
-is three things:
+is three `mkFormFamily` arguments:
 
+<!-- example: credentials -->
 ```nix
-env = { LLM_GATEWAY_URL = "https://gateway.internal/v1"; };
-secretEnv = { LLM_GATEWAY_KEY = "$(cat /run/secrets/gateway-key)"; };
-piFiles = { "models.json" = ./models.json; };
+{
+  env = { LLM_GATEWAY_URL = "https://gateway.internal/v1"; };
+  secretEnv = { LLM_GATEWAY_KEY = "$(cat /run/secrets/gateway-key)"; };
+  piFiles = { "models.json" = ./models.json; };
+}
 ```
 
 - the URL is an `env` literal, which may appear on bwrap's argument list;
@@ -432,9 +496,9 @@ What these do not prove:
   written is untested by it; only a launch shows that, and only on the host that
   launches.
 - **It cannot see runtime binds.** Binds delivered through `--args` or
-  `add-runtime` code, mounts with a space or a command substitution in them, and
-  an environment value that spans several words are printed as residues and
-  otherwise unchecked.
+  `add-runtime` code, a mount whose path is computed at launch, and protected
+  state bound again through a literal path into your home are printed as
+  residues and otherwise unchecked.
 - **One audit is one sample.** `hostile-audit` tests one protected store — the
   run's audit ledger — with one model, once. It is not a conformance test, and
   passing it does not establish the rest of the contract; the guarantees
