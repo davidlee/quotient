@@ -87,7 +87,7 @@ secret_open='^exec \{quotient_secret_fd\}<'
 mask_plain='^\[ -e (.+) \] && quotient_mask\+=\(--tmpfs (.+)\)$'
 mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf '\''quotient: protect path %s is not a directory\\n'\'' (.+) >&2; exit 1; \}; quotient_mask\+=\(--tmpfs (.+)\); \}$'
 
-# Reading a line as bash does (DEC-029). The characters that make a line more
+# Reading a line as bash does. The characters that make a line more
 # than words: the two expansions (`$`, `~`), then every character that can end a
 # word or start an operator — a command boundary, a redirection, a subshell, a
 # comment. Each has an inert control byte of its own, at the same position, so
@@ -204,12 +204,12 @@ shell_words() { # line
   done
   # The trailing `.` keeps a last empty word, which command substitution would
   # otherwise strip with its newline.
-  if ! words=$( (set -f +B && eval "set -- $one" && printf '%s\n' "$@" && printf .) 2>/dev/null); then
+  if ! words=$( (set -f && set +B && eval "set -- $one" && printf '%s\n' "$@" && printf .) 2>/dev/null); then
     echo 'quoting that does not close'
     return 1
   fi
   words=${words%.}
-  count=$( (set -f +B && eval "set -- $split" && printf '%s\n' "$#") 2>/dev/null) || count=-1
+  count=$( (set -f && set +B && eval "set -- $split" && printf '%s\n' "$#") 2>/dev/null) || count=-1
   if [ "$count" != "$(printf '%s' "$words" | grep -c '')" ]; then
     echo 'a shell operator outside quotes'
     return 1
@@ -379,7 +379,7 @@ mounts_to() { mounts "$1" | awk -v target="$2" '$NF == target'; }
 # bind is a read-write bind, so it is in the set: (f) and (g) are about the
 # permissions a caller ends up with, and the flag's name is no part of that. An
 # overlay is in it too, with its upper and work directories, which it writes on
-# the host (DEC-030).
+# the host.
 bind_words() { # argument-file
   local -a stream=()
   argv_stream "$1" stream
@@ -465,7 +465,7 @@ check_tail() { # label root line-file
   done
 }
 
-## Protected state bound again elsewhere ((j), DEC-031)
+## Protected state bound again elsewhere (j)
 
 # A path as (j) compares it: the home's spellings (`$HOME`, `${HOME}`) read as
 # `~`, the state home's (`$XDG_STATE_HOME`, `${XDG_STATE_HOME}`, the builder's
@@ -838,7 +838,7 @@ check_capability() {
     fail "$i" "the bwrap line expands the mask $mask_expansions times, want once"
   fi
 
-  # (j) No mount shows protected state at a path of its own (DEC-031): the mask
+  # (j) No mount shows protected state at a path of its own: the mask
   # covers the default state directory and each protect path where they are,
   # so a caller's bind of one, of a directory holding one, or of `/`, at any
   # other target shows every session and the run evidence there.
@@ -876,7 +876,7 @@ check_baseline() {
 
   # (g) Every host path the baseline writes is one the policy calls exposed: a
   # read-write bind's source, the device flags among them, and an overlay's
-  # upper and work directories (DEC-030). Both sides as written, store hashes
+  # upper and work directories. Both sides as written, store hashes
   # folded alike.
   local source
   printf '%s\n' "$EXPOSURE" | sed -E "$fold_store" >"$work/exposure"

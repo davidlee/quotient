@@ -1,0 +1,42 @@
+memory_uid = "mem_01a17522c02a79a1be9be84b213d97c1"
+memory_key = "mem.fact.quotient.no-doctrine-ids-in-shipped-text"
+schema_version = 1
+memory_type = "fact"
+status = "active"
+title = "Shipped text must cite no doctrine ids"
+summary = "docs/, examples/, help/, README.md, flake.nix and nix/ may not contain DEC-/SL-/RV- etc ids; src/drift.test.ts fails the test recipe (and gate)"
+created = "2026-10-25"
+updated = "2026-10-25"
+
+[scope]
+paths = ["nix", "docs", "help", "flake.nix", "README.md"]
+globs = []
+commands = []
+tags = ["drift", "gate"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "cda92b896c51e579473017ab4139f91533cb2abb"
+ref_name = "refs/heads/main"
+checkout_state_id = "dcabbc8f8818424ae925637a79ade721fd7baf5925c9d9b62a9fa27a7c04869e"
+base_commit = "7cea541c29f1386d66462703f6e19b320b398d2c"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "medium"
+weight = 0
+
