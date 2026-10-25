@@ -410,5 +410,31 @@ response = """
 Operator chose option A (2026-10-26): fix inside SL-003 as an appended PHASE-06, design changes recorded as DECs for operator assent. Each reproduction becomes a permanent check-fixtures case (or an evaluation-refusal case) with its expected verdict. Verify after PHASE-06 lands and the gate is green.
 """
 
+[[finding]]
+id = "F-16"
+status = "answered"
+severity = "minor"
+title = "PHASE-02/03 VT-1 mandates should find their keywords; observed: verify-vt FAIL"
+detail = """
+Expected: `doctrine slice verify-vt 3` passes every VT mandate.
+Observed (2026-10-26): PHASE-02 VT-1 — keyword `/proc/1/environ` absent from `scripts/form-probe`; PHASE-03 VT-1 — keyword `/proc/1/cmdline` absent from `scripts/form-probe`. The probe pi that reads /proc/1 lives in nix/checks/flake.nix (grep: nix/checks/flake.nix, nix/form-family.nix); scripts/form-probe only reports its rows (`canary-proc1`, `secret-cmdline`). The behaviour is verified by the gate (form-probe rows PASS); the mandates point at the wrong file. Pre-existing, not from PHASE-06.
+"""
+disposition = "design-wrong"
+response = """
+Plan criteria are immutable-append and off reconcile's surface, so the mandate cannot be edited in place. The behaviour holds (form-probe canary-proc1 / secret-cmdline rows PASS in every gate run this session). Reconciliation brief: record in notes that PHASE-02/03 VT-1's test_file should have been nix/checks/flake.nix; verify-vt FAILs for those two rows are known mis-targeted mandates, with the gate's probe rows as their evidence.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Plan criteria are immutable-append and off reconcile's surface, so the mandate cannot be edited in place. The behaviour holds (form-probe canary-proc1 / secret-cmdline rows PASS in every gate run this session). Reconciliation brief: record in notes that PHASE-02/03 VT-1's test_file should have been nix/checks/flake.nix; verify-vt FAILs for those two rows are known mis-targeted mandates, with the gate's probe rows as their evidence.
+"""
+
 # Findings are append-only `[[finding]]` tables, added by `review raise`.
 # Empty here at creation — a fresh review is Active, awaiting the raiser.
