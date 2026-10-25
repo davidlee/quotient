@@ -74,12 +74,12 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 # can see. Names are ids: the first word of every PASS/FAIL line.
 pi_rows=(
   G1 G1-cwd G2 G3 G4 env-literal pkg-path
-  G5-exposure G5-piFiles G5-piFiles-ro G5-world-ro G5-world-ro-parent exposure-root
+  G5-exposure G5-piFiles G5-piFiles-ro pi-files-defer G5-world-ro G5-world-ro-parent exposure-root
   protect-missing
   G6-sessions-other G6-runs G6-protect G6-protect-space
   secret-env secret-cmdline canary-proc1 canary-pi
 )
-host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 persistHome G9 protect-file secret-literal G7)
+host_rows=(G8-missing G8-relative G8-file F5-setenv-LANG F5-setenv-TERM F5-home G4 persistHome G9 protect-file eval-refusals G7)
 
 failed=0
 reported=()
@@ -98,7 +98,7 @@ layout() {
   mkdir "$P" || fatal "$P could not be created fresh"
   # $home is deliberately absent: persistHome's own mkdir -p must create it.
   mkdir -p "$root/out" "$exposure" "$state/sessions/this" "$state/sessions/other" \
-    "$state/runs/r" "$world/protect" "$world/ro" "$protect_space"
+    "$state/runs/r" "$world/protect" "$world/ro" "$protect_space" "$world/pi-cover"
   printf 'quotient-form-probe\n' >"$root/hello.txt"
   printf 'a file where a protected directory was meant\n' >"$protect_file"
   printf 'another session\n' >"$state/sessions/other/marker"
@@ -106,6 +106,9 @@ layout() {
   printf 'protected\n' >"$world/protect/marker"
   printf 'protected with a space\n' >"$protect_space/marker"
   printf 'read-only\n' >"$world/ro/marker"
+  # What a caller's deferred bind over ~/.pi/agent would show, were it to land
+  # over the piFiles file.
+  printf 'covered\n' >"$world/pi-cover/settings.json"
 }
 
 cleanup() {
@@ -293,21 +296,31 @@ refuses_launch() { # row description expected-message command...
   fi
 }
 
-# A secretEnv value with no `$` must fail at evaluation, naming the variable:
-# the builder's gate is character presence, so what it admits is the caller's
-# shell expression and never the text that spells one. The family lives outside
-# the flake's packages so `nix flake check` never meets the refusal, and only an
-# eval forces it.
-literal_secret() {
-  local status=0 out
-  out=$(cd "$repo" && nix eval "./nix/checks#legacyPackages.$system.literal-secret" \
-    --override-input quotient "path:$repo" 2>&1) || status=$?
-  if [ "$status" -ne 0 ] &&
-    grep -qF -- "mkFormFamily: secretEnv FORM_PROBE_SECRET must be" <<<"$out"; then
-    pass secret-literal "a literal secretEnv value fails evaluation naming the variable"
-  else
-    fail secret-literal "a literal secretEnv value — exit $status, output: $(tr '\n' ' ' <<<"$out")"
-  fi
+# The arguments the builder must refuse at evaluation (the test flake's
+# evalRefusals): each must fail there, printing the message the table names. The
+# families live outside the flake's packages so `nix flake check` never meets a
+# refusal (its eval-refusals check sees only that each fails), and only an eval
+# forces one. The table is read from the flake, so a refusal added there is
+# asserted here without another edit.
+eval_refusals() {
+  local table name message status out
+  # shellcheck disable=SC2016  # a Nix expression: its `${n}` is Nix's
+  table=$(cd "$repo" && nix eval --raw "./nix/checks#legacyPackages.$system.eval-refusal-messages" \
+    --override-input quotient "path:$repo" \
+    --apply 'm: builtins.concatStringsSep "\n" (map (n: n + "\t" + m.${n}) (builtins.attrNames m))') ||
+    fatal "nix eval of the evaluation-refusal table failed"
+  [ -n "$table" ] || { fail eval-refusals "the evaluation-refusal table is empty"; return; }
+  pass eval-refusals "the evaluation-refusal table names $(grep -c '' <<<"$table") refusals"
+  while IFS=$'\t' read -r name message; do
+    status=0
+    out=$(cd "$repo" && nix eval "./nix/checks#legacyPackages.$system.$name" \
+      --override-input quotient "path:$repo" 2>&1) || status=$?
+    if [ "$status" -ne 0 ] && grep -qF -- "$message" <<<"$out"; then
+      pass "refuse-$name" "evaluation refuses it: $message"
+    else
+      fail "refuse-$name" "want an evaluation refusal naming '$message' — exit $status, output: $(tr '\n' ' ' <<<"$out")"
+    fi
+  done <<<"$table"
 }
 
 # ── The probe ──────────────────────────────────────────────────────────────
@@ -359,7 +372,7 @@ refuses_launch G9 "an empty secretEnv value exits non-zero and the probe pi neve
 refuses_launch protect-file "a protect path that is a file exits non-zero naming $protect_file" \
   "quotient: protect path $protect_file is not a directory" \
   "$form_protect_file" "$session" assert
-literal_secret
+eval_refusals
 
 # G4, host side: the jail's /tmp is its own, so the marker is not here.
 if [ -e "$marker" ]; then

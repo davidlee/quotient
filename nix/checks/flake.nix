@@ -142,6 +142,10 @@
             "G5-piFiles $capability: the piFiles file is bound at ~/.pi/agent"
           expect "$(attempt write "$HOME/.pi/agent/settings.json")" refused \
             "G5-piFiles-ro $capability: the piFiles file is read-only"
+          # The probe family's options add a deferred bind of a directory holding
+          # a `covered` settings.json over ~/.pi/agent; the builder's bind follows.
+          expect "$(cat "$HOME/.pi/agent/settings.json" 2>/dev/null)" probe-settings \
+            "pi-files-defer $capability: a caller's deferred bind over ~/.pi/agent covers no piFiles file"
           expect "$(attempt write "$ro/probe-marker")" refused \
             "G5-world-ro $capability: a non-exposed host dir bound ro is not writable"
           # The parent must be visible, or the refusal above would be true of a
@@ -206,7 +210,12 @@
           inherit pkgs jail-nix;
           pi = probePi pkgs capability;
           packages = [ pkgs.gnugrep ];
-          options = c: [ (c.ro-bind "${probeRoot}/world" "${probeRoot}/world") ];
+          # The caller's deferred bind over ~/.pi/agent is the case the piFiles
+          # placement exists for: it must cover none of them.
+          options = c: [
+            (c.ro-bind "${probeRoot}/world" "${probeRoot}/world")
+            (c.defer (c.ro-bind "${probeRoot}/world/pi-cover" (c.noescape "~/.pi/agent")))
+          ];
           env = { FORM_PROBE_LITERAL = "probe-literal"; };
           secretEnv = { FORM_PROBE_SECRET = "$(printf %s probe-secret)"; };
           exposure = [
@@ -224,6 +233,57 @@
           persistHome = "${probeRoot}/home";
           network = false;
         };
+
+      # The arguments the builder refuses at evaluation, each with the text its
+      # refusal must name: a configuration mistake reported at the call, never at
+      # launch. Each is a `legacyPackages` attribute (below); `eval-refusals`
+      # asserts every one fails to evaluate, and scripts/form-probe reads the
+      # messages from `eval-refusal-messages` and asserts each is the one printed.
+      evalRefusals = {
+        # A literal secret would be written into the world-readable store.
+        literal-secret = {
+          args.secretEnv.CHECK_SECRET = "check-secret";
+          message = "mkFormFamily: secretEnv CHECK_SECRET must be a shell expression containing $";
+        };
+        # A piFiles source must reach the store; a host path string never does.
+        pifiles-string = {
+          args.piFiles."settings.json" = "/etc/hostname";
+          message = "mkFormFamily: piFiles settings.json must be a path or a derivation";
+        };
+        # QUOTIENT_ is the server's namespace and HOME is forwarded from it.
+        env-quotient = {
+          args.env.QUOTIENT_DEBUG = "1";
+          message = "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: QUOTIENT_DEBUG";
+        };
+        secret-quotient = {
+          args.secretEnv.QUOTIENT_DEBUG = "$CHECK_DEBUG";
+          message = "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: QUOTIENT_DEBUG";
+        };
+        env-home = {
+          args.env.HOME = "/srv/home";
+          message = "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: HOME";
+        };
+        secret-home = {
+          args.secretEnv.HOME = "$CHECK_HOME";
+          message = "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: HOME";
+        };
+        # A cleanup hook makes jail.nix run bwrap under a trap instead of exec.
+        add-cleanup = {
+          args.options = c: [ (c.add-cleanup "true") ];
+          message = "mkFormFamily: options cannot use add-cleanup";
+        };
+        # The launcher writes these as single-quoted literals, where a `$` fails
+        # the build at shellcheck; refused at the call instead, by name.
+        env-dollar = {
+          args.env.NOTE = "a$b";
+          message = "mkFormFamily: env values and protect paths cannot contain $: env NOTE";
+        };
+        protect-dollar = {
+          args.protect = [ "/srv/$x" ];
+          message = "mkFormFamily: env values and protect paths cannot contain $: protect \"/srv/$x\"";
+        };
+      };
+      refusedFamily = pkgs: refusal: quotient.lib.mkFormFamily (sampleBase pkgs // refusal.args);
 
       # The paths the sample families name at build time. The check reads them
       # as text and launches nothing, so nothing here needs to exist.
@@ -276,13 +336,14 @@
           );
           # Ordinary arguments whose text a quote-stripping read gets wrong: an
           # empty env value, a value that spells a flag, a path holding an
-          # apostrophe. The first hides the QUOTIENT_ name after it.
+          # apostrophe. The first would hide the name after it, which its
+          # fixture doctors into a QUOTIENT_ one (the builder refuses that name).
           emptyenv = family (
             sampleBase pkgs
             // {
               env = {
                 S_EMPTY = "";
-                QUOTIENT_DEBUG = "1";
+                T_AFTER = "1";
               };
             }
           );
@@ -326,6 +387,15 @@
             }
           );
           aliasroot = family (sampleBase pkgs // { options = c: [ (c.ro-bind "/" "/host") ]; });
+          # A caller's deferred bind over ~/.pi/agent: the builder's piFiles binds
+          # follow it, in the tail, so it covers none of them.
+          deferpi = family (
+            full
+            // {
+              options =
+                c: (callerOptions c) ++ [ (c.defer (c.ro-bind samplePaths.world (c.noescape "~/.pi/agent"))) ];
+            }
+          );
         };
     in
     {
@@ -370,20 +440,15 @@
       # The families the builder must refuse to evaluate. They are not packages:
       # `nix flake check` evaluates every package and would meet the refusal
       # first, and `legacyPackages` is the one output it does not read. Only
-      # forcing the attribute, as scripts/form-probe does, reaches the refusal.
+      # forcing an attribute, as scripts/form-probe does, reaches the refusal.
       legacyPackages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
-        {
-          # A literal secretEnv value: a configuration mistake the builder
-          # refuses at evaluation, naming the variable.
-          literal-secret = (quotient.lib.mkFormFamily (
-            (probeArgs pkgs "write") // {
-              secretEnv = { FORM_PROBE_SECRET = "probe-secret"; };
-            }
-          )).write;
+        nixpkgs.lib.mapAttrs (_: refusal: (refusedFamily pkgs refusal).read) evalRefusals
+        // {
+          eval-refusal-messages = nixpkgs.lib.mapAttrs (_: refusal: refusal.message) evalRefusals;
         }
       );
 
@@ -542,10 +607,16 @@
             }
           );
 
-          # (e) the server's own namespace reaches the jail through the caller's
-          # environment.
+          # (e) the server's own namespace reaches the jail through bwrap's
+          # environment. The builder refuses a QUOTIENT_ name in `env`, so the
+          # launcher text is doctored to carry one.
           neg-quotient-env = refuse "quotient-env" "(e)" (
-            control { env = callerEnv // { QUOTIENT_DEBUG = "1"; }; }
+            doctor {
+              family = families.full;
+              launcher = f: ''
+                replace "${f}" '--setenv CHECK_LITERAL literal' '--setenv QUOTIENT_DEBUG 1 --setenv CHECK_LITERAL literal'
+              '';
+            }
           );
 
           # (f) a form drops a bind its baseline has.
@@ -581,6 +652,22 @@
           );
 
           check-fixtures = import ./fixtures.nix { inherit pkgs families; };
+
+          # Every evalRefusals entry fails to evaluate. tryEval sees that it
+          # failed, not why: the message is scripts/form-probe's to assert.
+          eval-refusals =
+            let
+              evaluated = nixpkgs.lib.filterAttrs (
+                _: refusal: (builtins.tryEval (refusedFamily pkgs refusal).read.drvPath).success
+              ) evalRefusals;
+              names = nixpkgs.lib.concatStringsSep " " (nixpkgs.lib.attrNames evaluated);
+            in
+            pkgs.runCommand "eval-refusals" { } (
+              if evaluated == { } then
+                "echo ${toString (builtins.length (builtins.attrNames evalRefusals))} refusals > $out"
+              else
+                "echo 'the builder evaluated what it must refuse: ${names}' >&2; exit 1"
+            );
         }
       );
     };

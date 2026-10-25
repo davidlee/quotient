@@ -426,6 +426,7 @@ fixture duplicate-protect duplicate pass
 # An empty env value is an argument of its own: read away, the scan takes the
 # next `--setenv` as its value and never sees the QUOTIENT_ name after it.
 fixture empty-env-quotient emptyenv 'refuse:(e)'
+edit launcher-read '--setenv T_AFTER 1' '--setenv QUOTIENT_DEBUG 1'
 
 # The same erasure in a caller's raw arguments hides a bind from (g).
 fixture raw-empty-bind rawempty 'refuse:(g)'
@@ -444,5 +445,23 @@ fixture overlay-unexposed overlay 'refuse:(g)'
 fixture alias-state-dir aliasstate 'refuse:(j)'
 fixture alias-protect aliasprotect 'refuse:(j)'
 fixture alias-host-root aliasroot 'refuse:(j)'
+
+## piFiles in the tail
+
+# The builder's piFiles binds follow every caller option, a deferred one
+# included, so a caller's bind over ~/.pi/agent covers none of them.
+fixture pifiles-defer deferpi pass
+
+# Between the mask and the root bind only the builder's piFiles binds may stand:
+# a store path, read-only, under ~/.pi/agent.
+fixture tail-other-mount default 'refuse:(c)'
+edit launcher-read '"${quotient_mask[@]}"' '"${quotient_mask[@]}" --ro-bind /etc /etc'
+
+fixture tail-pifiles-host-source default 'refuse:(c)'
+edit launcher-read '"${quotient_mask[@]}"' '"${quotient_mask[@]}" --ro-bind /etc/hostname ~/.pi/agent/settings.json'
+
+## (e) a QUOTIENT_ name on the secret descriptor
+
+fixture secret-name-quotient full 'refuse:(e)' names=QUOTIENT_DEBUG
 
 table_complete

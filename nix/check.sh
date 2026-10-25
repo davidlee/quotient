@@ -427,10 +427,11 @@ index_of() {
 
 ## The tail's order (the order half of (c), shared with (i))
 
-# The mask token opens the tail; after it the only mounts are this capability's
-# root bind and the session bind, in that order, then --chdir $quotient_root.
-# Nothing may follow the session bind but the finaliser, so a caller's bind
-# cannot slip behind it.
+# The mask token opens the tail; after it come the builder's piFiles binds — a
+# read-only bind of a store path under ~/.pi/agent, none or more — then this
+# capability's root bind and the session bind, in that order, then --chdir
+# $quotient_root. Nothing may follow the session bind but the finaliser, so a
+# caller's bind cannot slip behind it, nor between the mask and the root.
 check_tail() { # label root line-file
   local label=$1 root=$2
   local -a stream=()
@@ -440,21 +441,27 @@ check_tail() { # label root line-file
     'opt --bind' "operand $session_var" "operand $session_var"
     'opt --chdir' 'operand $quotient_root'
   )
-  local mask i flag
+  local mask start i flag
   if ! mask=$(index_of stream "opt $mask_token"); then
     fail "$label" "the tail does not open with $mask_token"
     return
   fi
+  start=$((mask + 1))
+  while [ "${stream[start]-}" = 'opt --ro-bind' ] &&
+    [[ ${stream[start + 1]-} == 'operand /nix/store/'* ]] &&
+    [[ ${stream[start + 2]-} == 'operand ~/.pi/agent/'* ]]; do
+    start=$((start + 3))
+  done
   for i in "${!expected[@]}"; do
-    if [ "${stream[mask + 1 + i]-}" != "${expected[i]}" ]; then
-      fail "$label" "tail word $((mask + 2 + i)) is '${stream[mask + 1 + i]-}', expected '${expected[i]}'"
+    if [ "${stream[start + i]-}" != "${expected[i]}" ]; then
+      fail "$label" "tail word $((start + 1 + i)) is '${stream[start + i]-}', expected '${expected[i]}'"
     fi
   done
   for i in "${!stream[@]}"; do
     # The positions compared above are the tail's own, root and session bind
     # included; a mount flag from there on is a caller's, and whatever it mounts
     # it does so behind the session bind.
-    if [ "$i" -le "$((mask + ${#expected[@]}))" ] || [ "${stream[i]%% *}" != opt ]; then
+    if [ "$i" -lt "$((start + ${#expected[@]}))" ] || [ "${stream[i]%% *}" != opt ]; then
       continue
     fi
     for flag in "${mount_ops[@]}"; do
@@ -699,6 +706,13 @@ check_capability() {
   for guard in QUOTIENT_SESSION_HOME QUOTIENT_RUN_DIR QUOTIENT_POLICY; do
     must_not "$e" "$argv" "$guard"
   done
+  # The secret descriptor sets the names the family declares, out of bwrap's
+  # sight: a QUOTIENT_ name among them reaches pi all the same.
+  while IFS= read -r set_name; do
+    case $set_name in
+      QUOTIENT_*) fail "$e" "the secret descriptor sets the QUOTIENT_ variable '$set_name'" ;;
+    esac
+  done <<<"$SECRET_ENV_NAMES"
 
   # (f) The bind set is the baseline's plus exactly this capability's root bind
   # and the session bind: nothing dropped, nothing else added, so no caller

@@ -69,6 +69,41 @@ let
   badPiFiles = lib.filter (key: !(piFileKeyOk key)) (lib.attrNames piFiles);
   badHostPaths = lib.filter (entry: !(lib.hasPrefix "/" entry.path)) hostPaths;
 
+  # A `piFiles` source must be in the store, so the jail binds immutable bytes:
+  # a path (imported when interpolated), a derivation, or a string that names a
+  # store path and carries its context (`"${drv}/share/models.json"`). A plain
+  # host path string would be bound from the host as it is at launch.
+  piFileSourceOk =
+    source:
+    builtins.isPath source
+    || lib.isDerivation source
+    || (builtins.isString source && builtins.hasContext source && lib.hasPrefix builtins.storeDir source);
+  badPiFileSources = lib.filter (key: !(piFileSourceOk piFiles.${key})) (lib.attrNames piFiles);
+
+  # HOME is forwarded from the server, and the mounts that make the home are
+  # made at that path; QUOTIENT_ is the server's own namespace. Neither is the
+  # caller's to set.
+  reservedName = name: name == "HOME" || lib.hasPrefix "QUOTIENT_" name;
+  reservedNames = lib.filter reservedName (lib.unique (lib.attrNames env ++ lib.attrNames secretEnv));
+
+  # The launcher writes an env value and a protect path as single-quoted
+  # literals, and writeShellApplication's shellcheck fails the build on a `$`
+  # in one; refuse it here instead, by name.
+  dollarValues =
+    map (name: "env ${name}") (lib.filter (name: lib.hasInfix "$" (toString env.${name})) (lib.attrNames env))
+    ++ map (path: "protect \"${path}\"") (lib.filter (lib.hasInfix "$") protectPaths);
+
+  # The combinator set a caller's `options` receive. A cleanup hook makes
+  # jail.nix run bwrap under a trap rather than exec it, so the form would no
+  # longer stand where its parent's signal reaches the jail.
+  callerCombinators =
+    c:
+    c
+    // {
+      add-cleanup =
+        _: throw "mkFormFamily: options cannot use add-cleanup: the form must exec bwrap directly, and a cleanup hook runs it under a trap instead";
+    };
+
   # jail.nix's `set-env` shell-quotes its value, which would make a runtime
   # expression a literal. This is the marker its `escape` leaves alone, so the
   # launcher's shell expands the value when it builds bwrap's argv.
@@ -152,6 +187,7 @@ let
           '')
           (c.unsafe-add-raw-args "\"\${quotient_mask[@]}\"")
         ]
+        ++ lib.mapAttrsToList (piFilePermission c) piFiles
         ++ lib.optionals isForm [
           (c.unsafe-add-raw-args "${rootFlag} \"$quotient_root\" \"$quotient_root\"")
           (c.unsafe-add-raw-args ''--bind "$QUOTIENT_ACTIVE_SESSION_DIR" "$QUOTIENT_ACTIVE_SESSION_DIR"'')
@@ -172,13 +208,12 @@ let
       (c.unsafe-add-raw-args "--bind ${lib.escapeShellArg persistHome} ~")
     ];
 
-  # `piFiles` binds store paths read-only under `~/.pi/agent` (row 4), after the
-  # home, caller binds and exposure, so neither a persisted home nor a caller
-  # option can replace them.
+  # `piFiles` binds store paths read-only under `~/.pi/agent`, in the tail right
+  # after the mask, so no caller option — a deferred one included — and no
+  # persisted home can replace them. Interpolating the source imports a path.
   piFilePermission =
     c: subPath: source:
-    c.unsafe-add-raw-args
-      "--ro-bind ${lib.escapeShellArg (toString source)} ~/.pi/agent/${lib.escapeShellArg subPath}";
+    c.unsafe-add-raw-args "--ro-bind ${lib.escapeShellArg "${source}"} ~/.pi/agent/${lib.escapeShellArg subPath}";
 
   # The caller's own permissions at their sec-2 positions (row 3): packages,
   # options and env, then the builder's exposure binds. Every path a caller
@@ -186,10 +221,9 @@ let
   callerPermissions =
     c:
     [ (c.add-pkg-deps packages) ]
-    ++ (options c)
+    ++ (options (callerCombinators c))
     ++ lib.mapAttrsToList (name: value: c.set-env name value) env
-    ++ map (path: c.rw-bind path path) exposure
-    ++ lib.mapAttrsToList (piFilePermission c) piFiles;
+    ++ map (path: c.rw-bind path path) exposure;
 
   # Base forwards LANG and TERM with `fwd-env`, which exits under `set -u` when
   # the server lacks them; these entries replace base's (one `--setenv` per
@@ -240,6 +274,12 @@ assert lib.assertMsg (literalSecrets == [ ])
   "mkFormFamily: secretEnv ${lib.concatStringsSep ", " literalSecrets} must be a shell expression containing $, not a literal";
 assert lib.assertMsg (badPiFiles == [ ])
   "mkFormFamily: piFiles keys must be non-empty relative paths without a \"..\" segment: ${lib.concatStringsSep ", " badPiFiles}";
+assert lib.assertMsg (badPiFileSources == [ ])
+  "mkFormFamily: piFiles ${lib.concatStringsSep ", " badPiFileSources} must be a path or a derivation (or a string naming one in the store), so the jail binds it from the store";
+assert lib.assertMsg (reservedNames == [ ])
+  "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: ${lib.concatStringsSep ", " reservedNames}";
+assert lib.assertMsg (dollarValues == [ ])
+  "mkFormFamily: env values and protect paths cannot contain $: ${lib.concatStringsSep ", " dollarValues}";
 assert lib.assertMsg (badHostPaths == [ ])
   "mkFormFamily: persistHome, exposure and protect paths must be absolute: ${lib.concatStringsSep ", " (map describePath badHostPaths)}";
 {
