@@ -12,83 +12,28 @@
 // never `readline` (it also splits on Unicode separators). The reader is
 // incremental and ends at stdin EOF — no timer, no poll, no child.
 import { StringDecoder } from 'node:string_decoder';
-import { lstatSync, statSync, writeFileSync } from 'node:fs';
+import { lstatSync, statSync } from 'node:fs';
 import { addAbortSignal, type Readable, type Writable } from 'node:stream';
-import { reduce, type Reduced } from '../reduce/reduce.ts';
 import { legacyLayers, resolveLocations, usable, type Locations } from '../config.ts';
-import { loadHelp, renderContext, sectionText, type HelpSnapshot, type Section } from '../help/help.ts';
+import { loadHelp, renderContext, sectionText, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
-import { createLatch, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
-import { admitCall, clampCeilings, formExtensions, selectSlot, transcriptBudget, writablePaths } from './policy.ts';
-import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot, type Snapshot } from './profiles.ts';
+import { admit, type AdmissionContext, type Startup, type StartupFailure } from './admission.ts';
+import { toolResult, type ToolResult } from './documents.ts';
+import { appendAttempt, runLayout, type CallId } from './evidence.ts';
+import { executeRun } from './execute.ts';
 import { absent } from './paths.ts';
-import { chooseForm, lookupProjectForm } from './forms.ts';
-import { acquireSession, readHostIdentity, type HostIdentity } from './session.ts';
-import { checkChildView } from './childview.ts';
-import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe, type CallId, type RunLayout } from './evidence.ts';
-import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
-import { createGate, DEFAULT_IDLE_MS } from './gate.ts';
+import { loadProfiles } from './profiles.ts';
+import { refusedResult } from './result.ts';
+import { readHostIdentity, type HostIdentity } from './session.ts';
+import { DEFAULT_GRACE_MS } from './spawn.ts';
+import { DEFAULT_IDLE_MS } from './gate.ts';
+import { PI_AGENT_TOOL, readAgentRequest, type AgentRequest } from './tools.ts';
 
 export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
 export const PROTOCOL_VERSION = '2025-06-18';
 
-/** The one tool this server exposes, with its declared input schema. Its
- *  description is the `tool` help section, read at start-up. */
-export const PI_AGENT_TOOL = {
-  name: 'pi_agent',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      prompt: { type: 'string', description: 'The prompt the agent receives on stdin.' },
-      profile: {
-        type: 'string',
-        description: "The profile to run under; it must be listed in the operator policy.",
-      },
-      cwd: {
-        type: 'string',
-        description: "The run's root. An absent value resolves to the server's launch directory; either way the policy must allow it.",
-      },
-      session: { type: 'string', description: 'An existing session id to continue. Absent mints one.' },
-      tools: {
-        type: 'array',
-        items: { type: 'string' },
-        description: "May only narrow the profile's tool set, never widen it.",
-      },
-      ceilings: {
-        type: 'object',
-        properties: {
-          requests: { type: 'number' },
-          context_tokens: { type: 'number' },
-          cost_usd: { type: 'number' },
-          wall_clock_s: { type: 'number' },
-        },
-        description: 'Per-call requests, peak context_tokens, cost and wall-clock ceilings. May only lower the policy maxima.',
-        additionalProperties: false,
-      },
-      transcript_budget_bytes: {
-        type: 'integer',
-        description: 'Soft byte ceiling for the returned transcript.',
-      },
-    },
-    required: ['prompt', 'profile'],
-    additionalProperties: false,
-  },
-} as const;
-
-/** The call's arguments, once their shape has been checked. */
-export type AgentRequest = {
-  prompt: string;
-  profile: string;
-  cwd?: string;
-  session?: string;
-  tools?: string[];
-  ceilings?: { requests?: number; context_tokens?: number; cost_usd?: number; wall_clock_s?: number };
-  transcript_budget_bytes?: number;
-};
-
 type WireId = string | number | null;
-type ToolResult = { content: { type: 'text'; text: string }[]; isError: boolean };
 
 /** One `tools/call` in flight: its own abort trigger, and the promise the reader
  *  waits on at stdin EOF so no child outlives the server. */
@@ -105,6 +50,9 @@ type Context = {
   /** Where the policy, evidence and sessions are: resolved once, from the
    *  environment, which is fixed for the process lifetime. */
   locations: Locations;
+  /** The pid table the server reads: `/proc` in production, a fixture in a
+   *  test. Session liveness and ownership are read from it. */
+  procDir: string;
   /** This server's host identity, read once at start-up: where its pid means
    *  something (design sec-3 Start step 4). */
   here: HostIdentity;
@@ -126,83 +74,8 @@ type Context = {
 /** A request id as a map key: `1` and `"1"` name different calls. */
 const callKey = (id: WireId): string => `${typeof id}:${String(id)}`;
 
-const CEILING_FIELDS = ['requests', 'context_tokens', 'cost_usd', 'wall_clock_s'];
-const ARGUMENT_FIELDS = [
-  'prompt',
-  'profile',
-  'cwd',
-  'session',
-  'tools',
-  'ceilings',
-  'transcript_budget_bytes',
-];
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/**
- * Check the request's own shape. Returns the field to name in a
- * `request-invalid` detail. The token is DEC-103's; DEC-103 names no position for
- * it, and this build puts the request's own shape first — a caller with a broken
- * request is told about its request rather than about a policy it cannot see.
- * The order is: a start-up snapshot that did not load (`profile-invalid`, every
- * call) -> request shape (`request-invalid`) -> step 1 policy -> step 2
- * enabled -> step 3 profile -> step 4 root -> step 5 capability/form -> step 6
- * ceilings -> `tools` narrowing -> step 7 session -> step 8 child view -> the
- * seam.
- */
-function readAgentRequest(value: Record<string, unknown>): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
-  for (const field of Object.keys(value)) {
-    if (!ARGUMENT_FIELDS.includes(field)) {return { ok: false, detail: `unknown field: ${field}` };}
-  }
-  if (value.prompt === undefined) {return { ok: false, detail: 'prompt is required' };}
-  if (typeof value.prompt !== 'string') {return { ok: false, detail: 'prompt must be a string' };}
-  if (value.profile === undefined) {return { ok: false, detail: 'profile is required' };}
-  if (typeof value.profile !== 'string') {return { ok: false, detail: 'profile must be a string' };}
-
-  const request: AgentRequest = { prompt: value.prompt, profile: value.profile };
-
-  for (const field of ['cwd', 'session'] as const) {
-    const holder = value[field];
-    if (holder === undefined) {continue;}
-    if (typeof holder !== 'string') {return { ok: false, detail: `${field} must be a string` };}
-    request[field] = holder;
-  }
-
-  if (value.tools !== undefined) {
-    const tools = value.tools;
-    if (!Array.isArray(tools) || !tools.every((tool) => typeof tool === 'string')) {
-      return { ok: false, detail: 'tools must be an array of strings' };
-    }
-    request.tools = tools;
-  }
-
-  if (value.ceilings !== undefined) {
-    const ceilings = value.ceilings;
-    if (!isRecord(ceilings)) {return { ok: false, detail: 'ceilings must be an object' };}
-    for (const field of Object.keys(ceilings)) {
-      if (field === 'tokens') {
-        return { ok: false, detail: 'ceilings.tokens is no longer supported; use ceilings.context_tokens' };
-      }
-      if (!CEILING_FIELDS.includes(field)) {return { ok: false, detail: `unknown field: ceilings.${field}` };}
-      const limit = ceilings[field];
-      if (typeof limit !== 'number' || !Number.isFinite(limit)) {
-        return { ok: false, detail: `ceilings.${field} must be a finite number` };
-      }
-    }
-    request.ceilings = ceilings;
-  }
-
-  if (value.transcript_budget_bytes !== undefined) {
-    const budget = value.transcript_budget_bytes;
-    if (typeof budget !== 'number' || !Number.isInteger(budget)) {
-      return { ok: false, detail: 'transcript_budget_bytes must be an integer' };
-    }
-    request.transcript_budget_bytes = budget;
-  }
-
-  return { ok: true, request };
-}
 
 /** Unwrap a `tools/call` params object down to the tool's own arguments. */
 function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
@@ -214,35 +87,19 @@ function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { 
   return readAgentRequest(params.arguments);
 }
 
-// ── The run: evidence, the ladder's outcome and the run's result ───────────
+// ── The call: the request, admission, the run ───────────────────────────────
 //
-// The run replaces the seam PHASE-02..05 left here. Everything before it decided
-// that this call MAY run; from here the launcher is spawned, the ladder owns the
-// ending, and the evidence directory is the only place the outcome is recorded.
-// Only a call that passed step 8 reaches this point, so the run directory is
-// allocated after validation, not before (EX-6).
+// Admission decides that this call MAY run and hands back the values the run
+// consumes; the run itself (the gate, the spawn, the ladder and the result) is
+// `execute.ts`. Only those two refusals that precede admission are answered
+// here: the start-up snapshot and the request's own shape. Everything from the
+// policy to step 8 is `admission.ts`, which records its refusals as it decides.
 
-/** Write the run's reduced transcript and status beside the stream they came
- *  from. An evidence write that fails is reported as a failed append: a run whose
- *  own evidence cannot be written must not be answered as a clean success. */
-function writeRunFiles(layout: RunLayout, reduced: Reduced): boolean {
-  try {
-    writeFileSync(layout.transcript, reduced.transcript);
-    writeFileSync(layout.status, `${JSON.stringify(reduced.status, null, 2)}\n`);
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`quotient: could not write ${layout.transcript} / ${layout.status}: ${message}\n`);
-    return false;
-  }
-}
-
-function toolResult(document: AgentResult): ToolResult {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(document) }],
-    isError: document.state !== 'completed',
-  };
-}
+/** Nothing follows a run's audit timestamps yet: `executeRun` offers the hook
+ *  for the run registry, which this server does not have. */
+const noAudit = (): void => {
+  /* nothing to follow */
+};
 
 /** Record a refusal at the request boundary: the ledger's other writer. */
 function refused(context: Context, callId: CallId, reason: string, detail: string): ToolResult {
@@ -251,11 +108,10 @@ function refused(context: Context, callId: CallId, reason: string, detail: strin
 }
 
 /**
- * One `tools/call`: the start-up profile snapshot, the request's shape, steps
- * 1-6, the `tools` narrowing, step 7 (the session), step 8 (the child view) and
- * the run itself. Every refusal is a tool result, recorded in `attempts.jsonl` as
- * it is decided. The session lock is released last, after the ladder, the reap,
- * the drain and the run's final audit append (design sec-4, sec-6).
+ * One `tools/call`: the start-up profile snapshot, the request's shape, then
+ * admission (steps 1-8, recorded where each is decided), then the run. The
+ * session lock is released last, after the ladder, the reap, the drain and the
+ * run's final audit append (design sec-4, sec-6).
  */
 async function callTool(
   params: unknown,
@@ -267,221 +123,45 @@ async function callTool(
   // discovery: every call answers the reason and the path, whatever its shape.
   if (!context.startup.ok) {return refused(context, id, 'profile-invalid', startupFailure(context.startup));}
 
-  const snapshot = context.startup.profiles;
   const parsed = readToolCall(params);
   if (!parsed.ok) {return refused(context, id, 'request-invalid', parsed.detail);}
-  const request = parsed.request;
 
-  const admission = admitCall(context.locations, id);
-  if (!admission.ok) {return toolResult(refusedResult(admission.reason, admission.detail));}
-
-  const refuse = (reason: string, detail: string): ToolResult => {
-    appendAttempt(admission.runDir, { callId: id, reason, detail, policyDigest: admission.digest });
-    return toolResult(refusedResult(reason, detail));
-  };
-
-  // Step 3: the profile, from the start-up snapshot only, its capability pinned
-  // by the policy's map.
-  const profile = resolveProfile(snapshot, request.profile, admission.policy.profiles);
-  if (!profile.ok) {return refuse(profile.reason, profile.detail);}
-
-  // Step 4: the root, canonicalised and allowlisted by components.
-  const root = resolveRoot(request.cwd, context.launchDir, admission.policy.roots);
-  if (!root.ok) {return refuse(root.reason, root.detail);}
-
-  // Step 5: the capability selects the machine slot, and the slot's declared
-  // extensions must be able to deliver the profile's tools (EX-7). Both come
-  // first, before the approvals store or the project's link is read, so a
-  // malformed store never pre-empts today's `profile-invalid` (design sec-2).
-  const slot = selectSlot(admission.policy, profile.profile.filesystem);
-  if (!slot.ok) {return refuse(slot.reason, slot.detail);}
-  const extensions = checkProfileExtensions(profile.profile, formExtensions(slot.form));
-  if (!extensions.ok) {return refuse(extensions.reason, extensions.detail);}
-
-  // Whether an approval governs this call is itself the selection (DEC-008), so a
-  // store that cannot be read — or a location no store can be read from — decides
-  // nothing and refuses. The lookup is the one composition admission and `allow`
-  // share: store, governing approval, base, probe.
-  const approvalsPath = context.locations.approvalsPath;
-  if (!approvalsPath.ok) {
-    return refuse(
-      'form-unapproved',
-      `the approvals store location is unusable (${approvalsPath.detail}): no call can be shown to be approved, so nothing ran`,
-    );
-  }
-  const lookup = lookupProjectForm({
-    approvalsPath: approvalsPath.path,
-    capability: profile.profile.filesystem,
-    root: root.root,
-    rootsEntry: root.rootsEntry,
-    writable: writablePaths(admission.policy, admission.sessionHome),
-  });
-  if (!lookup.ok) {return refuse('form-unapproved', `${lookup.detail}: nothing ran`);}
-  const selected = chooseForm(slot, lookup.governing, lookup.base, lookup.probe);
-  if (!selected.ok) {return refuse(selected.reason, selected.detail);}
-
-  // Step 6: the ceilings, clamped downward.
-  const ceilings = clampCeilings(request.ceilings, admission.policy.maxima);
-  if (!ceilings.ok) {return refuse(ceilings.reason, ceilings.detail);}
-
-  // The call's `tools` may only narrow the profile's snapshotted set; the whole
-  // narrowed list is what the launch form will hand to `--tools` (PHASE-06).
-  const tools = effectiveTools(profile.profile, request.tools);
-  if (!tools.ok) {return refuse(tools.reason, tools.detail);}
-
-  // The admitted values (`root.root`, `selected.form`, `ceilings.ceilings`,
-  // `tools.tools`) and the snapshot digest are what PHASE-06's spawn consumes.
-
-  // Step 7: the session — grammar, ownership, and the (root, capability) binding
-  // recorded in the same critical section as first use (design sec-2 step 7,
-  // sec-6). Ownership is conferred by an O_EXCL create and survives until the
-  // answer is decided, so it is released last.
-  const session = acquireSession({
-    sessionHome: admission.sessionHome,
-    runDir: admission.runDir,
-    session: request.session,
-    root: root.root,
-    capability: profile.profile.filesystem,
-    callId: id,
-    policyDigest: admission.digest,
+  // What admission reads of the server: the start-up snapshot, the locations
+  // resolved once, the launch directory, the pid table and this server's host
+  // identity.
+  const admission: AdmissionContext = {
+    startup: context.startup,
+    locations: context.locations,
+    launchDir: context.launchDir,
+    procDir: context.procDir,
     here: context.here,
-  });
-  if (!session.ok) {return refuse(session.reason, session.detail);}
+  };
+  // Admission recorded its own refusal where it decided it: answering it is all
+  // that is left, and a second append would double the ledger line.
+  const verdict = admit(parsed.request, admission, id);
+  if (!verdict.ok) {return toolResult(refusedResult(verdict.reason, verdict.detail));}
+  const admitted = verdict.admitted;
 
   // The run's evidence layout, allocated once and handed to the spawn: the spawn
   // would allocate the same five paths itself, and a throw before it returns must
   // still be able to name where the run's evidence lives.
-  const layout = runLayout(admission.runDir, id);
-
-  // The gate (design sec-4, PHASE-07): one tick evaluator over the clamped
-  // snapshot, aborting through this call's own controller so a crossing reaches
-  // the ladder exactly as a cancellation does. Created after the last refusal
-  // that precedes the run, so its idle poll never outlives a call.
-  const gate = createGate({
-    ceilings: ceilings.ceilings,
-    policyPath: admission.policyPath,
-    // The cause token stays the ladder's input; the trigger rides along
-    // additively, so the abort's audit record can name the crossing.
-    abort: (trigger) => { controller.abort({ cause: trigger.cause, trigger }); },
-    idleMs: context.gateIdleMs,
-  });
-
+  const layout = runLayout(admitted.runDir, id);
   try {
-    // Step 8: the child view — the canonicalised union of {root, the active
-    // session directory, the policy's exposure paths} — must not reach a protected
-    // store more strongly than that store tolerates (design sec-2 step 8,
-    // sec-3). The refusal names the overlapping member and the store and stops;
-    // nothing is masked, and no run directory exists yet (PHASE-06 allocates one
-    // after this step).
-    const view = checkChildView({
-      root: root.root,
-      capability: profile.profile.filesystem,
-      sessionDir: session.sessionDir,
-      exposure: admission.policy.exposure,
-      sessionHome: admission.sessionHome,
-      runDir: admission.runDir,
-      policyPath: admission.policyPath,
-      approvalsPath: usable(context.locations.approvalsPath),
-      profileLayers: context.locations.profileLayers,
-      helpLayers: context.locations.helpLayers,
-    });
-    if (!view.ok) {return refuse(view.reason, view.detail);}
-
-    // Design sec-6's failure policy: a server that cannot record a refusal must
-    // not start a run it also could not abort-audit. Decided before the run
-    // directory exists, so nothing has been allocated and nothing is spawned.
-    if (!writeAttemptProbe(admission.runDir)) {
-      return toolResult(
-        refusedResult(
-          'audit-unavailable',
-          `${attemptsPath(admission.runDir)} cannot be appended to: the server does not launch a run it cannot record`,
-        ),
-      );
-    }
-
-    // The abort latch (design sec-5, DEC-093): the causes this call discovers are
-    // recorded here, in discovery order, and read once at the commit point below.
-    // The result is derived from it in one place, `resultFor` — the server holds no
-    // cause → state map of its own (EX-8).
-    const latch = createLatch();
-
-    const run = await runChild(
-      {
-        form: selected.form,
-        formSource: selected.source,
-        profile: profile.profile,
-        session: session.session,
-        sessionDir: session.sessionDir,
-        root: root.root,
-        runDir: admission.runDir,
-        callId: id,
-        tools: tools.tools,
-        prompt: request.prompt,
-        policyDigest: admission.digest,
-        profileDigest: snapshot.digest,
+    return toolResult(
+      await executeRun(admitted, layout, controller, noAudit, {
+        env: context.env,
+        graceMs: context.graceMs,
+        gateIdleMs: context.gateIdleMs,
+        diagnostics: context.diagnostics,
+        profileDigest: context.startup.profiles.digest,
         helpDigest: context.startup.help.digest,
-        layout,
-      },
-      { signal: controller.signal, graceMs: context.graceMs, env: context.env, onRecord: gate.tick },
+      }),
     );
-
-    // Nothing ran: the run's own first audit record could not be written, so the
-    // directory was discarded and the call is a refusal (EX-6), recorded in the
-    // ledger that is still writable.
-    if (run.auditFailedBeforeSpawn) {
-      appendAttempt(admission.runDir, {
-        callId: id,
-        reason: 'audit-failed',
-        detail: `the run audit could not be written and the run directory was discarded: ${run.layout.audit}`,
-        policyDigest: admission.digest,
-      });
-      return toolResult(
-        refusedResult(
-          'audit-failed',
-          `the run's audit could not be written, so nothing ran: ${run.layout.audit}`,
-        ),
-      );
-    }
-
-    // The one reader (design sec-4): the stream this run captured, reduced by the
-    // reducer that owns the accounting, with the transcript budget the call asked
-    // for — clamped by the policy's maximum, so neither value is ignored.
-    const reduced = reduce(run.lines, {
-      budgetBytes: transcriptBudget(request.transcript_budget_bytes, admission.policy.transcript_budget_bytes),
-    });
-    const wrote = writeRunFiles(run.layout, reduced);
-
-    // The three causes the server discovers, in the order it discovers them: the
-    // ladder's own cause, a launch that never ran, then an evidence append that
-    // failed. `!wrote` is the same failure as a failed audit append — the run's own
-    // evidence cannot be written — so it is the same cause, recorded once.
-    if (run.abort !== null) {latch.record(run.abort);}
-    if (run.spawnFailed) {latch.record('spawn');}
-    if (run.auditFailed || !wrote) {latch.record('audit');}
-
-    // The commit point: after the ladder, the reap, the drain, the final accounting
-    // (the reduction above) and the `exit`/abort evidence appends (inside the
-    // spawn). Nothing that can fail is left, because the return is the last step.
-    const document = resultFor({
-      reduced,
-      outcome: run,
-      causes: latch.commit(),
-      session: session.session,
-    });
-    return toolResult(document);
-  } catch (error) {
-    // The run was established (a session, a run directory) and the server threw
-    // while running it: the answer is a conforming `failed` envelope over the
-    // layout, with the reducer's verdict on an unread stream. The detail is
-    // diagnostics, not reduced markdown, so it never enters the envelope.
-    const detail = error instanceof Error ? error.message : String(error);
-    context.diagnostics.write(`quotient: call ${String(id)} failed while running: ${detail}\n`);
-    return toolResult(failedResult('error', ['error'], session.session, reduce([], {}).status, layout));
   } finally {
-    gate.close();
-    session.release();
+    admitted.session.release();
   }
 }
+
 
 function reply(context: Context, message: Record<string, unknown>): void {
   context.output.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
@@ -589,13 +269,6 @@ async function handleLine(line: string, context: Context): Promise<void> {
       reply(context, { id, error: { code: -32601, message: `Method not found: ${method}` } });
   }
 }
-
-/** What the server reads once at start-up: the profiles, then the help. The
- *  first that does not load puts the server in the start-up-refused state. */
-type Startup = { ok: true; profiles: Snapshot; help: HelpSnapshot } | StartupFailure;
-
-/** A start-up refusal: the path to fix and why, said in one line. */
-type StartupFailure = { ok: false; path: string; detail: string };
 
 /**
  * The legacy launch-dir layers earlier versions read (DEC-011). One present —
@@ -731,7 +404,9 @@ export async function serve(
   const launchDir = options.launchDir ?? process.cwd();
   const locations = resolveLocations(env);
   const startup = loadStartup(locations, launchDir);
-  const here = readHostIdentity('/proc');
+  // The pid table session ownership and liveness are read from: the process's own.
+  const procDir = '/proc';
+  const here = readHostIdentity(procDir);
   // One line, naming the path: the server refuses from here on, and an operator
   // needs to know which file to fix.
   if (!startup.ok) {diagnostics.write(`quotient: ${startupFailure(startup)}\n`);}
@@ -742,6 +417,7 @@ export async function serve(
     startup,
     launchDir,
     locations,
+    procDir,
     here,
     inFlight: new Map(),
     closed: false,

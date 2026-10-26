@@ -23,7 +23,8 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { packageVersion } from '../root.ts';
-import { PROTOCOL_VERSION, PI_AGENT_TOOL } from './server.ts';
+import { PROTOCOL_VERSION } from './server.ts';
+import { PI_AGENT_TOOL } from './tools.ts';
 import {
   attempts,
   callLine,
