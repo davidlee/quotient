@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · PHASE-02 · 9ccee47
+fresh-as-of: 2026-10-26 · PHASE-02 + D-1 · 4459ed8
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -66,6 +66,9 @@ unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → p
   step 4 and the `ownerLiveness` bullet, sec-7 `session.ts` paragraph,
   sec-9 `fakeProc` / `session.test.ts` / `views.test.ts` bullets, plan
   PHASE-02 objective/EX text (immutable ids: append, don't renumber).
+  Landed in 4459ed8, after PHASE-02's recorded delta (9ccee47) and
+  outside any phase range; gate green, 451 tests; 4 mutation controls killed.
+  No Codex pass on this follow-up (small, test-pinned).
 
 ## Reopened scope: tasks binding (2026-10-26)
 
