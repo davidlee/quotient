@@ -1,0 +1,46 @@
+memory_uid = "mem_01a17a72faae75a2a10f2dd380e472b5"
+memory_key = "mem.fact.quotient.symlink-root-test-vacuity"
+schema_version = 1
+memory_type = "fact"
+status = "active"
+title = "Symlinked-root tests pass vacuously when the roots entry is the root itself"
+summary = "Replacing an admitted root with a symlink also moves a roots entry equal to it; admit a subdirectory of the entry to test root re-resolution"
+created = "2026-10-26"
+updated = "2026-10-26"
+
+[scope]
+paths = ["src/server/admission.test.ts", "src/server/profiles.ts"]
+globs = []
+commands = []
+tags = ["testing", "admission"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "a060aad6ad9753ec6aef519ed9fd22230b0a4d1e"
+ref_name = "refs/heads/main"
+checkout_state_id = "5112e4d2743fd92cd9423f0c1c14ea70d1351db6265a0b939a6db7fb315656c6"
+base_commit = "b1c998181a59bf16fd4276cfdcd61091fff3d3e8"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
+[[source]]
+kind = "commit"
+ref = "b1c9981"
+

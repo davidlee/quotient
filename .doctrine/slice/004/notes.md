@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-07 completed; PHASE-08 next · 70e02a4
+fresh-as-of: 2026-10-27 · PHASE-08 completed; PHASE-09 next · b1c9981
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -18,16 +18,20 @@ fresh-as-of: 2026-10-27 · PHASE-07 completed; PHASE-08 next · 70e02a4
 - PHASE-05 done — views.ts, documents.ts + suites (6322f83, fa36bf7, 4b48ddf; delta ceb2ce3..4b48ddf); Codex 2 high + 2 medium fixed (§ PHASE-05 execution)
 - PHASE-06 done — waiting.ts + suite, shared run fixtures in test-rig (4e3fe68, b8f6950, e5c1b3b; delta e3fb817..e5c1b3b); Codex 3 medium (2 fixed, F1 accepted) + 1 low fixed (§ PHASE-06 execution)
 - PHASE-07 done — blocking pi_agent through the registry; call driver + reply gate; EOF at the trigger (3095a6f, 70e02a4; delta 5d8e37c..70e02a4); Codex 1 medium fixed (§ PHASE-07 execution)
+- PHASE-08 done — five tools, readers + argsDigest, start/wait/ack/cancel handlers, readmit, tool help sections, sleeper form (b1c9981; delta recorded); Codex 3 fixed + 1 contested (§ PHASE-08 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
 - mem.fact.quotient.client-concurrency-readonlyhint — clients overlap calls only with readOnlyHint
 - mem.fact.quotient.readable-end-before-dispatch — input `end` can precede dispatch of lines already read (70e02a4)
+- mem.fact.quotient.symlink-root-test-vacuity — a roots entry equal to the admitted root follows the same symlink (b1c9981)
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-08 (start, wait, ack, cancel and lanes over the server)
-- PHASE-07 → PHASE-08 carries: argsDigest '' for blocking starts; M4 control (at-trigger closing) once lanes exist; closingRefusal ledger line if any start path can reach it (§ PHASE-07 execution)
+- next: PHASE-09 (/phase-plan first)
+- D-9..D-11 — HANDLERS shape, sec-5 refused-wait ledger line (Codex F1 contested), handle/wait/ack help sections to PHASE-10; /reconcile amends (§ PHASE-08 execution)
+- M4 (at-trigger closing) accepted at runs.test level; closingRefusal unreachable through serve (C13) (§ PHASE-08 execution)
+- open user decision (PHASE-07 close): a client that writes and closes stdin at once may get some or none of its replies — unanswered
 - D-6 — Context.admission is `AdmissionContext | StartupFailure`; D-7 — runCall handler is `(signal) => Answer`; D-8 — EX-6's auditKinds(runDir, run) kept as auditKinds(layout) (C5); /reconcile amends (§ PHASE-07 execution)
 - PHASE-06 drift — sec-5 `awaitTargets` returns Promise<boolean> vs sec-7 Promise<void>; code follows sec-7; /reconcile amends sec-5 (§ PHASE-06 execution)
 - PHASE-06 F1 — wait reactions retained on live `settled` until settle; accepted (bounded); /reconcile: add to sec-9 Risks
@@ -473,3 +477,60 @@ Lint (HEAD → after): server.ts 9 → 7 (serve's complexity error gone),
 server.test 32 → 31, spawn.test 38 → 34, test-rig 27 → 27, spawn.ts 20 → 20.
 Gate at 70e02a4: 605/605, pack-check 4/4. VT-1..3 pass; VA-1 grep: removeRun's
 one call is runs.ts publishFailed.
+
+## PHASE-08 execution (2026-10-27)
+
+Red by two parallel Opus subagents (pure suites: tools/admission/help; server
+suite + rig: start/wait/ack/cancel lines, envelopeDocument/refusalDocument,
+sleeper form named by its prompt, released by a renamed file). Green: an Opus
+subagent took tools.ts, readmit and the four help sections; server.ts in-session.
+Tests: 672 (605 at PHASE-07). Commit b1c9981.
+
+Choices C1–C14 (phase sheet), the ones that fill gaps in the design text:
+- C4: on a start-up-refused server every call that is not wait/ack/cancel by
+  name — malformed params and unknown names included — answers profile-invalid
+  before its request is read.
+- C5: Context gains `here` read at start-up whatever start-up's verdict
+  (wait/ack/cancel resolve disk runs on a refused server).
+- C9: readmit keeps the admitted runDir (the run is published there; execute.ts
+  feeds it to the child env and the audit-failed line). A refusal authorise
+  decides is recorded in the current policy's run dir, as admit's are.
+- C11: a refused server's wait/ack/cancel descriptions are their built-in
+  sections (loadHelp([])), since the operator layers may be what failed; the
+  pi_agent/start descriptions and the agent instructions name the refusal.
+- Asked.ceilings is `(maxima) => …` (readmit's per-unit min needs the policy
+  read inside authorise); Asked.exact asks for the canonical-identity check.
+
+Divergences for /reconcile:
+- D-9: sec-7 HANDLERS is `(args, call: CallContext)`; implemented as
+  `(args, call, context)` with an `admitting(handler)` wrapper for the two
+  starting tools (the start-up check before the request is read).
+- D-10: sec-5 "changes no state anyone can observe" — a refused wait still
+  appends its attempts line (every refusal is recorded where decided). Codex F1,
+  contested; the text should say so.
+- D-11: help sections `handle`, `wait`, `ack` (sec-8) not added — PHASE-10 with
+  the contracts (EX-3 says so).
+
+Mutation controls (11): readmit when queued, needs_success, cancel marking, key
+replay, refused server serving, exact root, ceiling and budget narrowing, lane
+— killed. Survivors fixed with new assertions: a wait that acknowledges (the
+listing must read the same twice); a wait that ignores its call signal (new
+case: EOF ends a wait on a foreign run at once, timeout 30 s). M4 (at-trigger
+closing) not provable through serve — the only head that settles after the
+trigger is one EOF aborts, and close() drops the successor in the same sweep;
+covered at runs.test level; accepted.
+
+Codex pass (gpt-6.1-sol, high): 0 high, 3 medium, 2 low.
+- F1 contested (D-10). F2 fixed: readmit widened a reducer-default budget to a
+  later policy maximum; now clamps `admitted ?? DEFAULT_BUDGET_BYTES` (constant
+  now exported by reduce.ts, used by reduce + cli). F3 fixed: `ceilings: {}`
+  digests as none. F4 fixed: a root moved behind a symlink to outside the roots
+  refused root-not-allowlisted; the exact check now runs before the allowlist.
+  F5 fixed: the wall-clock case gains an enforcement control (state `timeout`).
+
+Sharp edge: a symlink test whose roots entry IS the admitted root passes
+vacuously — the entry canonicalises through the same symlink. Admit a
+subdirectory of the entry.
+
+Lint (PHASE-07 → after): server.ts 7 → 7, server.test 31 → 28, test-rig 27 → 27,
+help.ts 12 → 11, reduce.ts 125 → 124, tools.ts/admission.ts and new tests 0.
