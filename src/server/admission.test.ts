@@ -11,7 +11,8 @@
 // `serve` reads them once.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readdirSync, realpathSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveLocations } from '../config.ts';
 import { loadHelp } from '../help/help.ts';
@@ -42,11 +43,23 @@ function contextFor(rig: Rig): AdmissionContext {
 }
 
 /** One `attempts.jsonl` line as this suite reads it. */
-type LedgerLine = { callId: unknown; reason: unknown };
+type LedgerLine = { callId: unknown; reason: unknown; detail: unknown; digest: unknown };
 
 /** The server-level ledger under the rig's run dir, as records. */
 function ledger(rig: Rig): LedgerLine[] {
-  return attempts(rig.runDir).map((raw): LedgerLine => ({ callId: raw.call_id, reason: raw.reason }));
+  return attempts(rig.runDir).map((raw): LedgerLine => ({
+    callId: raw.call_id,
+    reason: raw.reason,
+    detail: raw.detail,
+    digest: raw.policy_digest,
+  }));
+}
+
+/** The digest of the policy bytes on disk now; absent when there is no file to
+ *  hash, as the ledger leaves it absent. */
+function policyDigest(rig: Rig): string | undefined {
+  if (!existsSync(rig.policyPath)) {return undefined;}
+  return createHash('sha256').update(readFileSync(rig.policyPath)).digest('hex');
 }
 
 /** The ledger lines one call left, in order. */
@@ -65,14 +78,17 @@ function validRequest(rig: Rig): { prompt: string; profile: string; cwd: string 
   return { prompt: 'work', profile: 'read', cwd: rig.root };
 }
 
-/** A refusal recorded once, against the call, naming the reason. Steps 1-2's
- *  line is `admitCall`'s, the rest `admit`'s: either way there is exactly one. */
+/** A refusal recorded once, against the call: the reason, the same detail the
+ *  caller is told, and the digest of the policy it was decided under. Steps
+ *  1-2's line is `admitCall`'s, the rest `admit`'s: either way there is one. */
 function refused(rig: Rig, result: ReturnType<typeof admit>, callId: CallId, reason: string): void {
   assert.equal(refusalReason(result), reason);
+  const detail = result.ok ? undefined : result.detail;
+  assert.ok(detail !== undefined && detail.length > 0, 'the refusal says which value decided it');
   assert.deepEqual(
-    ledgerFor(rig, callId).map((line) => line.reason),
-    [reason],
-    'the refusal is recorded once, against the call',
+    ledgerFor(rig, callId).map(({ reason: recorded, detail: said, digest }) => ({ reason: recorded, detail: said, digest })),
+    [{ reason, detail, digest: policyDigest(rig) }],
+    'the refusal is recorded once, against the call, as it was answered',
   );
 }
 
@@ -125,6 +141,26 @@ test('the tools narrowing: a tool outside the profile\'s set refuses tools-not-a
   // The read profile grants `read, grep, find, ls, bash`; `write` is not its to give.
   const request = { ...validRequest(rig), tools: ['write'] };
   refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'tools-not-allowed');
+});
+
+test('first failure wins: an unknown profile is refused before a bad root, ceiling, tool or session', (t) => {
+  const rig = newRig(t);
+  const request = { prompt: 'work', profile: 'nope', cwd: rig.launchDir, ceilings: { requests: 21 }, tools: ['write'], session: '-not-a-session' };
+  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'profile-unknown');
+});
+
+test('first failure wins: a bad root is refused before a ceiling, tool or session', (t) => {
+  const rig = newRig(t);
+  const request = { prompt: 'work', profile: 'read', cwd: rig.launchDir, ceilings: { requests: 21 }, tools: ['write'], session: '-not-a-session' };
+  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'root-not-allowlisted');
+});
+
+test('first failure wins: a ceiling is refused before a tool or session, and a tool before a session', (t) => {
+  const rig = newRig(t);
+  const context = contextFor(rig);
+  const request = { ...validRequest(rig), ceilings: { requests: 21 }, tools: ['write'], session: '-not-a-session' };
+  refused(rig, admit(request, context, 'c-1'), 'c-1', 'ceiling-above-maximum');
+  refused(rig, admit({ ...request, ceilings: undefined }, context, 'c-2'), 'c-2', 'tools-not-allowed');
 });
 
 // ── Step 7: the session ───────────────────────────────────────────────────

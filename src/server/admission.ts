@@ -149,9 +149,14 @@ export function admit(
     throw error;
   }
   if (!launchable.ok) {
-    session.release();
+    // Recorded before the lock is given back, so no other call can take the
+    // session before this refusal is in the ledger.
     const { recordable, ...refusal } = launchable;
-    return recordable ? recorded(ledger, refusal) : refusal;
+    try {
+      return recordable ? recorded(ledger, refusal) : refusal;
+    } finally {
+      session.release();
+    }
   }
 
   return {

@@ -92,18 +92,19 @@ export async function executeRun(
 ): Promise<AgentResult> {
   // The gate (design sec-4, PHASE-07): one tick evaluator over the clamped
   // snapshot, aborting through this call's own controller so a crossing reaches
-  // the ladder exactly as a cancellation does. Created after the last refusal
-  // that precedes the run, so its idle poll never outlives a call.
-  const gate = createGate({
-    ceilings: admitted.ceilings,
-    policyPath: admitted.policyPath,
-    // The cause token stays the ladder's input; the trigger rides along
-    // additively, so the abort's audit record can name the crossing.
-    abort: (trigger) => { controller.abort({ cause: trigger.cause, trigger }); },
-    idleMs: deps.gateIdleMs,
-  });
-
+  // the ladder exactly as a cancellation does. Created first, inside the
+  // exception boundary, so its idle poll never outlives a call and a failure to
+  // build it is still a `failed` envelope rather than a throw.
+  let gate: Gate | undefined;
   try {
+    gate = createGate({
+      ceilings: admitted.ceilings,
+      policyPath: admitted.policyPath,
+      // The cause token stays the ladder's input; the trigger rides along
+      // additively, so the abort's audit record can name the crossing.
+      abort: (trigger) => { controller.abort({ cause: trigger.cause, trigger }); },
+      idleMs: deps.gateIdleMs,
+    });
     return await runToResult(admitted, layout, controller, onAudit, deps, gate);
   } catch (error) {
     // The run was established (a session, a run directory) and the server threw
@@ -114,7 +115,7 @@ export async function executeRun(
     deps.diagnostics.write(`quotient: call ${String(admitted.callId)} failed while running: ${detail}\n`);
     return failedResult('error', ['error'], admitted.session.session, EMPTY_STATUS, layout);
   } finally {
-    gate.close();
+    gate?.close();
   }
 }
 
