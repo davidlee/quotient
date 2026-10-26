@@ -14,13 +14,20 @@ import assert from 'node:assert/strict';
 import { spawn as spawnProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { reduce, type Tally } from '../reduce/reduce.ts';
 import { buildArgv, childEnv, runChild, type SpawnPlan } from './spawn.ts';
 import { runLayout, type RunLayout } from './evidence.ts';
+import { executeRun, type ExecuteDeps } from './execute.ts';
 import type { Profile } from './profiles.ts';
+import { createRegistry } from './runs.ts';
 import {
+  admittedCall,
+  attempts,
+  auditKinds,
   callLine,
   closeServer,
+  DEFAULT_START,
   onlyRunDir,
   runDirs,
   emit,
@@ -36,11 +43,14 @@ import {
   pause,
   readText,
   resultDocument,
+  resultJson,
+  runOf,
   SETTLED,
   serverCommand,
   spawnRecord,
   waitForPath,
-  waitForReplies, type Env, type Rig 
+  waitForReplies,
+  waitForResult, type Env, type Rig 
 } from './test-rig.ts';
 
 
@@ -278,7 +288,7 @@ test('an unconfined write form runs pi with pi\'s argv: no session positional, a
   assert.equal(sawArgv.filter((arg) => arg === sessionDir).length, 1, 'the sessionDir appears once, as --session-dir\'s value');
   assert.equal(sawArgv.at(-1), '--no-extensions');
 
-  const [spawned] = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
+  const spawned = spawnRecord(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.equal(spawned.form_kind, 'unconfined');
   assert.equal(spawned.form, rig.writeLauncher, 'the audit names pi as the command');
   assert.deepEqual(spawned.argv, sawArgv);
@@ -448,18 +458,20 @@ test('two concurrent calls and a SIGTERM-ignoring grandchild: cancelling one lea
   // The wire act: one call cancelled, and both the other call and the server
   // itself (this process) must survive — a signal to the server's group would end
   // the test.
+  // The cancelled call is silenced: its outcome is its result.json, and only the
+  // other call and the ping answer.
   server.write(line({ method: 'notifications/cancelled', params: { requestId: 1 } }));
-  const replies = await waitForReplies(server, 2);
+  const cancelled = await waitForResult(rig.runDir, runOf(rig.runDir, 1));
+  await waitForReplies(server, 1);
   server.write(line({ id: 3, method: 'ping' }));
-  const three = await waitForReplies(server, 3);
+  const two = await waitForReplies(server, 2);
   server.end();
   await server.done;
 
-  const cancelledReply = replies.find((reply) => reply.id === 1);
-  const keptReply = replies.find((reply) => reply.id === 2);
-  const afterPing = three.find((reply) => reply.id === 3);
-  assert.ok(cancelledReply && keptReply && afterPing, JSON.stringify(three));
-  const cancelled = resultDocument(cancelledReply);
+  assert.equal(server.replies().find((reply) => reply.id === 1), undefined, 'the cancelled call got no reply');
+  const keptReply = two.find((reply) => reply.id === 2);
+  const afterPing = two.find((reply) => reply.id === 3);
+  assert.ok(keptReply !== undefined && afterPing !== undefined, JSON.stringify(two));
   assert.equal(cancelled.state, 'cancelled');
   assert.equal(cancelled.termination, 'cancelled');
   assert.deepEqual(cancelled.causes, ['cancelled']);
@@ -601,11 +613,11 @@ test('an audit record that cannot be written never blocks the ladder: the child 
   rmSync(auditPath);
   mkdirSync(auditPath);
   server.write(line({ method: 'notifications/cancelled', params: { requestId: 16 } }));
-  const [reply] = await waitForReplies(server, 1);
+  const doc = await waitForResult(rig.runDir, runOf(rig.runDir, 16));
   server.end();
   await server.done;
 
-  const doc = resultDocument(reply);
+  assert.deepEqual(server.replies(), [], 'the cancelled call got no reply: its outcome is its result.json');
   assert.equal(doc.state, 'cancelled');
   assert.equal(doc.termination, 'cancelled');
   assert.deepEqual(doc.causes, ['cancelled', 'audit']);
@@ -636,10 +648,10 @@ test('an unwritable attempts.jsonl refuses audit-unavailable without spawning an
   assert.deepEqual(readdirSync(rig.runDir), ['attempts.jsonl'], 'no run directory was allocated');
 });
 
-test('an audit append failing before spawn discards the run directory and refuses audit-failed', async (t) => {
+test('a publish failure (the run directory cannot be made) refuses audit-failed, leaves no run directory and records audit-failed in attempts.jsonl', async (t) => {
   const rig = newRig(t, { read: LAUNCH_MARKER });
   // The ledger stays writable (so the probe passes) while the run dir cannot gain
-  // a child directory: the run's own `spawn` record is the append that fails.
+  // a child directory: publication, the run's `admitted` record, is what fails.
   mkdirSync(rig.runDir, { recursive: true });
   writeFileSync(join(rig.runDir, 'attempts.jsonl'), '');
   chmodSync(rig.runDir, 0o555);
@@ -674,10 +686,10 @@ test('an audit append failing before spawn discards the run directory and refuse
   assert.equal(attempts[0].call_id, 13);
 });
 
-test('an audit append that fails after the run directory was allocated discards it before anything is launched', async (t) => {
+test('a spawn record that cannot be written keeps the run directory, and nothing is launched', async (t) => {
   const rig = newRig(t, { read: LAUNCH_MARKER });
-  // The directory is there and cannot take the `spawn` record: nothing ran, so the
-  // directory goes rather than standing as evidence of a run that did not happen.
+  // The directory is there and cannot take the `spawn` record: nothing ran, but a
+  // published run's directory is never deleted (design sec-3's publication line).
   const layout: RunLayout = runLayout(rig.runDir, 1);
   mkdirSync(layout.dir, { recursive: true });
   chmodSync(layout.dir, 0o555);
@@ -687,8 +699,58 @@ test('an audit append that fails after the run directory was allocated discards 
   assert.equal(outcome.auditFailed, true);
   assert.equal(outcome.spawnFailed, false);
   assert.equal(outcome.exitCode, null);
-  assert.equal(existsSync(layout.dir), false, 'the run directory was discarded');
+  assert.equal(existsSync(layout.dir), true, 'the run directory stays');
   assert.equal(existsSync(join(rig.markerDir, 'launched')), false, 'nothing was launched');
+});
+
+/** What the run reads of the server, for a run driven without `serve`. */
+const executeDeps = (rig: Rig): ExecuteDeps => ({
+  env: rig.env,
+  graceMs: 200,
+  gateIdleMs: 20,
+  diagnostics: new PassThrough(),
+  profileDigest: 'b'.repeat(64),
+  helpDigest: 'c'.repeat(64),
+});
+
+test('a spawn record that fails after publication keeps the run directory and settles an audit-failed refusal into result.json', async (t) => {
+  const rig = newRig(t, { read: LAUNCH_MARKER });
+  // The server's launch (C1), with the audit made read-only between publication
+  // and the spawn record: the `admitted` record stays readable, and the `spawn`
+  // record is the append that fails, so `runChild` reports auditFailedBeforeSpawn.
+  const registry = createRegistry({
+    diagnostics: new PassThrough(),
+    launch: (record, admitted, _queued, onAudit) => {
+      chmodSync(record.layout.audit, 0o444);
+      t.after(() => {
+        if (existsSync(record.layout.audit)) {chmodSync(record.layout.audit, 0o644);}
+      });
+      return executeRun(admitted, record.layout, record.controller, onAudit, executeDeps(rig)).then((result) => ({ result }));
+    },
+  });
+  const started = registry.start({ ...DEFAULT_START, origin: 'blocking', admitted: admittedCall(rig, 17) });
+  if (!started.ok) {assert.fail(`start refused: ${started.reason}: ${started.detail}`);}
+  const { record } = started;
+  const document = await started.document;
+  await record.settled;
+
+  assert.equal(existsSync(record.layout.dir), true, 'a published run directory is never deleted');
+  assert.equal(existsSync(join(rig.markerDir, 'launched')), false, 'nothing was launched');
+  assert.deepEqual(auditKinds(record.layout), ['admitted'], 'the spawn record was never written');
+  assert.equal(record.state, 'settled');
+
+  // The refusal is the run's settlement: result.json holds what the call answers.
+  const settled = resultJson(rig.runDir, record.run);
+  assert.ok(settled !== null, 'the run settled into its result.json');
+  assert.deepEqual(settled, document, 'the call answers the document its result.json holds');
+  assert.equal(document.state, 'refused');
+  assert.equal(document.refusal?.reason, 'audit-failed');
+  assert.doesNotMatch(document.refusal.detail, /discard/);
+
+  const ledger = attempts(rig.runDir);
+  assert.deepEqual(ledger.map((attempt): unknown => attempt.reason), ['audit-failed']);
+  assert.equal(ledger[0].call_id, 17);
+  assert.doesNotMatch(String(ledger[0].detail), /discard/, 'no detail says the directory was discarded');
 });
 
 test('a pre-exec spawn failure after the run directory exists reports failed with termination spawn', async (t) => {
@@ -711,10 +773,10 @@ test('a pre-exec spawn failure after the run directory exists reports failed wit
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
     records.map((record) => record.record),
-    ['spawn', 'exit'],
+    ['admitted', 'spawn', 'exit'],
   );
-  assert.equal(records[1].spawn_failed, true);
-  assert.equal(records[1].code, null);
+  assert.equal(records[2].spawn_failed, true);
+  assert.equal(records[2].code, null);
 });
 
 // ── EX-7: the facts are reported, not interpreted ──────────────────────────
@@ -804,18 +866,19 @@ test('the session lock is released only after the drain and the final audit appe
   // grandchild is in, so the run settles in the grace rather than in 30 seconds.
   const cancelledAt = Date.now();
   server.write(line({ method: 'notifications/cancelled', params: { requestId: 21 } }));
-  const [reply] = await waitForReplies(server, 1, 5000);
+  const settled = await waitForResult(rig.runDir, runOf(rig.runDir, 21), 5000);
   const elapsed = Date.now() - cancelledAt;
   server.end();
   await server.done;
-  assert.equal(resultDocument(reply).state, 'cancelled');
+  assert.deepEqual(server.replies(), [], 'the cancelled call got no reply: its outcome is its result.json');
+  assert.equal(settled.state, 'cancelled');
   assert.ok(elapsed < 2000, `the ladder bounded the drain: ${elapsed} ms`);
   assert.equal(isAlive(grandchildPid), false, 'the drain was not outlived by the member holding the pipe');
   // The final audit append is the `exit` record, written after the drain.
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
     records.map((record) => record.record),
-    ['spawn', 'abort', 'exit'],
+    ['admitted', 'spawn', 'abort', 'exit'],
   );
 
   // Only after that cleanup does the next call get through.
@@ -874,15 +937,17 @@ test('notifications/cancelled aborts exactly the requestId it names; an unknown 
   assert.deepEqual(first[0].result, { pong: true });
 
   server.write(line({ method: 'notifications/cancelled', params: { requestId: 51 } }));
-  const replies = await waitForReplies(server, 2);
+  const cancelled = await waitForResult(rig.runDir, runOf(rig.runDir, 51));
+  server.write(line({ id: 53, method: 'ping' }));
+  await waitForReplies(server, 2);
   server.end();
   await server.done;
 
-  const cancelled = resultDocument(replies[1]);
+  const replies = server.replies();
   assert.equal(cancelled.state, 'cancelled');
   assert.equal(cancelled.termination, 'cancelled');
   assert.deepEqual(cancelled.causes, ['cancelled']);
-  assert.equal(replies[1].id, 51);
+  assert.deepEqual(replies.map((reply): unknown => reply.id), [52, 53], 'the cancelled call got no reply: its outcome is its result.json');
   assert.ok(!replies.some((reply) => reply.error !== undefined), 'a cancellation is never a JSON-RPC error');
   assert.equal(isAlive(pid), false, 'the cancelled call left no child behind');
 
@@ -891,7 +956,7 @@ test('notifications/cancelled aborts exactly the requestId it names; an unknown 
   assert.equal(records.at(-1)?.record, 'exit');
 });
 
-test('a cancellation arriving after the leader was reaped still bounds the drain: the group that holds stdout is killed, so the call answers instead of waiting on a grandchild', async (t) => {
+test('a cancellation arriving after the leader was reaped still bounds the drain: the group that holds stdout is killed, so the run settles instead of waiting on a grandchild', async (t) => {
   const rig = newRig(t, {
     read: [
       'printf \'%s\\n\' $$ > "@MARKER@/pid"',
@@ -917,13 +982,13 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
   // arrives within the grace however long the grandchild would have slept.
   const abortedAt = Date.now();
   server.write(line({ method: 'notifications/cancelled', params: { requestId: 53 } }));
-  const [reply] = await waitForReplies(server, 1, 5000);
+  const doc = await waitForResult(rig.runDir, runOf(rig.runDir, 53), 5000);
   const elapsed = Date.now() - abortedAt;
   server.end();
   await server.done;
 
-  assert.ok(elapsed < 2000, `the answer waits for the bounded drain, not for the grandchild: ${elapsed} ms`);
-  const doc = resultDocument(reply);
+  assert.ok(elapsed < 2000, `the settlement waits for the bounded drain, not for the grandchild: ${String(elapsed)} ms`);
+  assert.deepEqual(server.replies(), [], 'the cancelled call got no reply: its outcome is its result.json');
   assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
   assert.equal(doc.termination, 'cancelled');
   assert.deepEqual(doc.causes, ['cancelled']);
@@ -931,9 +996,9 @@ test('a cancellation arriving after the leader was reaped still bounds the drain
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
     records.map((record) => record.record),
-    ['spawn', 'abort', 'exit'],
+    ['admitted', 'spawn', 'abort', 'exit'],
   );
-  assert.equal(records[1].cause, 'cancelled');
+  assert.equal(records[2].cause, 'cancelled');
   assert.equal(isAlive(grandchildPid), false, 'the group signal reached the member holding the pipe: no child is left behind');
 });
 
@@ -951,13 +1016,15 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
   }
 
   server.write(line({ method: 'notifications/cancelled', params: { requestId: 71 } }));
-  const replies = await waitForReplies(server, 2);
+  const settled = await Promise.all(runDirs(rig.runDir).map((run) => waitForResult(rig.runDir, run)));
+  server.write(line({ id: 72, method: 'ping' }));
+  await waitForReplies(server, 1);
   server.end();
   await server.done;
 
-  for (const reply of replies) {
-    assert.equal(reply.id, 71);
-    const doc = resultDocument(reply);
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [72], 'neither cancelled call got a reply');
+  assert.equal(settled.length, 2);
+  for (const doc of settled) {
     assert.equal(doc.state, 'cancelled', JSON.stringify(doc));
     assert.deepEqual(doc.causes, ['cancelled']);
   }
@@ -970,7 +1037,7 @@ test('two tools/calls carrying one id are both in the index: a cancellation nami
   for (const records of audits) {assert.equal(records.find((record) => record.record === 'abort')?.cause, 'cancelled');}
 });
 
-test('stdin EOF aborts every in-flight run through the same ladder, writes no result and leaves no child behind', async (t) => {
+test('stdin EOF aborts every in-flight run through the same ladder, writes no reply and leaves no child behind', async (t) => {
   const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'trap \'\' TERM', 'sleep 60'].join('\n') });
   const server = serveRig(rig, { graceMs: 200 });
   server.write(callLine(61, { prompt: 'work', profile: 'read', cwd: rig.root, session: 'eof' }));
@@ -987,10 +1054,15 @@ test('stdin EOF aborts every in-flight run through the same ladder, writes no re
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
     records.map((record) => record.record),
-    ['spawn', 'abort', 'exit'],
+    ['admitted', 'spawn', 'abort', 'exit'],
   );
-  assert.equal(records[1].cause, 'eof');
+  assert.equal(records[2].cause, 'eof');
   assert.equal(records.at(-1)?.signal, 'SIGKILL');
+  // The run still settled: a later server reads it settled, not lost (sec-6).
+  const settled = resultJson(rig.runDir, basename(onlyRunDir(rig.runDir)));
+  assert.ok(settled !== null, 'the aborted run settled into its result.json');
+  assert.equal(settled.state, 'incomplete', JSON.stringify(settled));
+  assert.deepEqual(settled.causes, ['eof']);
 });
 
 // ── the audit hook and malformed stream lines (design sec-7) ───────────────

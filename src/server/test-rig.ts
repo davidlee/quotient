@@ -30,11 +30,12 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveLocations } from '../config.ts';
+import { loadHelp } from '../help/help.ts';
 import { reduce, type Reduced } from '../reduce/reduce.ts';
 import { isRecord } from '../json.ts';
 import { serve, type ServeOptions } from './server.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
-import type { Admitted, Refused } from './admission.ts';
+import { admit as admitRequest, type AdmissionContext, type Admitted, type Refused } from './admission.ts';
 import {
   appendAudit,
   attemptsPath,
@@ -48,9 +49,9 @@ import {
   type CallId,
   type RunLayout,
 } from './evidence.ts';
-import type { Filesystem } from './profiles.ts';
+import { loadProfiles, type Filesystem } from './profiles.ts';
 import { createRegistry, type Launch, type Registry, type RunRecord, type StartSpec } from './runs.ts';
-import type { HostIdentity, RunOwner } from './session.ts';
+import { readHostIdentity, type HostIdentity, type RunOwner } from './session.ts';
 import { admitCall, type Admission } from './policy.ts';
 import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
@@ -59,6 +60,32 @@ export type Env = Record<string, string | undefined>;
 /** Steps 1-2 for an environment, as the server resolves it. */
 export const admit = (env: Env, callId: CallId): Admission =>
   admitCall(resolveLocations(env), callId);
+
+/** The context a call is decided from, built the way `serve` builds its own:
+ *  the deployment's resolved locations, one profile and help snapshot, and this
+ *  host's identity. The policy is deliberately absent: steps 1-2 read it. */
+export function admissionContext(rig: Rig): AdmissionContext {
+  const locations = resolveLocations(rig.env);
+  const profiles = loadProfiles(locations.profileLayers);
+  if (!profiles.ok) {assert.fail(`the rig's profiles do not load: ${profiles.path}: ${profiles.detail}`);}
+  const help = loadHelp(locations.helpLayers);
+  if (!help.ok) {assert.fail(`the rig's help does not load: ${help.path}: ${help.detail}`);}
+  return {
+    startup: { ok: true, profiles: profiles.snapshot, help: help.snapshot },
+    locations,
+    launchDir: rig.launchDir,
+    procDir: '/proc',
+    here: readHostIdentity('/proc'),
+  };
+}
+
+/** A real admission through steps 1-8 for RIG's read profile rooted at the rig:
+ *  the `Admitted` a server-driven run starts from, holding a real session lock. */
+export function admittedCall(rig: Rig, callId: CallId): Admitted {
+  const verdict = admitRequest({ prompt: 'work', profile: 'read', cwd: rig.root }, admissionContext(rig), callId);
+  if (!verdict.ok) {assert.fail(`the rig's call must be admitted: ${verdict.reason}: ${verdict.detail}`);}
+  return verdict.admitted;
+}
 
 /** The server as a real process: the bare bin, which serves MCP on stdio. */
 export const serverCommand: [string, string[]] = [process.execPath, [new URL('../cli.ts', import.meta.url).pathname]];
@@ -484,8 +511,9 @@ export type LiveServer = {
   /** Raw bytes, exactly as given: for framing cases. */
   send: (bytes: string) => void;
   end: () => void;
-  /** The input fails, as a broken stdin pipe would. */
-  fail: (error: Error) => void;
+  /** The input fails, as a broken stdin pipe would; with no error it is
+   *  destroyed, so it ends with neither an `end` nor an `error` event. */
+  fail: (error?: Error) => void;
   done: Promise<void>;
   stderr: () => string;
 };
@@ -719,6 +747,39 @@ export type FakeLaunch = {
 export function auditKinds(layout: RunLayout): string[] {
   const audit = readAudit(layout);
   return audit === null ? [] : audit.records.map((record) => record.record);
+}
+
+/** RUN's `result.json` under RUN_DIR, parsed: the document its settlement wrote
+ *  (design sec-3's commit), or null while none has landed. */
+export function resultJson(runDir: string, run: string): Record<string, unknown> | null {
+  const path = layoutFor(runDir, run).result;
+  if (!existsSync(path)) {return null;}
+  const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (!isRecord(parsed)) {assert.fail(`${path} is not a result document`);}
+  return parsed;
+}
+
+/** RUN's `result.json` once it lands. The commit renames it into place, so the
+ *  moment the path exists the document is whole. */
+export async function waitForResult(
+  runDir: string,
+  run: string,
+  timeoutMs = 10000,
+): Promise<NonNullable<ReturnType<typeof resultJson>>> {
+  await waitForPath(layoutFor(runDir, run).result, `${run}/result.json`, timeoutMs);
+  const found = resultJson(runDir, run);
+  if (found === null) {assert.fail(`${run}/result.json vanished after it landed`);}
+  return found;
+}
+
+/** The one run directory's name a call made under RUN_DIR, read back from the
+ *  call id its name carries (`runName`): which run is whose, when calls overlap. */
+export function runOf(runDir: string, callId: number | string): string {
+  const named = runDirs(runDir).filter(
+    (name) => name.replace(/^run-[0-9TZ]+-/, '').replace(/-[0-9a-f]{12}$/, '') === String(callId),
+  );
+  assert.equal(named.length, 1, `expected one run for call ${String(callId)}, saw ${named.join(', ')}`);
+  return named[0];
 }
 
 /** A completed `pi-agent-result/2` document for a run at LAYOUT, from the real

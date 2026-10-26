@@ -552,13 +552,15 @@ test('a call that clears steps 3-6 reaches the run, with an absent cwd taken fro
     .split('\n')
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
-  assert.equal(audit[0].record, 'spawn');
-  assert.equal(audit[0].root, realpathSync(wire.root));
+  assert.equal(audit[0].record, 'admitted', 'the run was published before it was spawned');
+  const spawned = audit.find((record) => record.record === 'spawn');
+  assert.ok(spawned !== undefined, 'the run audited its spawn');
+  assert.equal(spawned.root, realpathSync(wire.root));
   // The snapshot it ran under, and the document that won, are audited.
   const layer = xdgProfileLayer(dirname(wire.root));
-  assert.equal(audit[0].profile_source, join(layer, 'read.md'));
+  assert.equal(spawned.profile_source, join(layer, 'read.md'));
   const snapshot = loadProfiles([join(wire.root, '.quotient', 'profiles'), layer]);
-  assert.equal(audit[0].profile_digest, snapshot.ok && snapshot.snapshot.digest);
+  assert.equal(spawned.profile_digest, snapshot.ok && snapshot.snapshot.digest);
 });
 
 test('the profile refusals reach the caller as tool results, in grammar -> snapshot -> map -> capability order', async () => {

@@ -3,8 +3,7 @@
 // Everything here happened after admission decided that this call MAY run: the
 // gate is built over the clamped ceilings, the launcher is spawned, the ladder
 // owns the ending, and the evidence directory is the only place the outcome is
-// recorded. Only a call that passed step 8 reaches this module, so the run
-// directory was allocated after validation, not before (EX-6).
+// recorded. Only a published run reaches this module.
 //
 // `executeRun` never throws and never releases the session: the caller holds the
 // lock and releases it after this resolves (design sec-4, sec-6).
@@ -61,21 +60,14 @@ const spawnPlan = (admitted: Admitted, layout: RunLayout, deps: ExecuteDeps): Sp
 });
 
 /**
- * Nothing ran: the run's own first audit record could not be written, so the
- * directory was discarded and the call is a refusal (EX-6), recorded in the
- * ledger that is still writable.
+ * Nothing ran: the run's `spawn` record could not be written, so nothing was
+ * launched and the call is a refusal (EX-6), recorded in the ledger that is still
+ * writable. The run directory stays.
  */
 function auditFailed(admitted: Admitted, run: RunOutcome): AgentResult {
-  appendAttempt(admitted.runDir, {
-    callId: admitted.callId,
-    reason: 'audit-failed',
-    detail: `the run audit could not be written and the run directory was discarded: ${run.layout.audit}`,
-    policyDigest: admitted.policyDigest,
-  });
-  return refusedResult(
-    'audit-failed',
-    `the run's audit could not be written, so nothing ran: ${run.layout.audit}`,
-  );
+  const detail = `the spawn record could not be written, so nothing was launched: ${run.layout.audit}`;
+  appendAttempt(admitted.runDir, { callId: admitted.callId, reason: 'audit-failed', detail, policyDigest: admitted.policyDigest });
+  return refusedResult('audit-failed', detail);
 }
 
 /** The gate over the clamped ceilings, and the run it guards. */
@@ -138,7 +130,7 @@ async function runToResult(
     onAudit,
   });
 
-  // Nothing ran: the spawn discarded its directory and the call is a refusal.
+  // Nothing was launched: the call is a refusal.
   if (run.auditFailedBeforeSpawn) {return auditFailed(admitted, run);}
 
   // The one reader (design sec-4): the stream this run captured, reduced by the

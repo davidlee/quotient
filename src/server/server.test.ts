@@ -21,13 +21,20 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { Writable } from 'node:stream';
+import { isRecord } from '../json.ts';
 import { packageVersion } from '../root.ts';
-import { PROTOCOL_VERSION } from './server.ts';
+import { toolResult, type ToolResult } from './documents.ts';
+import { layoutFor } from './evidence.ts';
+import { refusedResult } from './result.ts';
+import { abortNamed, PROTOCOL_VERSION, runCall, type CallHost, type InFlightCall } from './server.ts';
 import { PI_AGENT_TOOL } from './tools.ts';
 import {
   attempts,
+  auditKinds,
   callLine,
+  closeServer,
   converse,
   executableAt,
   isAlive,
@@ -37,18 +44,24 @@ import {
   newRig,
   onlyRunDir,
   patchPolicy,
+  pause,
   plantProjectForm,
   profileDocument,
   readText,
+  resultDocument,
+  resultJson,
   rigApprovalsPath,
   rigForm,
   runDirs,
+  runOf,
   SETTLED,
   serveRig,
   serverCommand,
   spawnRecord,
   validPolicy,
   waitForPath,
+  waitForReplies,
+  waitForResult,
   workspace,
   writeApprovals,
   writeProfiles,
@@ -192,17 +205,22 @@ test('the server process starts, answers initialize and exits 0 on stdin EOF', (
  *  SIGKILL at the end of the ladder ends it. */
 const STUBBORN = ['printf \'%s\\n\' $$ > "@MARKER@/pid"', "trap '' TERM", 'sleep 60'].join('\n');
 
-/** The shutdown path's evidence: the stub is gone, and its run audited an abort
- *  with cause eof followed by the group SIGKILL's exit. */
+/** The shutdown path's evidence: the stub is gone, its run audited its
+ *  publication, an abort with cause eof and the group SIGKILL's exit, and the
+ *  run settled into its `result.json` (design sec-6, Client EOF). */
 function assertShutDown(rig: Rig, pid: number): void {
   assert.equal(isAlive(pid), false, 'the run was aborted, not left behind');
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
     records.map((record) => record.record),
-    ['spawn', 'abort', 'exit'],
+    ['admitted', 'spawn', 'abort', 'exit'],
   );
-  assert.equal(records[1].cause, 'eof');
-  assert.equal(records[2].signal, 'SIGKILL');
+  assert.equal(records[2].cause, 'eof');
+  assert.equal(records[3].signal, 'SIGKILL');
+  const settled = resultJson(rig.runDir, basename(onlyRunDir(rig.runDir)));
+  assert.ok(settled !== null, 'the aborted run settled into its result.json');
+  assert.equal(settled.state, 'incomplete', JSON.stringify(settled));
+  assert.deepEqual(settled.causes, ['eof']);
 }
 
 test('the AbortSignal runs the stdin-EOF shutdown path: abort in flight with cause eof, await the ladder, return', async (t) => {
@@ -236,6 +254,20 @@ test('a failed input stream takes the same shutdown path as EOF', async (t) => {
   assertShutDown(rig, pid);
 });
 
+test('an input destroyed without an error takes the same shutdown path as EOF', async (t) => {
+  const rig = newRig(t, { read: STUBBORN });
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(64, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
+  const [pid] = markerPids(rig);
+
+  server.fail();
+  await server.done;
+
+  assert.deepEqual(server.replies(), [], 'no end or error event fired, and still nothing is written');
+  assertShutDown(rig, pid);
+});
+
 test('a signal aborted before serve starts admits nothing', async (t) => {
   const rig = newRig(t, { read: STUBBORN });
   const server = serveRig(rig, { signal: AbortSignal.abort() });
@@ -261,6 +293,244 @@ test('SIGTERM to the server process shuts down through the same path and exits 0
   server.kill('SIGTERM');
   assert.equal(await exited, 0, stderr.join(''));
   assertShutDown(rig, pid);
+});
+
+// ── Blocking pi_agent through the registry (SL-004 PHASE-07) ─────────────
+//
+// A blocking call is start plus wait: admission, then the registry publishes the
+// run (its `admitted` record first) and the call answers the document the commit
+// wrote to `result.json`. A `notifications/cancelled` leaves its request silenced
+// for good, with the outcome in `result.json`; EOF writes no reply, and every run
+// still settles (design sec-3, sec-6).
+
+/** A stub that appends its pid, ignores SIGTERM and sleeps: several can run at
+ *  once, and only the ladder's group SIGKILL ends one. */
+const STUBBORN_EACH = ['printf \'%s\\n\' $$ >> "@MARKER@/pids"', "trap '' TERM", 'sleep 60'].join('\n');
+
+/** The pids of COUNT stubs, once each has reported itself. */
+async function waitForPids(rig: Rig, count: number): Promise<number[]> {
+  const deadline = Date.now() + 10000;
+  while (markerPids(rig, 'pids').length < count) {
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for ${String(count)} launchers`);}
+    await pause(5);
+  }
+  return markerPids(rig, 'pids');
+}
+
+/** The settled document of a run, or a failed expectation when it left none. */
+function settledDocument(rig: Rig, run: string): Record<string, unknown> {
+  const settled = resultJson(rig.runDir, run);
+  if (settled === null) {assert.fail(`${run} left no result.json`);}
+  return settled;
+}
+
+test('a blocking pi_agent run opens its audit with the admitted record and answers the document its result.json holds', async (t) => {
+  const rig = newRig(t);
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(80, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const [reply] = await waitForReplies(server, 1);
+  await closeServer(server);
+
+  const run = basename(onlyRunDir(rig.runDir));
+  assert.deepEqual(auditKinds(layoutFor(rig.runDir, run)), ['admitted', 'spawn', 'exit']);
+  const [admitted] = jsonLines(layoutFor(rig.runDir, run).audit);
+  assert.equal(admitted.origin, 'blocking', 'the run came through the blocking door');
+  assert.deepEqual(settledDocument(rig, run), payload(reply).doc, 'the call answers the document the commit wrote');
+});
+
+test('notifications/cancelled leaves a blocking call silenced: no reply for its id, a later ping still answers, and result.json reads cancelled', async (t) => {
+  const rig = newRig(t, { read: STUBBORN });
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(81, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
+  const [pid] = markerPids(rig);
+  const run = basename(onlyRunDir(rig.runDir));
+
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 81 } }));
+  const settled = await waitForResult(rig.runDir, run);
+  // Read after the run settled, so its answer follows anything the cancelled call
+  // could have written; closing then awaits every call, so the check is final.
+  server.write(line({ id: 82, method: 'ping' }));
+  await waitForReplies(server, 1);
+  await closeServer(server);
+
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [82], 'the cancelled request got no reply, ever');
+  assert.equal(settled.state, 'cancelled', JSON.stringify(settled));
+  assert.equal(settled.termination, 'cancelled');
+  assert.deepEqual(settled.causes, ['cancelled']);
+  assert.equal(isAlive(pid), false, 'the cancelled run left no child behind');
+});
+
+test('a reply already written before its notifications/cancelled stands: exactly one reply, unchanged, and no error', async (t) => {
+  const rig = newRig(t);
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(83, { prompt: 'work', profile: 'read', cwd: rig.root }));
+  const [answered] = await waitForReplies(server, 1);
+
+  // The notification names a request that has already been answered.
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 83 } }));
+  server.write(line({ id: 84, method: 'ping' }));
+  await waitForReplies(server, 2);
+  await closeServer(server);
+
+  const replies = server.replies();
+  assert.deepEqual(replies.map((reply): unknown => reply.id), [83, 84]);
+  assert.deepEqual(replies[0], answered, 'the reply stands as it was written');
+  assert.ok(!replies.some((reply) => reply.error !== undefined), 'a late cancellation is never a JSON-RPC error');
+  const run = basename(onlyRunDir(rig.runDir));
+  assert.deepEqual(settledDocument(rig, run), payload(answered).doc, 'the settled outcome is the one answered');
+});
+
+test('EOF writes no replies, settles every in-flight run into its result.json and leaves no child behind', async (t) => {
+  const rig = newRig(t, { read: STUBBORN_EACH });
+  const server = serveRig(rig, { graceMs: 200 });
+  server.write(callLine(85, { prompt: 'first', profile: 'read', cwd: rig.root, session: 'eof-one' }));
+  server.write(callLine(86, { prompt: 'second', profile: 'read', cwd: rig.root, session: 'eof-two' }));
+  const pids = await waitForPids(rig, 2);
+
+  await closeServer(server);
+
+  assert.deepEqual(server.replies(), [], 'no reply is written once the client is gone');
+  for (const id of [85, 86]) {
+    const settled = settledDocument(rig, runOf(rig.runDir, id));
+    assert.equal(settled.state, 'incomplete', JSON.stringify(settled));
+    assert.deepEqual(settled.causes, ['eof']);
+  }
+  for (const pid of pids) {assert.equal(isAlive(pid), false, 'no child outlives serve');}
+});
+
+// ── The call driver: one reply gate (SL-004 PHASE-07 C3) ─────────────────
+//
+// `runCall` owns one in-flight call: registration, its handler, the one reply
+// gate (`!closed && !silenced`) and deregistration. No PHASE-07 handler can throw
+// after publication through `serve`, so the gate's catch arm is driven here
+// directly, with handlers the test controls.
+
+/** A writable that keeps every chunk written to it. */
+function sink(into: string[]): Writable {
+  return new Writable({
+    write(chunk, _encoding, done): void {
+      into.push(String(chunk));
+      done();
+    },
+  });
+}
+
+/** A host with no call in flight, and the replies written to its output. */
+function callHost(): { host: CallHost; replies: () => Record<string, unknown>[] } {
+  const out: string[] = [];
+  const host: CallHost = { output: sink(out), diagnostics: sink([]), closed: false, inFlight: new Map() };
+  const replies = (): Record<string, unknown>[] =>
+    out
+      .join('')
+      .split('\n')
+      .filter((raw) => raw.length > 0)
+      .map((raw): unknown => JSON.parse(raw))
+      .filter(isRecord);
+  return { host, replies };
+}
+
+/** What a handler saw at the moment its call was aborted. */
+type AbortSeen = { reason?: unknown; silenced?: boolean };
+
+/** A handler that runs until its call is aborted and then ENDS: by throwing, or by
+ *  answering a refusal. It records the abort's reason and whether its call was
+ *  already silenced when the abort arrived. */
+function untilAborted(
+  ends: 'throws' | 'answers',
+  seen: AbortSeen,
+  call: () => InFlightCall | undefined,
+): (signal: AbortSignal) => Promise<ToolResult> {
+  return (signal) =>
+    new Promise<ToolResult>((resolve, reject) => {
+      signal.addEventListener(
+        'abort',
+        () => {
+          seen.reason = signal.reason;
+          seen.silenced = call()?.silenced;
+          if (ends === 'throws') {reject(new Error('the handler failed after its abort'));}
+          else {resolve(toolResult(refusedResult('server-error', 'answered after its abort')));}
+        },
+        { once: true },
+      );
+    });
+}
+
+test('a handler that throws after its call was silenced writes no reply: abortNamed silences, then aborts with cancelled', async () => {
+  const { host, replies } = callHost();
+  const seen: AbortSeen = {};
+  const holder: { call?: InFlightCall } = {};
+  const call = runCall(host, 91, untilAborted('throws', seen, () => holder.call));
+  holder.call = call;
+
+  abortNamed({ requestId: 91 }, host);
+  await call.done;
+
+  assert.deepEqual(replies(), [], 'a silenced call answers nothing, even from its catch arm');
+  assert.equal(call.silenced, true);
+  assert.equal(seen.silenced, true, 'the call was silenced before it was aborted');
+  assert.equal(seen.reason, 'cancelled');
+});
+
+test('control: the same throwing handler aborted without a cancellation answers one server-error refusal that claims nothing about what ran', async () => {
+  const { host, replies } = callHost();
+  const call = runCall(host, 92, untilAborted('throws', {}, () => undefined));
+
+  call.controller.abort();
+  await call.done;
+
+  const written = replies();
+  assert.equal(written.length, 1, 'an unsilenced call answers exactly once');
+  assert.equal(written[0].id, 92);
+  const doc: unknown = resultDocument(written[0]);
+  assert.equal(field(doc, 'state'), 'refused');
+  const refusal = refusalOf(doc);
+  assert.equal(refusal.reason, 'server-error');
+  assert.match(refusal.detail, /the server failed while handling this call: the handler failed after its abort/);
+  assert.doesNotMatch(refusal.detail, /before this call could run|nothing ran/);
+  assert.equal(call.silenced, false);
+});
+
+test('a handler answering a value writes exactly one reply before runCall returns, and none on a closed host', async () => {
+  const answer = (): ToolResult => toolResult(refusedResult('request-invalid', 'answered at once'));
+
+  const open = callHost();
+  const answered = runCall(open.host, 93, answer);
+  assert.deepEqual(open.replies().map((reply): unknown => reply.id), [93], 'the reply is written before runCall returns');
+  await answered.done;
+  assert.equal(open.replies().length, 1, 'and only once');
+
+  const closed = callHost();
+  closed.host.closed = true;
+  await runCall(closed.host, 94, answer).done;
+  assert.deepEqual(closed.replies(), [], 'nothing is written down a closed channel');
+});
+
+test('two calls under one id are both silenced by one notification, whether they throw or answer', async () => {
+  const { host, replies } = callHost();
+  const throwing = runCall(host, 95, untilAborted('throws', {}, () => undefined));
+  const answering = runCall(host, 95, untilAborted('answers', {}, () => undefined));
+
+  abortNamed({ requestId: 95 }, host);
+  await Promise.all([throwing.done, answering.done]);
+
+  assert.deepEqual(replies(), [], 'neither namesake answers');
+  assert.equal(throwing.silenced, true);
+  assert.equal(answering.silenced, true);
+});
+
+test('a call is in the in-flight index while it runs and gone from it once done', async () => {
+  const { host } = callHost();
+  const release: { answer?: () => void } = {};
+  const pending = new Promise<ToolResult>((resolve) => {
+    release.answer = (): void => { resolve(toolResult(refusedResult('request-invalid', 'answered late'))); };
+  });
+  const call = runCall(host, 96, () => pending);
+  assert.equal(host.inFlight.size, 1, 'registered before its handler settles');
+
+  release.answer?.();
+  await call.done;
+  assert.equal(host.inFlight.size, 0, 'deregistered once done');
 });
 
 // ── A malformed request is a tool result, never a JSON-RPC error (EX-2) ─────
@@ -348,14 +618,17 @@ test('a launch form that cannot be executed reports failed with termination spaw
   assert.equal(doc.final, false);
   assert.deepEqual(doc.refusal, null);
   // The run directory exists — step 8 passed — so the outcome is the run's audit,
-  // not a ledger line: `spawn` before the launch and `exit` with no code.
-  const audit = jsonLines(join(onlyRunDir(runDir), 'audit.jsonl'));
-  assert.deepEqual(audit.map((line) => line.record), ['spawn', 'exit']);
-  assert.match(String(audit[0].policy_digest), /^[0-9a-f]{64}$/);
-  assert.match(String(audit[0].profile_digest), /^[0-9a-f]{64}$/);
-  assert.equal(audit[0].profile_source, join(xdgProfileLayer(dir), 'read.md'), 'the winning document is audited');
-  assert.equal(audit[1].code, null);
-  assert.equal(audit[1].spawn_failed, true);
+  // not a ledger line: its publication, `spawn` before the launch and `exit`
+  // with no code.
+  const auditPath = join(onlyRunDir(runDir), 'audit.jsonl');
+  const audit = jsonLines(auditPath);
+  assert.deepEqual(audit.map((line): unknown => line.record), ['admitted', 'spawn', 'exit']);
+  const spawned = spawnRecord(auditPath);
+  assert.match(String(spawned.policy_digest), /^[0-9a-f]{64}$/);
+  assert.match(String(spawned.profile_digest), /^[0-9a-f]{64}$/);
+  assert.equal(spawned.profile_source, join(xdgProfileLayer(dir), 'read.md'), 'the winning document is audited');
+  assert.equal(audit[2].code, null);
+  assert.equal(audit[2].spawn_failed, true);
   assert.equal(attempts(runDir).length, 0);
 });
 

@@ -20,6 +20,7 @@ import {
   line,
   onlyRunDir,
   profileDocument,
+  spawnRecord,
   validPolicy,
   workspace,
   writeProfiles,
@@ -443,7 +444,7 @@ test('server: help_digest is on the spawn record', async () => {
   const launchDir = join(dir, 'launch');
   write(xdgHelpLayer(dir), 'setup', 'local setup\n');
   await converse([callLine(1, { prompt: 'hi', profile: 'read', cwd: root })], env, { launchDir });
-  const audit = jsonLines(join(onlyRunDir(runDir), 'audit.jsonl'));
-  assert.equal(audit[0].record, 'spawn');
-  assert.equal(audit[0].help_digest, expected(env, launchDir).digest);
+  const auditPath = join(onlyRunDir(runDir), 'audit.jsonl');
+  assert.equal(jsonLines(auditPath)[0].record, 'admitted', 'the run was published before it was spawned');
+  assert.equal(spawnRecord(auditPath).help_digest, expected(env, launchDir).digest);
 });

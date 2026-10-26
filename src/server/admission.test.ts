@@ -14,33 +14,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveLocations } from '../config.ts';
-import { loadHelp } from '../help/help.ts';
-import { admit, type AdmissionContext } from './admission.ts';
+import { admit } from './admission.ts';
 import type { CallId } from './evidence.ts';
-import { loadProfiles } from './profiles.ts';
-import { readHostIdentity } from './session.ts';
-import { attempts, newRig, patchPolicy, plantProjectForm, rigForm, type Rig } from './test-rig.ts';
+import { admissionContext, attempts, newRig, patchPolicy, plantProjectForm, rigForm, type Rig } from './test-rig.ts';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
-
-/** The context a call is decided from, built the way `serve` builds its own:
- *  the deployment's resolved locations, one profile and help snapshot, and this
- *  host's identity. The policy is deliberately absent: steps 1-2 read it. */
-function contextFor(rig: Rig): AdmissionContext {
-  const locations = resolveLocations(rig.env);
-  const profiles = loadProfiles(locations.profileLayers);
-  if (!profiles.ok) {assert.fail(`the rig's profiles do not load: ${profiles.path}: ${profiles.detail}`);}
-  const help = loadHelp(locations.helpLayers);
-  if (!help.ok) {assert.fail(`the rig's help does not load: ${help.path}: ${help.detail}`);}
-  return {
-    startup: { ok: true, profiles: profiles.snapshot, help: help.snapshot },
-    locations,
-    launchDir: rig.launchDir,
-    procDir: '/proc',
-    here: readHostIdentity('/proc'),
-  };
-}
 
 /** One `attempts.jsonl` line as this suite reads it. */
 type LedgerLine = { callId: unknown; reason: unknown; detail: unknown; digest: unknown };
@@ -96,7 +74,7 @@ function refused(rig: Rig, result: ReturnType<typeof admit>, callId: CallId, rea
 
 test('step 1: a policy file that is gone refuses policy-unavailable and records the attempt', (t) => {
   const rig = newRig(t);
-  const context = contextFor(rig);
+  const context = admissionContext(rig);
   unlinkSync(rig.policyPath);
   refused(rig, admit(validRequest(rig), context, 'c-1'), 'c-1', 'policy-unavailable');
 });
@@ -104,7 +82,7 @@ test('step 1: a policy file that is gone refuses policy-unavailable and records 
 test('step 2: a disabled policy refuses disabled and records the attempt', (t) => {
   const rig = newRig(t);
   patchPolicy(rig, 'enabled', false);
-  refused(rig, admit(validRequest(rig), contextFor(rig), 'c-1'), 'c-1', 'disabled');
+  refused(rig, admit(validRequest(rig), admissionContext(rig), 'c-1'), 'c-1', 'disabled');
 });
 
 // ── Steps 3-6: the profile, the root, the form, the ceilings ──────────────
@@ -112,20 +90,20 @@ test('step 2: a disabled policy refuses disabled and records the attempt', (t) =
 test('step 3: an unknown profile refuses profile-unknown and records the attempt', (t) => {
   const rig = newRig(t);
   const request = { ...validRequest(rig), profile: 'nope' };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'profile-unknown');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'profile-unknown');
 });
 
 test('step 4: a cwd outside the policy roots refuses root-not-allowlisted and records the attempt', (t) => {
   const rig = newRig(t);
   // The launch dir is a real directory outside the rig's one allowlisted root.
   const request = { ...validRequest(rig), cwd: rig.launchDir };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'root-not-allowlisted');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'root-not-allowlisted');
 });
 
 test('step 5: a project form with no approval refuses form-unapproved and records the attempt', (t) => {
   const rig = newRig(t);
   plantProjectForm(rig, rigForm(rig, 'unapproved'));
-  refused(rig, admit({ prompt: 'work', profile: 'write', cwd: rig.root }, contextFor(rig), 'c-1'), 'c-1', 'form-unapproved');
+  refused(rig, admit({ prompt: 'work', profile: 'write', cwd: rig.root }, admissionContext(rig), 'c-1'), 'c-1', 'form-unapproved');
 });
 
 test('step 6: a ceiling above the policy maximum refuses ceiling-above-maximum', (t) => {
@@ -133,31 +111,31 @@ test('step 6: a ceiling above the policy maximum refuses ceiling-above-maximum',
   // The rig's policy maxima are `validPolicy`'s: 20 requests, 100k context tokens,
   // $1.50 and 600 s. A call may lower any of them and none of them may rise.
   const request = { ...validRequest(rig), ceilings: { requests: 21 } };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'ceiling-above-maximum');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'ceiling-above-maximum');
 });
 
 test('the tools narrowing: a tool outside the profile\'s set refuses tools-not-allowed', (t) => {
   const rig = newRig(t);
   // The read profile grants `read, grep, find, ls, bash`; `write` is not its to give.
   const request = { ...validRequest(rig), tools: ['write'] };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'tools-not-allowed');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'tools-not-allowed');
 });
 
 test('first failure wins: an unknown profile is refused before a bad root, ceiling, tool or session', (t) => {
   const rig = newRig(t);
   const request = { prompt: 'work', profile: 'nope', cwd: rig.launchDir, ceilings: { requests: 21 }, tools: ['write'], session: '-not-a-session' };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'profile-unknown');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'profile-unknown');
 });
 
 test('first failure wins: a bad root is refused before a ceiling, tool or session', (t) => {
   const rig = newRig(t);
   const request = { prompt: 'work', profile: 'read', cwd: rig.launchDir, ceilings: { requests: 21 }, tools: ['write'], session: '-not-a-session' };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'root-not-allowlisted');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'root-not-allowlisted');
 });
 
 test('first failure wins: a ceiling is refused before a tool or session, and a tool before a session', (t) => {
   const rig = newRig(t);
-  const context = contextFor(rig);
+  const context = admissionContext(rig);
   const request = { ...validRequest(rig), ceilings: { requests: 21 }, tools: ['write'], session: '-not-a-session' };
   refused(rig, admit(request, context, 'c-1'), 'c-1', 'ceiling-above-maximum');
   refused(rig, admit({ ...request, ceilings: undefined }, context, 'c-2'), 'c-2', 'tools-not-allowed');
@@ -168,12 +146,12 @@ test('first failure wins: a ceiling is refused before a tool or session, and a t
 test('step 7: a session id outside the grammar refuses session-invalid and records the attempt', (t) => {
   const rig = newRig(t);
   const request = { ...validRequest(rig), session: '-not-a-session' };
-  refused(rig, admit(request, contextFor(rig), 'c-1'), 'c-1', 'session-invalid');
+  refused(rig, admit(request, admissionContext(rig), 'c-1'), 'c-1', 'session-invalid');
 });
 
 test('step 7: a second admit for a session this one holds refuses session-busy', (t) => {
   const rig = newRig(t);
-  const context = contextFor(rig);
+  const context = admissionContext(rig);
   const first = admit(validRequest(rig), context, 'c-1');
   if (!first.ok) {assert.fail(`the first call was refused: ${first.reason}: ${first.detail}`);}
   const session = first.admitted.session.session;
@@ -188,7 +166,7 @@ test('step 8: an exposure overlapping a protected store refuses view-overlaps-pr
   // The run dir is evidence: no exposure may reach it, and the policy naming it
   // is the overlap step 8 exists to refuse.
   patchPolicy(rig, 'exposure', [rig.runDir]);
-  const context = contextFor(rig);
+  const context = admissionContext(rig);
   const request = { ...validRequest(rig), session: 'step-eight-trial' };
   refused(rig, admit(request, context, 'c-1'), 'c-1', 'view-overlaps-protected');
   // Step 8 runs after the session was taken, so the refusal must have released
@@ -204,7 +182,7 @@ test('the probe: an unwritable ledger refuses audit-unavailable, and the refusal
   const rig = newRig(t);
   // `attempts.jsonl` is a directory, so the probe cannot open it for append.
   mkdirSync(join(rig.runDir, 'attempts.jsonl'), { recursive: true });
-  const context = contextFor(rig);
+  const context = admissionContext(rig);
   const request = { ...validRequest(rig), session: 'probe-trial' };
   assert.equal(refusalReason(admit(request, context, 'c-1')), 'audit-unavailable');
   // The ledger is the thing that failed, so nothing was appended to it — and no
@@ -223,7 +201,7 @@ test('the probe: an unwritable ledger refuses audit-unavailable, and the refusal
 
 test('success: a valid request is admitted with the session still held, until the caller releases it', (t) => {
   const rig = newRig(t);
-  const context = contextFor(rig);
+  const context = admissionContext(rig);
   const first = admit(validRequest(rig), context, 'c-1');
   if (!first.ok) {assert.fail(`the call was refused: ${first.reason}: ${first.detail}`);}
   const admitted = first.admitted;

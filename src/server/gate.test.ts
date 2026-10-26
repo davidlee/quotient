@@ -548,7 +548,7 @@ test('a run that hits no limit completes, and its audit has no abort record (EX-
   assert.equal(doc.state, 'completed', JSON.stringify(doc));
   assert.equal(doc.termination, 'stop');
   const records = jsonLines(doc.artifacts.audit).map((record) => record.record);
-  assert.deepEqual(records, ['spawn', 'exit'], 'no abort record on a run that hit no limit');
+  assert.deepEqual(records, ['admitted', 'spawn', 'exit'], 'no abort record on a run that hit no limit');
 });
 
 // ── PHASE-08 EX-6: the transcript budget reaches the reducer of a live call ──

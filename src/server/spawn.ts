@@ -29,7 +29,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
 import { countRecord, createTally, type Tally } from '../reduce/reduce.ts';
 import { isRecord } from '../json.ts';
-import { attemptsPath, appendAudit, removeRun, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
+import { attemptsPath, appendAudit, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
 import type { Form, FormSource } from './policy.ts';
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument, type Profile } from './profiles.ts';
 import type { Termination } from './result.ts';
@@ -129,10 +129,10 @@ export type RunOutcome = {
   spawnFailed: boolean;
   /** An audit append failed at any point — before spawn or after. */
   auditFailed: boolean;
-  /** The `spawn` audit record failed, so nothing was launched and the run
-   *  directory was discarded: the call is a refusal, not a run (EX-6). */
+  /** The `spawn` audit record failed, so nothing was launched; the run
+   *  directory stays: the call is a refusal, not a run (EX-6). */
   auditFailedBeforeSpawn: boolean;
-  /** Where this run's evidence lives (or would have, for a discarded run). */
+  /** Where this run's evidence lives. */
   layout: RunLayout;
 };
 
@@ -283,7 +283,7 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
 
   // The decision before the act: an operator reading audit.jsonl sees what was
   // launched, under which snapshot. A record that cannot be written means the run
-  // never starts and its directory is discarded (EX-6).
+  // never starts; its directory stays, holding what its publication wrote.
   if (
     !audit({
       record: 'spawn',
@@ -305,7 +305,6 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     })
   ) {
     auditFailedBeforeSpawn = true;
-    removeRun(layout);
     return outcome();
   }
 
