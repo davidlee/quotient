@@ -19,6 +19,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
+import { isRecord } from '../json.ts';
 import { absent, errorCode, within } from './paths.ts';
 import { isFilesystem, type Filesystem } from './profiles.ts';
 
@@ -43,9 +44,6 @@ const DOCUMENT_KEYS: readonly string[] = ['schema', 'approvals'];
 const ENTRY_KEYS: readonly string[] = ['root', 'capability', 'path', 'sha256', 'approved_at'];
 /** A digest is 64 lowercase hex characters, and nothing else. */
 const SHA256_HEX = /^[0-9a-f]{64}$/;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 type EntryRead = { ok: true; approval: Approval } | { ok: false; detail: string };
 type EntriesRead = { ok: true; entries: unknown[] } | { ok: false; detail: string };

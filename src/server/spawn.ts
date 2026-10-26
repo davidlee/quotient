@@ -27,7 +27,8 @@ import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
-import { countRecord, createTally, isEventObject, type Tally } from '../reduce/reduce.ts';
+import { countRecord, createTally, type Tally } from '../reduce/reduce.ts';
+import { isRecord } from '../json.ts';
 import { attemptsPath, appendAudit, removeRun, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
 import type { Form, FormSource } from './policy.ts';
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument, type Profile } from './profiles.ts';
@@ -355,8 +356,8 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     }
     // Not an object (`null`, `[]` …): malformed by the reducer's own rule, so the
     // live tally and the reduction count the same lines.
-    if (!isEventObject(event)) {return;}
-    if ((event as { type?: unknown }).type === 'agent_settled') {settled = true;}
+    if (!isRecord(event)) {return;}
+    if (event.type === 'agent_settled') {settled = true;}
     // This runs inside a stream event, outside any promise: a record whose
     // handling throws is treated as malformed rather than ending the server.
     try {

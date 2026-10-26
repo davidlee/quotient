@@ -22,6 +22,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
+import { isRecord } from '../json.ts';
 import { absent } from './paths.ts';
 import { validateAgentResult, type AgentResult } from './result.ts';
 
@@ -289,8 +290,7 @@ function parseAs<T>(text: string, is: (value: unknown) => value is T): T | null 
  * record, not a torn line.
  */
 function isAuditRecord(value: unknown): value is AuditRecord {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {return false;}
-  return 'record' in value && typeof value.record === 'string';
+  return isRecord(value) && typeof value.record === 'string';
 }
 
 /**

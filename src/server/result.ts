@@ -8,6 +8,7 @@
 // evidence: the reducer supplies the stream-side facts, the spawn supplies the
 // child's, and `resultFor` is the ONLY place a verdict is derived (EX-8).
 import type { Reduced } from '../reduce/reduce.ts';
+import { isRecord } from '../json.ts';
 
 export const RESULT_SCHEMA = 'pi-agent-result/2';
 
@@ -353,9 +354,6 @@ export function failedResult(
 export type Validation = { ok: true } | { ok: false; detail: string };
 
 const invalid = (detail: string): Validation => ({ ok: false, detail });
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * Check a document against design sec-5's shape and DEC-093's precedence rule, in

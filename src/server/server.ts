@@ -17,6 +17,7 @@ import { addAbortSignal, type Readable, type Writable } from 'node:stream';
 import { legacyLayers, resolveLocations, usable, type Locations } from '../config.ts';
 import { loadHelp, renderContext, sectionText, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
+import { isRecord } from '../json.ts';
 import { admit, type AdmissionContext, type Startup, type StartupFailure } from './admission.ts';
 import { toolResult, type ToolResult } from './documents.ts';
 import { appendAttempt, runLayout, type CallId } from './evidence.ts';
@@ -73,9 +74,6 @@ type Context = {
 
 /** A request id as a map key: `1` and `"1"` name different calls. */
 const callKey = (id: WireId): string => `${typeof id}:${String(id)}`;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Unwrap a `tools/call` params object down to the tool's own arguments. */
 function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { ok: false; detail: string } {

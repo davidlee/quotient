@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isRecord } from '../json.ts';
 import { countRecord, createTally, reduce, type Reduced } from './reduce.ts';
 
 const cli = new URL('../cli.ts', import.meta.url).pathname;
@@ -704,8 +705,7 @@ test('the live tally over object lines equals the reduction, junk lines and all'
     } catch {
       continue;
     }
-    const isRecord = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
-    if (isRecord) {countRecord(parsed, live);}
+    if (isRecord(parsed)) {countRecord(parsed, live);}
   }
 
   const { status } = reduceLines(mixed);

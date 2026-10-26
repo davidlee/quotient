@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveLocations } from '../config.ts';
 import { reduce, type Reduced } from '../reduce/reduce.ts';
+import { isRecord } from '../json.ts';
 import { serve, type ServeOptions } from './server.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
 import type { Admitted, Refused } from './admission.ts';
@@ -411,9 +412,6 @@ export function jsonLines(path: string): Record<string, any>[] {
     .filter((raw) => raw.length > 0)
     .map((raw) => JSON.parse(raw) as Record<string, any>);
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** The `spawn` record of a run, read from its audit: what was launched, and from
  *  where. The audit has no contract (research F5), so the record's shape is this

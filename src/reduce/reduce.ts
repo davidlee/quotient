@@ -22,6 +22,8 @@
 // never sees the child's exit — so it reports the stream-side inputs the server
 // derives it from: `terminalReason`, `settled`, and the accounting signal.
 
+import { isRecord } from '../json.ts';
+
 export const SCHEMA = 'pi-run-status/3';
 
 /** Whether every ordinary cost observation needed for the result was valid.
@@ -93,14 +95,6 @@ export type Tally = {
   accounting: Accounting;
 };
 
-/** Whether a parsed stream line is a record: a non-null, non-array object.
- *  Anything else (`null`, a boolean, a number, a string, an array) is a malformed
- *  line, not an event. The one rule the reducer and the server's live observer
- *  share, so the live tally and the reduction count the same lines. */
-export function isEventObject(value: unknown): boolean {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 /** The accumulator's one constructor: the state a `Tally` has before its first
  *  record. The reducer, the spawn and the gate's idle poll all start here, so an
  *  empty accumulator is spelled once. */
@@ -166,17 +160,21 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
 
   for (const raw of lines) {
     if (!raw.trim()) {continue;}
-    let event: any;
+    let parsed: unknown;
     try {
-      event = JSON.parse(raw);
+      parsed = JSON.parse(raw);
     } catch {
       malformed += 1;
       continue;
     }
-    if (!isEventObject(event)) {
+    // Not a JSON object (`null`, a boolean, a number, a string, an array): a malformed
+    // line, not an event — the same rule the server's live observer applies.
+    if (!isRecord(parsed)) {
       malformed += 1;
       continue;
     }
+    // The pi event stream has no contract here: its events are read loosely.
+    const event: any = parsed;
     records += 1;
     countRecord(event, tally);
 

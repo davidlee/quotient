@@ -21,6 +21,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { isRecord } from '../json.ts';
 import {
   RUN_EVIDENCE_FILES,
   RUN_NAME_GRAMMAR,
@@ -37,9 +38,6 @@ import { buildResult } from './test-rig.ts';
 
 /** The temp the writer renames away; named here so a residue is provable. */
 const TMP = '.result.json.tmp';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** A fresh temp tree; the run dir under it is only ever named, never created. */
 function runDir(): string {

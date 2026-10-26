@@ -6,6 +6,8 @@
 // about policy, sessions or the run — it is the vocabulary the rest of the
 // server speaks, and the order it checks in is the order a caller is told about.
 
+import { isRecord } from '../json.ts';
+
 /** The one tool this server exposes, with its declared input schema. Its
  *  description is the `tool` help section, read at start-up. */
 export const PI_AGENT_TOOL = {
@@ -82,9 +84,6 @@ const ARGUMENT_FIELDS = [
 type Invalid = { ok: false; detail: string };
 
 const invalid = (detail: string): Invalid => ({ ok: false, detail });
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isCeilingField = (field: string): field is CeilingField =>
   CEILING_FIELDS.some((known) => known === field);

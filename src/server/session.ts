@@ -36,6 +36,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { hostname as osHostname } from 'node:os';
 import { join } from 'node:path';
+import { isRecord } from '../json.ts';
 import { errorCode } from './paths.ts';
 import { appendAttempt, type CallId } from './evidence.ts';
 import type { Filesystem } from './profiles.ts';
@@ -326,10 +327,10 @@ function readRecord(path: string): RecordRead {
   } catch {
     return { ok: false, detail: `${path} is not a JSON record`, missing: false };
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return { ok: false, detail: `${path} is not a JSON record`, missing: false };
   }
-  return { ok: true, value: value as Record<string, unknown> };
+  return { ok: true, value };
 }
 
 type OwnershipRead =

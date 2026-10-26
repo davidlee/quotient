@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { usable, type Locations } from '../config.ts';
+import { isRecord } from '../json.ts';
 import { appendAttempt, sha256Hex, type CallId } from './evidence.ts';
 import { canonicalPath, errorCode } from './paths.ts';
 import { MCP_EXTENSION, PROFILE_NAME, isFilesystem, type Filesystem } from './profiles.ts';
@@ -110,9 +111,6 @@ export const MAXIMA_FIELDS: readonly string[] = ['requests', 'context_tokens', '
 export const FORM_KEYS: readonly string[] = ['path', 'extensions', 'unconfined'];
 
 type PolicyCheck = { ok: true; policy: Policy } | { ok: false; reason: RefusalReason; detail: string };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const isAbsolutePath = (value: unknown): value is string => typeof value === 'string' && isAbsolute(value);
 
