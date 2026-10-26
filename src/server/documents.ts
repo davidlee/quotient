@@ -19,7 +19,7 @@ export const POLL_INTERVAL_MS = 2000;
 /** What start's handle is (design sec-2). */
 const HANDLE_SCHEMA = 'pi-run-handle/1';
 /** What wait and cancel answer (design sec-2). */
-const WAIT_SCHEMA = 'pi-agent-wait/1';
+export const WAIT_SCHEMA = 'pi-agent-wait/1';
 /** What ack answers (design sec-2). */
 const ACK_SCHEMA = 'pi-agent-ack/1';
 /** The two `until` conditions a wait may name (design sec-5). */
