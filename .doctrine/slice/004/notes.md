@@ -21,7 +21,6 @@ fresh-as-of: 2026-10-26 · PHASE-03 · cb45a56
 
 ### Open
 - next: PHASE-04 (run registry)
-- PHASE-03 VT-3 keyword `export function executeRun` vs `export async function` — pending user
 - D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
 - isRecord: now 7 private copies (tools.ts added one); consolidation candidate, not filed
 - PHASE-02 Codex F1 — recorded on RSK-003 (user: record, don't chase); /reconcile: add to design sec-9 Risks
@@ -87,6 +86,9 @@ unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → p
 - **VT-1 keyword (2026-10-26, PHASE-03 planning).** `request-invalid` →
   `session-invalid`: admit cannot produce `request-invalid` (readToolCall
   decides it in server.ts before admit runs). User: "Swap to session-invalid".
+- **PHASE-03 VT-3 keyword (2026-10-26, PHASE-03 close).** `export function
+  executeRun` → `async function executeRun`: the literal missed `async`. User:
+  "Amend keyword".
 
 ## Reopened scope: tasks binding (2026-10-26)
 
