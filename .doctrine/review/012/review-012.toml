@@ -1,0 +1,293 @@
+id    = 12
+slug  = "code-review-review-of-sl-003"
+title = "code-review review of SL-003"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "code-review"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "opus-reviewer"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Examined commit 1347f3b (RV-011 round-3 fixes) and its interaction with shell_words, canonical_target, unreadable_mounts, spelled_path and protected_aliases in nix/check.sh and the refusals in nix/form-family.nix, for false acceptance (G4/G5/G6, rules (c), (d), (g), (j)) and false refusal of builder text. Reproductions executed against check.sh's own functions and, for F-1/F-2, the real bwrap. Then verified the ISS-003 fixes for F-1..F-6 and F-7..F-8 the same way. Not re-examined: the rest of check.sh beyond these functions, form-probe, docs.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-003"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "major"
+title = "a mount reached through an earlier --symlink should be refused; observed: LINK/.. canonicalises past the link and is accepted"
+detail = """
+Expected (DEC-029 Amendment 3.3, F-31): a mount whose target or source lies at or under an earlier `--symlink` destination is refused under (c).
+Observed: nix/check.sh unreadable_mounts (:700-708) compares `spelled_path "$path"`, which runs canonical_target (:397-428). canonical_target collapses `..` lexically, so `/x/y/l/../tmp` becomes `/x/y/tmp`, not under link `/x/y/l`. The kernel follows `l` first, then applies `..`.
+Repro (check, executed against a copy of check.sh minus `main`): `exec bwrap --dir /a --dir /x/y --symlink ../../a /x/y/l --bind /tmp/quotient-checks/exposure /x/y/l/../tmp` — unreadable_mounts and protected_aliases print nothing; (d) compares the same canonical form and sees no second /tmp mount.
+Repro (runtime, executed): `bwrap ... --tmpfs /tmp --dir /a --dir /x/y --symlink ../../a /x/y/l --ro-bind <hostdir> /x/y/l/../tmp -- sh -c 'cat /tmp/m'` printed the host marker: a host directory mounted over the jail's /tmp (G4).
+G6 variant (check executed; runtime executed by the reviewer): `--dir /home/v --symlink ../v ~/l --ro-bind ~/.local/state/quotient ~/l/../.local/state/quotient` passes (j) (target spells the same as the source) yet lands at /home/.local/state/quotient, unmasked.
+Fixture gap: `mount-through-symlink` covers only `alias/.`.
+Suggested fix: refuse a `..` segment in any mount path once a `--symlink` has appeared on the line (a line the check cannot read exactly is refused), or test links against prefixes normalised without `..`.
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003 (operator: fix all, work off the backlog item). unreadable_mounts refuses a `..` in a mount target once the line carries a `--symlink`: the kernel follows the link before the `..`, which the lexical canonical form cannot. Fixture `mount-symlink-dotdot` (refuse:(c)) red before, green after; the reviewer's G6 variant (`~/l/../.local/state/quotient`) is now refused under (c).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003 (operator: fix all, work off the backlog item). unreadable_mounts refuses a `..` in a mount target once the line carries a `--symlink`: the kernel follows the link before the `..`, which the lexical canonical form cannot. Fixture `mount-symlink-dotdot` (refuse:(c)) red before, green after; the reviewer's G6 variant (`~/l/../.local/state/quotient`) is now refused under (c).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "minor"
+title = "a bind source under an in-jail --symlink destination should be read; observed: refused as through the symlink"
+detail = """
+Expected: bwrap resolves a bind's source on the host (old root), where the jail's `--symlink` does not exist, so the link rule applies to targets only.
+Observed: unreadable_mounts (:704-708) applies the link test to every path field, sources included.
+Repro (check, executed): `--symlink /nix/store/cfg ~/.config --ro-bind ~/.config/git /etc/gitconfig` refused with "'--ro-bind ~/.config/git' lies at or under the symlink '~/.config'".
+Repro (runtime, reviewer executed): `--symlink ../../nix $P/marker --ro-bind $P/marker/m /out -- cat /out` printed the host file.
+Suggested fix: test only record[1] (the target) against links.
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: the link rule applies to the target (record[1]) only; a source is resolved on the host. Fixture `source-under-symlink` (pass) red before, green after.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: the link rule applies to the target (record[1]) only; a source is resolved on the host. Fixture `source-under-symlink` (pass) red before, green after.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "minor"
+title = 'a path opening with $ should be admitted only when the $ opens a variable; observed: "$"/x and "$$"/x pass as anchored'
+detail = """
+Expected (DEC-029 Amendment 3.2): every mount path is absolute or begins with a symbol (an unquoted `~`, a `$`-variable).
+Observed: unreadable_mounts (:694) admits `'$'*`. `"$"/x` is the literal relative path `$/x` (bash: printf "[%s]" "$"/x → [$/x]); `"$$"/x` expands to a PID-relative path.
+Repro (check, executed): `--ro-bind "$"/x /y` → no refusal from unreadable_mounts or protected_aliases. A rw variant still fails (g) (not in EXPOSURE); the read-only bind of a launch-directory-relative path passes.
+Suggested fix: admit `'$'[A-Za-z_]*` and `'${'*` only.
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: a `$` anchors a path only as `$name…` or `${name…`. Fixtures `mount-dollar-literal` and `mount-dollar-pid` (refuse:(c)) red before, green after.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: a `$` anchors a path only as `$name…` or `${name…`. Fixtures `mount-dollar-literal` and `mount-dollar-pid` (refuse:(c)) red before, green after.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "minor"
+title = "a path climbing above a braced default should be refused; observed: ${quotient_root:-/a/b}/../.. is accepted"
+detail = """
+Expected: a mount path that climbs above its anchor is refused (DEC-029 Amendment 3, `climbs`), as `"$quotient_root/../.."` is.
+Observed: canonical_target (:400-404) takes the anchor up to the first `/`, which falls inside the braces: `${quotient_root:-/a/b}/../..` → anchor `${quotient_root:-`, rest `/a/b}/../..`, and the `..`s are consumed by `a` and `b}`; climbs is false.
+Repro (check, executed): `--ro-bind "${quotient_root:-/a/b}/../.." /y` → accepted. At launch `$quotient_root` is always set, so this binds the project's grandparent read-only.
+Pre-existing (anchor logic predates 1347f3b), but the round-3 path rules rely on it. Arguably within the "variables expanded at launch" residue; the inconsistency with the unbraced spelling is the defect.
+Suggested fix: take the anchor as the whole `${…}` (or `$name`) before splitting the remainder on `/`.
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: canonical_target takes a braced variable as one anchor, its default's `/` included, so `${quotient_root:-/a/b}/../..` climbs. Fixture `mount-climb-braced` (refuse:(c)) red before, green after; `"$quotient_root/sub"` and `"${quotient_root}"` still pass.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: canonical_target takes a braced variable as one anchor, its default's `/` included, so `${quotient_root:-/a/b}/../..` climbs. Fixture `mount-climb-braced` (refuse:(c)) red before, green after; `"$quotient_root/sub"` and `"${quotient_root}"` still pass.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-5"
+status = "verified"
+severity = "minor"
+title = "(j) should recognise ${HOME:-…} as a spelling of the home; observed: ${HOME:-/x}/.local/state/quotient mounted elsewhere passes"
+detail = """
+Expected (DEC-031): protected state is recognised "in each textual spelling"; DEC-031 enumerates `~/…`, `$HOME/…`, `${HOME}/…` and the XDG expression.
+Observed: spelled_path (:614-629) maps `$HOME` and `${HOME}` but not `${HOME:-…}`; HOME is always set at launch (DEC-019 precondition), so the default never applies.
+Repro (check, reviewer executed): `--bind "${HOME:-/x}/.local/state/quotient" /elsewhere` passes (j); `"${HOME}"/.local/state/quotient` is caught.
+Open question: this may be read as the "variables expanded at launch" residue, since DEC-031's list is enumerated. Pre-existing.
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003 (operator chose to fix rather than read it as a residue): spelled_path reads `${HOME:-…}` as `~`, since HOME is always set at launch. Fixture `alias-home-default` (refuse:(j)) red before, green after.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003 (operator chose to fix rather than read it as a residue): spelled_path reads `${HOME:-…}` as `~`, since HOME is always set at launch. Fixture `alias-home-default` (refuse:(j)) red before, green after.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "nit"
+title = "builder and checker should agree on refused control characters; observed: builder refuses DEL, which the check reads, and leaves env names unchecked"
+detail = '''
+Expected: nix/form-family.nix:89-94 says the builder refuses what the check refuses ("a control character in it but tab").
+Observed: controlChars (:99-101) includes 127 (DEL); check.sh's filter (`tr -d '\001-\010\013-\037'`, :227) admits DEL, so the builder over-refuses without a stated reason. `env` names are not validated (secretEnv names are, :285); a control byte in an env name would reach the bwrap line and be refused by the check as "a control byte" rather than by the builder by name.
+Inference from the code; no family built.
+'''
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: the builder's control-character set is C0 minus tab (DEL dropped: the check reads it), and env names must be POSIX identifiers like secretEnv names (message now "env and secretEnv names must be valid POSIX names"). Sample family `delenv` + fixture `del-in-env` (pass) red at evaluation before, green after; evalRefusals gains `env-name`, asserted by form-probe. docs/nix-forms.md updated.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: the builder's control-character set is C0 minus tab (DEL dropped: the check reads it), and env names must be POSIX identifiers like secretEnv names (message now "env and secretEnv names must be valid POSIX names"). Sample family `delenv` + fixture `del-in-env` (pass) red at evaluation before, green after; evalRefusals gains `env-name`, asserted by form-probe. docs/nix-forms.md updated.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-7"
+status = "verified"
+severity = "minor"
+title = "a braced variable with text after it in the segment should anchor the whole segment; observed: ${quotient_root}b/.. canonicalises to ${quotient_root} (regression from the F-4 fix)"
+detail = """
+Raised by the reviewer verifying the F-1..F-6 fix (staged diff); reproduced by the responder.
+Expected: `"${quotient_root}b/.."` is refused as climbing, as `"$quotient_root"b/..` is and as HEAD did.
+Observed: the F-4 arm of canonical_target took the anchor through the first `}` only, so `b` became a segment the `..` cancelled. `--ro-bind "${quotient_root}b/.." /y` accepted (check, executed); at launch it is the root's parent.
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: the braced anchor runs through the first `}` and the rest of its segment. Fixture `mount-climb-braced-suffix` (refuse:(c)) red before, green after; mount-climb-braced and the mask token still read as before (corpus 131/131).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: the braced anchor runs through the first `}` and the rest of its segment. Fixture `mount-climb-braced-suffix` (refuse:(c)) red before, green after; mount-climb-braced and the mask token still read as before (corpus 131/131).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+[[finding]]
+id = "F-8"
+status = "verified"
+severity = "minor"
+title = 'a $ quoted apart from the name after it should be read as text; observed: "$"x/y reads as the variable $x and is admitted as anchored'
+detail = """
+Raised by the reviewer verifying the F-3 fix; reproduced by the responder.
+Expected: `"$"x/y` (bash: the literal relative path `$x/y`) is refused as relative.
+Observed: the first parse yields the same word as `"$x"/y`, so the F-3 anchor pattern admits it. `--ro-bind "$"x/y /z` and `"$"HOME/x` accepted (check, executed); `bash -c 'printf "[%s]" "$"HOME/x'` → `[$HOME/x]`.
+Residue noted: a single-quoted `'$x'` reads the same way; writeShellApplication's shellcheck (SC2016) fails such a launcher's build (DEC-036 context).
+"""
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: shell_words refuses a `$` followed by anything but a name start, `{` or `@` (the `"$@"` the line carries). Fixture `dollar-quoted-apart` (refuse:(c)) red before, green after; corpus 131/131, so nothing the builder emits is refused. The single-quoted `'$x'` spelling stays covered by the build's shellcheck, not by the check.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed under ISS-003: shell_words refuses a `$` followed by anything but a name start, `{` or `@` (the `"$@"` the line carries). Fixture `dollar-quoted-apart` (refuse:(c)) red before, green after; corpus 131/131, so nothing the builder emits is refused. The single-quoted `'$x'` spelling stays covered by the build's shellcheck, not by the check.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Verified by the Opus reviewer against the staged fix (original repros refused/admitted as expected), fixture red→green, corpus 131/131, gate green (iss003-gate2.log)."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

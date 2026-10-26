@@ -200,8 +200,8 @@ extract_line() { awk "$bwrap_shape { print; exit }" "$1" >"$2"; }
 # The words bash reads from the line $1, one per line. Status 1, with the reason
 # on stdout, when bash would read the line as more than plain words: an operator
 # or an expansion outside quotes, a backtick outside single quotes, a command
-# substitution, an arithmetic or unreadable parameter expansion, an escaped `$`
-# or backtick, an ANSI-C or locale quote, a word opening with a `~` it does not
+# substitution, an arithmetic or unreadable parameter expansion, a `$` that
+# opens no variable, an escaped `$` or backtick, an ANSI-C or locale quote, a word opening with a `~` it does not
 # expand to the home, a control byte, or quoting that does not close. A line it reads otherwise than
 # its words say is refused, never read the way a rule would like.
 shell_words() { # line
@@ -215,6 +215,13 @@ shell_words() { # line
     *'\$'*) echo 'an escaped $'; return 1 ;;
     *'$('* | *'$['*) echo 'a command substitution or an arithmetic expansion'; return 1 ;;
   esac
+  # A `$` opens a variable only before a name, a brace or `@`; any other is
+  # text bash keeps, which the inert parse would read as the variable it spells
+  # when a quote parts it from the name after it (`"$"x`).
+  if [[ $line =~ \$([^A-Za-z_{@]|$) ]]; then
+    echo 'a $ that opens no variable'
+    return 1
+  fi
   rest=$line
   while [[ $rest == *'${'* ]]; do
     rest=${rest#*'${'}
@@ -391,7 +398,9 @@ option_operand_count() { # line option operand
 # A path as the kernel resolves it, lexically: repeated slashes, `.` segments
 # and a trailing slash name nothing, and `..` climbs one segment, so `//tmp`,
 # `/./tmp/`, `/tmp/.` and `/x/../tmp` are all `/tmp`. A path that does not open
-# with `/` is anchored at its first segment (`~`, `$quotient_root`), and a `..`
+# with `/` is anchored at its first segment (`~`, `$quotient_root`) — a braced
+# variable whole, a `/` in its default included, with the rest of its segment —
+# and a `..`
 # that would climb above that anchor is kept, after it: `~/../x` names a
 # directory no text resolves, which `climbs` tells apart.
 canonical_target() {
@@ -399,6 +408,11 @@ canonical_target() {
   local -a parts=() kept=()
   case $path in
     /*) anchor=/ ;;
+    '${'*'}'*)
+      part=${path#*\}}
+      anchor=${path%%\}*}\}${part%%/*}
+      path=${path#"$anchor"}
+      ;;
     *)
       anchor=${path%%/*}
       path=${path#"$anchor"}
@@ -606,13 +620,17 @@ pifiles_bind() { # source target
 
 ## Protected state bound again elsewhere (j)
 
-# A path as (j) compares it: the home's spellings (`$HOME`, `${HOME}`) read as
-# `~`, the state home's (`$XDG_STATE_HOME`, `${XDG_STATE_HOME}`, the builder's
-# defaulting expression) as its default `~/.local/state`, then slashes as the
-# kernel reads them. The real home is unknown here, so a literal path into it
+# A path as (j) compares it: the home's spellings (`$HOME`, `${HOME}`, and
+# `${HOME:-…}`, whose default never applies, since the home is always set at
+# launch) read as `~`, the state home's (`$XDG_STATE_HOME`,
+# `${XDG_STATE_HOME}`, the builder's defaulting expression) as its default
+# `~/.local/state`, then slashes as the kernel reads them. The real home is unknown here, so a literal path into it
 # compares as itself: a residue.
 spelled_path() {
   local path=$1 spelling home
+  case $path in
+    '${HOME:-'*'}' | '${HOME:-'*'}/'*) path=$tilde${path#*\}} ;;
+  esac
   for spelling in \
     '${XDG_STATE_HOME:-$HOME/.local/state}=~/.local/state' \
     '${XDG_STATE_HOME}=~/.local/state' '$XDG_STATE_HOME=~/.local/state' \
@@ -676,10 +694,14 @@ protected_aliases() { # argument-file
 # per line as the reason. A path is absolute or opens with a symbol the check
 # names — the home's `~`, which shell_words admits only where bash expands it,
 # or a variable — since bwrap resolves any other relative path against a
-# directory the text does not name. A path that climbs above its anchor lands
-# in, or reads, a directory no text names. And a path at or under an earlier
-# `--symlink`'s destination goes wherever the link points, which the rules do
-# not follow. A descriptor bind's source is a descriptor, no path at all.
+# directory the text does not name; a `$` names a variable only when a name or
+# a brace follows it. A path that climbs above its anchor lands in, or reads, a
+# directory no text names. And a target at or under an earlier `--symlink`'s
+# destination goes wherever the link points, which the rules do not follow; nor
+# does a `..` in a target once the line has a link, since the kernel follows a
+# link before the `..` after it. A source is resolved on the host, where the
+# jail's links do not exist. A descriptor bind's source is a descriptor, no path
+# at all.
 unreadable_mounts() { # argument-file
   local -a record=() links=()
   local at path compared link
@@ -691,7 +713,7 @@ unreadable_mounts() { # argument-file
       esac
       case $path in
         '') continue ;;
-        /* | "$tilde" | "$tilde"/* | '$'*) ;;
+        /* | "$tilde" | "$tilde"/* | '$'[A-Za-z_]* | '${'[A-Za-z_]*) ;;
         *)
           printf "'%s %s' is a relative path, which bwrap resolves against a directory no text names\n" "${record[0]}" "$path"
           continue
@@ -700,6 +722,10 @@ unreadable_mounts() { # argument-file
       compared=$(spelled_path "$path")
       if climbs "$compared"; then
         printf "'%s %s' climbs above the path it is anchored at, into a directory no text names\n" "${record[0]}" "$path"
+      fi
+      if [ "$at" -ne 1 ]; then continue; fi
+      if [ "${#links[@]}" -gt 0 ] && [[ /$path/ == */../* ]]; then
+        printf "'%s %s' has a '..' on a line with a --symlink, which the kernel resolves through the link\n" "${record[0]}" "$path"
       fi
       for link in "${links[@]}"; do
         if [ "$compared" = "$link" ] || [[ $compared == "$link"/* ]]; then

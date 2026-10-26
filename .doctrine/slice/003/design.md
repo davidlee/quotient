@@ -223,13 +223,13 @@ A failing expression exits through `set -e`, and an empty value exits explicitly
 | refusal | source |
 |---|---|
 | the platform is not Linux | DEC-015 |
-| `prefix` does not match `^[A-Za-z0-9][A-Za-z0-9._-]*$`; a `secretEnv` name is not a POSIX name | builder |
+| `prefix` does not match `^[A-Za-z0-9][A-Za-z0-9._-]*$`; an `env` or `secretEnv` name is not a POSIX name (env names since RV-012 F-6) | builder |
 | a `secretEnv` value contains no `$` | DEC-024 |
 | a `piFiles` key is empty, absolute or has a `..` segment; a value is not a path, derivation or store-context string | DEC-033 |
 | an `env` or `secretEnv` name is `HOME` or starts with `QUOTIENT_` | DEC-034 |
 | `options` calls `add-cleanup` (it would run bwrap under a trap, not `exec`) | DEC-035 |
 | an `env` value or `protect` path contains `$` | DEC-036 |
-| an `env` value, a `persistHome`, `exposure` or `protect` path, or a `piFiles` key contains a control character other than tab | DEC-036 Amendments 1–2 |
+| an `env` value, a `persistHome`, `exposure` or `protect` path, or a `piFiles` key contains a C0 control character other than tab (DEL is admitted: the check reads it, RV-012 F-6) | DEC-036 Amendments 1–2 |
 | a `persistHome`, `exposure` or `protect` path is not absolute | builder |
 
 The `$` and control-character limits exist because the launcher is shellchecked and `check.sh` reads it a line at a time; `docs/nix-forms.md` states them. The test flake's `eval-refusals` check holds one case per row (sec-5).
@@ -272,7 +272,7 @@ The bwrap line, the one beginning `exec <BWRAP>`, is read with bash's own parser
 1. Each of `$ ~ ; & | < > ( ) #`, a backtick, `*`, `?`, `[` and `{` becomes an inert control byte of its own. `eval "set -- <line>"` in a subshell under `set -f` and `set +B` yields the argv, and the bytes map back, so `"$quotient_root"` is the symbolic word `$quotient_root`.
 2. A second parse writes each operator character as two inert bytes around a space: quoted, the space stays inside the word; unquoted, it splits it. More words than the first parse means an unquoted operator, glob or brace, and the line is refused. A backtick is text only inside single quotes.
 3. A third parse lets bash expand every `~` to a mark byte as the home. A word that opens with a `~` bash does not expand to the home (quoted, escaped, `~name`, `~+`, `~-`) refuses the line; a `~` later in a word is text.
-4. The line is also refused for `$(` or `$[` anywhere, a `${…}` other than a name, `name[@]` or `name:-default` holding no quote, escape, substitution, paren or brace, an escaped `$` or backtick, an ANSI-C or locale quote, a stray control byte, a continuation backslash, or quoting that does not close.
+4. The line is also refused for `$(` or `$[` anywhere, a `${…}` other than a name, `name[@]` or `name:-default` holding no quote, escape, substitution, paren or brace, a `$` before anything but a name, a brace or `@` (RV-012 F-8: `"$"x` is text bash keeps), an escaped `$` or backtick, an ANSI-C or locale quote, a stray control byte, a continuation backslash, or quoting that does not close.
 
 A line bash would read otherwise than its words say is refused under (c), never read the way a rule would like. The cost: a caller's backslash-escaped operator (`\;`) is refused; jail.nix escapes with single quotes.
 
@@ -282,9 +282,9 @@ Every bwrap mount operation is read, wherever it appears, with its target and th
 
 Paths are compared as the kernel resolves them lexically (`canonical_target`): repeated slashes, `.` segments and a trailing slash name nothing, and `..` climbs one segment. Under (c) a mount path is refused when it (`unreadable_mounts`):
 
-- is relative and opens with no symbol the check names (an expanded `~`, a `$`-variable), since bwrap resolves it against a directory no text names;
-- climbs above its anchor (`~/../x`);
-- lies at or under an earlier `--symlink` destination on the line, since lexical resolution does not follow the link.
+- is relative and opens with no symbol the check names (an expanded `~`, a `$` followed by a name or a brace; `"$"/x` and `"$$"/x` are relative, RV-012 F-3), since bwrap resolves it against a directory no text names;
+- climbs above its anchor (`~/../x`); a braced variable is one anchor, a `/` in its default and the rest of its segment included (RV-012 F-4, F-7);
+- is a target at or under an earlier `--symlink` destination on the line, since lexical resolution does not follow the link; or a target holding a `..` once the line has a `--symlink`, since the kernel follows a link before the `..` after it (RV-012 F-1). A source is resolved on the host, where the jail's links do not exist, so the link rule does not apply to it (RV-012 F-2).
 
 A `piFiles` bind is admitted in the tail only when its source resolves under `/nix/store/` and its target under `~/.pi/agent/` (`pifiles_bind`).
 
@@ -303,7 +303,7 @@ Per capability, labelled as in DEC-021 so a failure names its rule; (j) is DEC-0
 | (g) | every host path the baseline writes is in `EXPOSURE`: each rw bind source, `--dev-bind` included (DEC-026), and each overlay's upper and work directory (DEC-030); a rw `--bind-fd` writes a descriptor, which no exposure path names (F-23) | G5 |
 | (h) | no `SECRET_ENV_NAMES` name as `--setenv NAME` on the bwrap line; `exec {quotient_secret_fd}<` and `--args $quotient_secret_fd` each at most once, exactly once when `SECRET_ENV_NAMES` is non-empty, the first preceding the bwrap line | secrets |
 | (i) | the launcher builds `quotient_mask` from the default state directory, in its plain shape, and exactly one guarded line (with DEC-023's directory test) per `PROTECT` path and no other (DEC-027), all before the bwrap line, and `${quotient_mask[@]}` opens the tail | G6 |
-| (j) | no mount's source equals, contains or lies inside protected state (the default state directory in any spelling, a `PROTECT` path) unless its target is that same path; `/`, a path that climbs above its anchor, and a descriptor bind's source overlap everything | G6 |
+| (j) | no mount's source equals, contains or lies inside protected state (the default state directory in any spelling, `${HOME:-…}` included since RV-012 F-5; a `PROTECT` path) unless its target is that same path; `/`, a path that climbs above its anchor, and a descriptor bind's source overlap everything | G6 |
 
 The order rules need no knowledge of jail.nix's internals, because the builder's tail identifies itself. The tail opens with the `${quotient_mask[@]}` token. After it, the only mount flags on the bwrap line are, in order, the builder's `piFiles` binds (none or more, each a store path at a path under `~/.pi/agent`, DEC-032), the root bind and the session bind, followed by `--chdir $quotient_root`. `--args $quotient_secret_fd`, jail.nix's finalisation flags and `${RUNTIME_ARGS[@]}` may follow. That is the order half of (c) and (i). Before it, anything goes, subject to the other assertions. The `/tmp` rule in (d) is positional too: exactly one mount on the line targets `/tmp`, and it is base's `--tmpfs /tmp`.
 

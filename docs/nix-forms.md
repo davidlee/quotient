@@ -210,6 +210,13 @@ ahead of your entries, which replaces the jail.nix base's forwarding of the two
 and is what lets a server started without a terminal launch at all. A name you
 set here replaces the builder's.
 
+Each name must be a POSIX identifier, here and in `secretEnv`, or evaluation
+fails:
+
+```
+mkFormFamily: env and secretEnv names must be valid POSIX names, got <NAME>
+```
+
 Two names are not yours: `HOME`, which is forwarded from the server and is where
 the jail builds the home, and any `QUOTIENT_*` variable, which is the server's
 namespace. Either, in `env` or `secretEnv`, fails evaluation:
@@ -229,9 +236,9 @@ mkFormFamily: env values and protect paths cannot contain $: env <NAME>
 A value that needs expanding at launch belongs in `secretEnv`.
 
 Nor may a value, a `persistHome`, `exposure` or `protect` path, or a `piFiles`
-key contain a control character other than tab. The form-family check reads
-the launcher a line at a time and refuses any other control character in it,
-so the builder refuses one by name:
+key contain a control character below space other than tab. The form-family
+check reads the launcher a line at a time and refuses any other such character
+in it, so the builder refuses one by name:
 
 ```
 mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: env <NAME>
@@ -250,8 +257,8 @@ lives in the world-readable Nix store:
 mkFormFamily: secretEnv <NAME> must be a shell expression containing $, not a literal
 ```
 
-Each name must be a POSIX identifier. A value that is empty after evaluation
-refuses the launch before pi starts:
+Each name must be a POSIX identifier (see `env`). A value that is empty after
+evaluation refuses the launch before pi starts:
 
 ```
 <prefix>: secretEnv <NAME> is empty

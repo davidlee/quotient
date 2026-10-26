@@ -299,6 +299,10 @@
           args.piFiles."first\nsecond" = ./flake.nix;
           message = "mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: piFiles \"first";
         };
+        env-name = {
+          args.env."NOT A NAME" = "x";
+          message = "mkFormFamily: env and secretEnv names must be valid POSIX names, got NOT A NAME";
+        };
         protect-dollar = {
           args.protect = [ "/srv/$x" ];
           message = "mkFormFamily: env values and protect paths cannot contain $: protect \"/srv/$x\"";
@@ -381,6 +385,8 @@
           # A value holding a backtick, a glob and a brace, which the builder
           # single-quotes.
           quotedspecials = family (sampleBase pkgs // { env.NOTE = "a`b{c,d}*?[e]"; });
+          # A value holding DEL, which is no control character the check refuses.
+          delenv = family (sampleBase pkgs // { env.NOTE = builtins.fromJSON ''"a\u007fb"''; });
           # A raw empty argument ahead of an undeclared rw bind.
           rawempty = family (
             sampleBase pkgs

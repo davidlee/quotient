@@ -84,7 +84,9 @@ let
   # made at that path; QUOTIENT_ is the server's own namespace. Neither is the
   # caller's to set.
   reservedName = name: name == "HOME" || lib.hasPrefix "QUOTIENT_" name;
-  reservedNames = lib.filter reservedName (lib.unique (lib.attrNames env ++ lib.attrNames secretEnv));
+  envNames = lib.unique (lib.attrNames env ++ lib.attrNames secretEnv);
+  badNames = lib.filter (name: !(lib.isValidPosixName name)) envNames;
+  reservedNames = lib.filter reservedName envNames;
 
   # The launcher writes an env value, a host path and a piFiles key as
   # single-quoted literals, and writeShellApplication's shellcheck fails the
@@ -96,11 +98,12 @@ let
     pred: map (name: "env ${name}") (lib.filter (name: pred (toString env.${name})) (lib.attrNames env));
   dollarValues =
     envValuesWith (lib.hasInfix "$") ++ map (path: "protect \"${path}\"") (lib.filter (lib.hasInfix "$") protectPaths);
-  # Every control character but tab. Nix escapes only `\n`, `\r` and `\t` in a
-  # string, so each is decoded from a JSON `\u` escape.
+  # Every C0 control character but tab: the set the check refuses. Nix escapes
+  # only `\n`, `\r` and `\t` in a string, so each is decoded from a JSON `\u`
+  # escape.
   controlChars = map (
     code: builtins.fromJSON "\"\\u${lib.fixedWidthString 4 "0" (lib.toHexString code)}\""
-  ) (lib.range 1 8 ++ lib.range 10 31 ++ [ 127 ]);
+  ) (lib.range 1 8 ++ lib.range 10 31);
   hasControl = text: lib.any (char: lib.hasInfix char text) controlChars;
   controlValues =
     envValuesWith hasControl
@@ -281,9 +284,10 @@ assert lib.assertMsg pkgs.stdenv.hostPlatform.isLinux
 assert lib.assertMsg prefixOk
   "mkFormFamily: prefix must match ^[A-Za-z0-9][A-Za-z0-9._-]*$, got \"${prefix}\"";
 # A secret name becomes a shell variable name, so it is not caller text that
-# can be quoted away: reject a name that is not a POSIX identifier.
-assert lib.assertMsg (lib.all lib.isValidPosixName secretNames)
-  "mkFormFamily: secretEnv names must be valid POSIX names, got ${lib.concatStringsSep ", " (lib.filter (name: !(lib.isValidPosixName name)) secretNames)}";
+# can be quoted away, and an env name reaches the environment pi reads: reject
+# a name of either that is not a POSIX identifier.
+assert lib.assertMsg (badNames == [ ])
+  "mkFormFamily: env and secretEnv names must be valid POSIX names, got ${lib.concatStringsSep ", " badNames}";
 assert lib.assertMsg (literalSecrets == [ ])
   "mkFormFamily: secretEnv ${lib.concatStringsSep ", " literalSecrets} must be a shell expression containing $, not a literal";
 assert lib.assertMsg (badPiFiles == [ ])

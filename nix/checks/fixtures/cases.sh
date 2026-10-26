@@ -471,6 +471,9 @@ fixture multiword-env-value multiword pass
 # A single-quoted backtick, glob or brace is text: the builder quotes such a
 # value, and it is the one word it spells.
 fixture quoted-specials quotedspecials pass
+
+# DEL is no control character the check refuses, so the builder admits it.
+fixture del-in-env delenv pass
 fixture apostrophe-exposure apostrophe pass
 
 # A word opening with `~` is the home only where bash expands it: unquoted, and
@@ -504,6 +507,11 @@ fixture alias-state-dir aliasstate 'refuse:(j)'
 fixture alias-protect aliasprotect 'refuse:(j)'
 fixture alias-host-root aliasroot 'refuse:(j)'
 
+# The home is always set at launch, so a default never applies: `${HOME:-…}` is
+# the home, and the state directory under it is protected state.
+fixture alias-home-default default 'refuse:(j)'
+edit_launchers '--clearenv' '--clearenv --ro-bind "${HOME:-/x}/.local/state/quotient" /visible-state'
+
 # A `..` segment names the directory it climbs to, as the kernel reads it.
 fixture alias-dotdot aliasdotdot 'refuse:(j)'
 
@@ -533,6 +541,41 @@ edit_launchers '--clearenv' '--clearenv --dir /tmp/work --symlink /tmp /tmp/work
 
 fixture mount-beside-symlink default pass
 edit_launchers '--clearenv' '--clearenv --symlink /etc /tmp/link --ro-bind /etc /tmp/linked'
+
+# The kernel follows a link before the `..` after it, so `alias/..` is the
+# parent of where the link points, not of the link: a `..` in a mount path is
+# refused once the line has a `--symlink`, since the text cannot follow it.
+fixture mount-symlink-dotdot default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --dir /tmp/work/sub --symlink /tmp /tmp/work/sub/alias --ro-bind /etc /tmp/work/sub/alias/../x'
+
+# A bind's source is resolved on the host, where the jail's links do not exist:
+# a source under a link's destination is the host path it spells.
+fixture source-under-symlink default pass
+edit_launchers '--clearenv' '--clearenv --symlink /etc /tmp/link --ro-bind /tmp/link/hostname /visible'
+
+# A `$` anchors a path only when it opens a variable: `"$"/etc` is the
+# relative path `$/etc`, and `$$` the shell's pid, neither a directory the
+# text names.
+fixture mount-dollar-literal default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind "$"/etc /visible'
+
+fixture mount-dollar-pid default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind "$$"/etc /visible'
+
+# A braced variable is one anchor, a `/` in its default included, so a `..`
+# after it climbs above it as after the unbraced spelling.
+fixture mount-climb-braced default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind "${quotient_root:-/a/b}/../.." /visible'
+
+# Text after the brace is part of the anchor's segment: `${quotient_root}b/..`
+# is the root's parent, which climbs.
+fixture mount-climb-braced-suffix default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind "${quotient_root}b/.." /visible'
+
+# A `$` quoted apart from the name after it is text bash keeps: `"$"x/y` is
+# the relative path `$x/y`, though it reads as the same word as `"$x"/y`.
+fixture dollar-quoted-apart default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind "$"x/y /visible'
 
 # A descriptor bind's source is whatever the descriptor opens, which the text
 # cannot name: written, it is no exposure path, and read, it may be protected
