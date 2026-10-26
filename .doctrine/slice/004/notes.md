@@ -20,7 +20,8 @@ fresh-as-of: 2026-10-26 · PHASE-02 · 9ccee47
 
 ### Open
 - next: PHASE-03 (admission extraction)
-- PHASE-02 Codex F1/F2 — recorded on RSK-003 (user: record, don't chase); /reconcile: add both to design sec-9 Risks
+- PHASE-02 Codex F1 — recorded on RSK-003 (user: record, don't chase); /reconcile: add to design sec-9 Risks
+- DIVERGENCE (F2, timens) — implementation adds a 4th identity component; /reconcile amends DEC-067 + design (§ Divergences)
 - IMP-004 — expected satisfied by PHASE-03; resolve at close
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
@@ -48,6 +49,23 @@ Host probe (PHASE-02 EN-2), this host, Node 22:
 unshare --user --pid --fork --mount-proc    NSpid: 2            one field (own /proc)
 unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → pidns null
 ```
+
+## Divergences (pending /reconcile)
+
+- **D-1 timens in the run owner's identity (2026-10-26).** User, after the
+  PHASE-02 Codex pass F2: "ok, I'll take F2 now", then "record the divergence
+  now and amend the design in reconcile". Implemented ahead of PHASE-04 (which
+  first persists `owner` in the `admitted` record), because a record written
+  without it could never be judged dead later.
+  What diverges: `HostIdentity` gains `timens` (`readlink <procDir>/self/ns/time`,
+  null when unreadable; no NSpid-style gate — start times are offset by the
+  *reader's* time namespace, and `self` is the reader). `ownerLiveness`:
+  `timens` joins the any-null → `unknown` check, and a differing `timens` (same
+  host and boot) → `unknown`. Different boot stays `stale` whatever `timens`.
+  Reconcile must amend: DEC-067 (identity tuple + rule), design sec-3 Start
+  step 4 and the `ownerLiveness` bullet, sec-7 `session.ts` paragraph,
+  sec-9 `fakeProc` / `session.test.ts` / `views.test.ts` bullets, plan
+  PHASE-02 objective/EX text (immutable ids: append, don't renumber).
 
 ## Reopened scope: tasks binding (2026-10-26)
 

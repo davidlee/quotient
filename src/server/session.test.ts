@@ -33,7 +33,7 @@ import { attempts, fakeProc, type FakeProcOwner } from './test-rig.ts';
 const SESSION_MODULE = new URL('./session.ts', import.meta.url).href;
 
 /** This server's host identity, as `readHostIdentity` reads it once at start-up. */
-const HERE: HostIdentity = { boot: 'boot-a', pidns: 'pid:[1]', host: 'host-a' };
+const HERE: HostIdentity = { boot: 'boot-a', pidns: 'pid:[1]', timens: 'time:[1]', host: 'host-a' };
 
 // The caller the tests drive: an ordinary process using session.ts, never the
 // server. `fork`ed for the cases that need a second live owner; `spawnSync`ed for
@@ -671,21 +671,32 @@ test('an acquisition reports the owner it recorded, with this server\'s identity
 });
 
 test('readHostIdentity reads boot, pid namespace and host, and each is null when it cannot be read (PHASE-02 VT-1)', () => {
-  const staged = procTable({ pid: 999_999, starttime: '1', boot: 'b1', pidns: 'pid:[7]' });
-  assert.deepEqual(readHostIdentity(staged, () => 'h1'), { boot: 'b1', pidns: 'pid:[7]', host: 'h1' }, 'the boot id is trimmed of its newline');
+  const staged = procTable({ pid: 999_999, starttime: '1', boot: 'b1', pidns: 'pid:[7]', timens: 'time:[9]' });
+  assert.deepEqual(
+    readHostIdentity(staged, () => 'h1'),
+    { boot: 'b1', pidns: 'pid:[7]', timens: 'time:[9]', host: 'h1' },
+    'the boot id is trimmed of its newline',
+  );
 
   const bare = procTable({ pid: 999_999, starttime: '1' });
-  assert.deepEqual(readHostIdentity(bare, () => 'h1'), { boot: null, pidns: null, host: 'h1' }, 'no boot_id and no ns link read as null');
+  assert.deepEqual(readHostIdentity(bare, () => 'h1'), { boot: null, pidns: null, timens: null, host: 'h1' }, 'no boot_id and no ns links read as null');
   assert.equal(readHostIdentity(bare, () => { throw new Error('no hostname'); }).host, null, 'a hostname probe that throws is null');
   assert.equal(readHostIdentity(bare, () => '').host, null, 'an empty hostname is null');
 
   const unreadable = procTable('unreadable');
-  assert.deepEqual(readHostIdentity(unreadable, () => 'h1'), { boot: null, pidns: null, host: 'h1' }, 'an unreadable pid table has no boot and no pidns');
+  assert.deepEqual(
+    readHostIdentity(unreadable, () => 'h1'),
+    { boot: null, pidns: null, timens: null, host: 'h1' },
+    'an unreadable pid table has no boot and no namespaces',
+  );
 
   // The namespace is only this process's when NSpid names exactly one: two fields
   // are a nested namespace, and a missing line says nothing at all.
-  const nested = procTable({ pid: 999_999, starttime: '1', pidns: 'pid:[7]', nspid: [4242, 1] });
+  const nested = procTable({ pid: 999_999, starttime: '1', pidns: 'pid:[7]', timens: 'time:[9]', nspid: [4242, 1] });
   assert.equal(readHostIdentity(nested, () => 'h1').pidns, null, 'two NSpid fields do not name this process\'s namespace');
+  // Start times are offset by the READER's time namespace, and `self` is the
+  // reader under any pid table: NSpid does not gate it.
+  assert.equal(readHostIdentity(nested, () => 'h1').timens, 'time:[9]', 'the time namespace is read whatever NSpid says');
   const unnamed = procTable({ pid: 999_999, starttime: '1', pidns: 'pid:[7]', nspid: [] });
   assert.equal(readHostIdentity(unnamed, () => 'h1').pidns, null, 'a missing NSpid line names no namespace');
 });
@@ -698,12 +709,14 @@ test('readHostIdentity on this host names its boot, its pid namespace and its ho
   const nspid = readFileSync('/proc/self/status', 'utf8').split('\n').find((line) => line.startsWith('NSpid:')) ?? '';
   const ownTable = nspid.slice('NSpid:'.length).trim().split(/\s+/).length === 1;
   assert.equal(here.pidns, ownTable ? readlinkSync('/proc/self/ns/pid') : null);
+  // Time namespaces arrived in Linux 5.6: an older kernel has no link and reads null.
+  assert.equal(here.timens, existsSync('/proc/self/ns/time') ? readlinkSync('/proc/self/ns/time') : null);
   assert.equal(here.host, hostname());
 });
 
 /** The staged table the liveness rows read, and the two identities they vary. */
-const STAGED_OWNER: FakeProcOwner = { pid: 999_999, starttime: '100', boot: 'b', pidns: 'pid:[1]' };
-const THIS_HOST: HostIdentity = { boot: 'b', pidns: 'pid:[1]', host: 'h' };
+const STAGED_OWNER: FakeProcOwner = { pid: 999_999, starttime: '100', boot: 'b', pidns: 'pid:[1]', timens: 'time:[1]' };
+const THIS_HOST: HostIdentity = { boot: 'b', pidns: 'pid:[1]', timens: 'time:[1]', host: 'h' };
 /** A pid no staged table carries: absent from the table, not unreadable. */
 const ABSENT = 888_888;
 
@@ -725,13 +738,19 @@ test('ownerLiveness is alive for one identity, stale for a gone owner or another
     // Another boot means stale only on this host: elsewhere, a boot id says nothing.
     ['another host and another boot', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, host: 'elsewhere', boot: 'other' }), 'unknown'],
     ['another pid namespace, the owner pid absent', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, pidns: 'pid:[2]' }), 'unknown'],
+    // Start times are offset by the reader's time namespace: another one cannot compare them.
+    ['another time namespace, the owner alive in the table', STAGED_OWNER, THIS_HOST, ownerOn({ timens: 'time:[2]' }), 'unknown'],
+    ['another boot and another time namespace', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, boot: 'other', timens: 'time:[2]' }), 'stale'],
     // A component either side cannot read is unknown, never a steal.
     ['the owner names no boot', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, boot: null }), 'unknown'],
     ['the owner names no pid namespace', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, pidns: null }), 'unknown'],
     ['the owner names no host', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, host: null }), 'unknown'],
+    ['the owner names no time namespace', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, timens: null }), 'unknown'],
     ['this server names no boot', STAGED_OWNER, { ...THIS_HOST, boot: null }, ownerOn({ pid: ABSENT }), 'unknown'],
     ['this server names no pid namespace', STAGED_OWNER, { ...THIS_HOST, pidns: null }, ownerOn({ pid: ABSENT }), 'unknown'],
     ['this server names no host', STAGED_OWNER, { ...THIS_HOST, host: null }, ownerOn({ pid: ABSENT }), 'unknown'],
+    ['this server names no time namespace', STAGED_OWNER, { ...THIS_HOST, timens: null }, ownerOn({ pid: ABSENT }), 'unknown'],
+    ['neither side names a time namespace', STAGED_OWNER, { ...THIS_HOST, timens: null }, ownerOn({ pid: ABSENT, timens: null }), 'unknown'],
     ['neither side names a pid namespace', STAGED_OWNER, { ...THIS_HOST, pidns: null }, ownerOn({ pid: ABSENT, pidns: null }), 'unknown'],
     ['another boot, but no pid namespace on this side', STAGED_OWNER, { ...THIS_HOST, pidns: null }, ownerOn({ pid: ABSENT, boot: 'other' }), 'unknown'],
     ['another boot, but no pid namespace on the owner side', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, pidns: null, boot: 'other' }), 'unknown'],

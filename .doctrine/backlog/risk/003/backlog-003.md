@@ -27,4 +27,5 @@ Recorded at the user's direction, not pursued now. Detail: SL-004 notes.md
   offsets `/proc/<pid>/stat` field 22 by the reader's time-namespace boottime
   offset, so same host/boot/pidns with different time namespaces reads a live
   owner `stale`. Session locks share this today. Inference from kernel source;
-  not reproduced. Candidate fix: `ns/time` as a fourth identity component.
+  not reproduced. Run owners: fixed in SL-004 (notes § Divergences D-1, `timens`).
+  Session locks still exposed.

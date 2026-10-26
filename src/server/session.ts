@@ -225,10 +225,11 @@ export function observeLiveness(procDir: string, pid: number, starttime: string)
 // ── Run owners ─────────────────────────────────────────────────────────────
 
 /**
- * Where a pid means something (design sec-3, DEC-067): the boot, the pid
- * namespace and the host. Each is null when it cannot be read.
+ * Where a pid and its start time mean something (design sec-3, DEC-067): the
+ * boot, the pid namespace, the time namespace and the host. Each is null when it
+ * cannot be read. `timens` is SL-004 divergence D-1 (notes.md), pending reconcile.
  */
-export type HostIdentity = { boot: string | null; pidns: string | null; host: string | null };
+export type HostIdentity = { boot: string | null; pidns: string | null; timens: string | null; host: string | null };
 
 /** A run's owning server: the session lock's pid and start time, plus where they mean something. */
 export type RunOwner = { pid: number; starttime: string } & HostIdentity;
@@ -273,8 +274,11 @@ function readPidNamespace(procDir: string): string | null {
 export function readHostIdentity(procDir: string, hostname: () => string = osHostname): HostIdentity {
   const boot = readTextOrNull(join(procDir, 'sys/kernel/random/boot_id'));
   const pidns = readPidNamespace(procDir);
+  // The kernel offsets a stat line's start time by the READER's time namespace,
+  // and `self` is the reader under any pid table, so no NSpid gate applies.
+  const timens = readOrNull(() => readlinkSync(join(procDir, 'self/ns/time')));
   const host = readOrNull(hostname);
-  return { boot, pidns, host: host === null || host === '' ? null : host };
+  return { boot, pidns, timens, host: host === null || host === '' ? null : host };
 }
 
 /**
@@ -282,13 +286,13 @@ export function readHostIdentity(procDir: string, hostname: () => string = osHos
  * nothing, so it can never take part in a verdict but `unknown`.
  */
 function fullyNamed(identity: HostIdentity): boolean {
-  return identity.boot !== null && identity.pidns !== null && identity.host !== null;
+  return identity.boot !== null && identity.pidns !== null && identity.timens !== null && identity.host !== null;
 }
 
 /**
  * The owner's liveness on the host-identity rule (design sec-3, DEC-067): a pid
- * means something only in one boot, on one host, in one pid namespace, so those
- * decide first and the pid table is consulted last. A component either side cannot
+ * means something only in one boot, on one host, in one pid namespace, and its
+ * start time only in one time namespace, so those decide first and the pid table is consulted last. A component either side cannot
  * read is `unknown`, never a steal; another host's boot says nothing about this one,
  * so host is compared before boot. This governs run resolution only: session locks
  * keep `observeLiveness` alone (RSK-003).
@@ -298,7 +302,7 @@ export function ownerLiveness(procDir: string, here: HostIdentity, owner: RunOwn
   if (here.host !== owner.host) {return 'unknown';}
   // The owner's boot has ended: its pid table is not consulted.
   if (here.boot !== owner.boot) {return 'stale';}
-  if (here.pidns !== owner.pidns) {return 'unknown';}
+  if (here.pidns !== owner.pidns || here.timens !== owner.timens) {return 'unknown';}
   return observeLiveness(procDir, owner.pid, owner.starttime);
 }
 

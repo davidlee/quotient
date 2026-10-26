@@ -580,7 +580,7 @@ export function resultDocument(reply: Record<string, any>): Record<string, any> 
 
 /** One process as a fake pid table should show it: its start time, and the host
  *  facts the session module reads to decide where a pid means something. */
-export type FakeProcOwner = { pid: number; starttime: string; boot?: string; pidns?: string; nspid?: number[] };
+export type FakeProcOwner = { pid: number; starttime: string; boot?: string; pidns?: string; timens?: string; nspid?: number[] };
 
 /**
  * A pid table staged under DIR, for `ServeOptions.procDir` and
@@ -588,7 +588,8 @@ export type FakeProcOwner = { pid: number; starttime: string; boot?: string; pid
  * `starttime` at field 22, PLUS this process's own stat line copied from /proc/self, so
  * an acquisition always finds its own start time under any staged owner.
  *
- * `boot` stages `sys/kernel/random/boot_id`, `pidns` a `self/ns/pid` symlink and
+ * `boot` stages `sys/kernel/random/boot_id`, `pidns` and `timens` the `self/ns/pid`
+ * and `self/ns/time` symlinks, and
  * `nspid` the `NSpid:` line of `self/status` (an empty list omits it). Nothing
  * staged is nothing written: the reader sees null. `'unreadable'` is a path that
  * does not exist, which is what an unreadable pid table looks like.
@@ -624,10 +625,11 @@ export function fakeProc(dir: string, staged: FakeProcOwner | 'unreadable'): str
     writeFileSync(bootId, `${staged.boot}\n`);
   }
 
-  if (staged.pidns !== undefined) {
-    const ns = join(procDir, 'self', 'ns', 'pid');
+  for (const [name, id] of [['pid', staged.pidns], ['time', staged.timens]] as const) {
+    if (id === undefined) {continue;}
+    const ns = join(procDir, 'self', 'ns', name);
     mkdirSync(dirname(ns), { recursive: true });
-    symlinkSync(staged.pidns, ns);
+    symlinkSync(id, ns);
   }
 
   return procDir;
