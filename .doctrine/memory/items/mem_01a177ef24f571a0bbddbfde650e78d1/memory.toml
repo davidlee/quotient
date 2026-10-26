@@ -1,0 +1,46 @@
+memory_uid = "mem_01a177ef24f571a0bbddbfde650e78d1"
+memory_key = "mem.fact.doctrine.verify-vt-needs-record-delta"
+schema_version = 1
+memory_type = "fact"
+status = "active"
+title = "verify-vt reads a hand-committed phase's tests as UNATTRIBUTABLE until its delta is recorded"
+summary = "After committing an orchestrated/solo phase in the main tree, run doctrine slice record-delta <slice> <PHASE> --commit <sha>; verify-vt attributes files through that registry, not commit subjects"
+created = "2026-10-26"
+updated = "2026-10-26"
+
+[scope]
+paths = []
+globs = []
+commands = ["doctrine slice verify-vt", "doctrine slice record-delta"]
+tags = ["orchestration"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "commit"
+commit = "f9944c667f7bfde69253a688593091abfc5e857a"
+tree = "7932eaf3fc51c43205d172e399ae68a39b97d06a"
+ref_name = "refs/heads/main"
+checkout_state_id = ""
+base_commit = "f9944c667f7bfde69253a688593091abfc5e857a"
+verified_sha = ""
+normalizer = ""
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
+[[source]]
+kind = "slice"
+ref = "SL-004"
+
