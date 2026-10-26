@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 69
+slug = "budget-bytes-bounds-included-results-the-first-settled-result-is-always-included-whole"
+title = "budget_bytes bounds included results; the first settled result is always included whole"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "The pre-reopening draft bounds the serialised wait envelope (default 64 KiB, max 1 MiB) yet never counts status-only entries, and reduces non-fitting results to status. A single result can exceed the max (transcript_budget_bytes is policy-raisable without cap; the final answer is unbounded), so it was uncollectable through wait. tasks/get must return the whole result."
+choice = "budget_bytes (default 64 KiB, cap 1 MiB, clamped) bounds the sum of results included in one answer; envelope metadata and status-only entries are not counted. The first settled entry in target order is always included whole, even if it alone exceeds the budget, so any result is collectable by waiting on it alone and every call makes progress. The contract states that one answer can exceed the budget by at most that one result. tasks/get is never budgeted."
+alternatives = ["Hard wire bound with oversized results read from result.json on disk", "Hard bound; oversized results only via tasks/get or blocking pi_agent"]
+rationale = "Protects the caller's context in the common case without making any result uncollectable; needs no filesystem access by the caller."
+consequences = ["Refines DEC-062's byte budget"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

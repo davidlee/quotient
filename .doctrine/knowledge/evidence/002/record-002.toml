@@ -1,0 +1,25 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 2
+slug = "claude-code-mcp-limits-30-minute-stdio-idle-timeout-2-minute-auto-backgrounding-tasks-only-on-2026"
+title = "Claude Code MCP limits: 30-minute stdio idle timeout, 2-minute auto-backgrounding, tasks only on 2026-07-28 main-conversation calls"
+record_kind = "evidence"
+status = "captured"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+datum = "Claude Code docs (code.claude.com/docs/en/mcp.md, env-vars.md; cached ~/dev/doctrine/docs/claude, fetched 2026-10-26); local Claude Code 2.1.310. Stdio servers have no per-request timer; MCP_TOOL_TIMEOUT defaults to ~28h wall clock; the binding limit is the idle timeout (CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT), 30 min for stdio, reset only by a response or progress notification; a per-server .mcp.json timeout >=1000ms floors the idle window. Main-conversation MCP calls still running after 2 min move to a background task (CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS); not subagent calls. readOnlyHint tools run in parallel with other read-only calls. MCP tasks (public beta, v2.1.304+): stdio/HTTP servers on protocol 2026-07-28, terminal CLI and Agent SDK sessions that fetch feature flags, main-conversation calls only (not subagents); client polls tasks/get (default 2000ms, pollIntervalMs clamped 250-30000), sends tasks/cancel; does not use tasks/result, tasks/list, notifications/tasks; -32602 on tasks/get read as unknown task id; completed task result is the normal tools/call result, isError reported as failure; taskId <=128 printable ASCII; keep the id answerable across connections (asked again after resume). Claude Code probes stdio servers with server/discover by default and falls back to initialize."
+provenance = "citation"
+confidence = "high"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)

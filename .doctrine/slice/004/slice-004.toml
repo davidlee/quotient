@@ -28,7 +28,91 @@ intent = "scope-relevant"
 
 [[selector]]
 selector = "README.md"
-intent = "scope-relevant"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/server.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/tools.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/admission.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/execute.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/runs.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/waiting.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/documents.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/evidence.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/result.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/help/help.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "help/*.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/design.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/pi-agent-result-2.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/pi-run-handle-1.md"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/pi-agent-wait-1.md"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/server.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/help/help.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/runs.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/waiting.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/documents.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/admission.test.ts"
+intent = "design-target"
 
 [[relation]]
 label = "references"
@@ -64,6 +148,26 @@ label = "references"
 role = "concerns"
 descriptor = "client scheduling probe"
 target = "EVD-001"
+
+[[relation]]
+label = "references"
+role = "concerns"
+target = "EVD-002"
+
+[[relation]]
+label = "references"
+role = "concerns"
+target = "EVD-003"
+
+[[relation]]
+label = "references"
+role = "concerns"
+target = "EVD-004"
+
+[[relation]]
+label = "references"
+role = "originates_from"
+target = "IDE-003"
 
 # STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
 # `[relationships]` axis. Slices carry no typed STRUCTURAL

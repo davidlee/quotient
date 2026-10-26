@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 55
+slug = "serve-mcp-2026-07-28-statelessly-beside-legacy-initialize-2025-06-18"
+title = "Serve MCP 2026-07-28 statelessly beside legacy initialize / 2025-06-18"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "SL-004 objective 7 binds the tasks extension, which exists only under 2026-07-28 (EVD-004). Codex and older Claude Code clients speak initialize / 2025-06-18 (EVD-003, EVD-002)."
+choice = "One process serves both eras. Modern: server/discover (resultType, supportedVersions, capabilities.extensions incl. io.modelcontextprotocol/tasks, instructions, _meta serverInfo, ttlMs, cacheScope); every request read for _meta io.modelcontextprotocol/protocolVersion and clientCapabilities; every result carries resultType 'complete' (or 'task'); tools/list carries ttlMs and cacheScope; an unsupported version is error -32022 {supported, requested}. Legacy: initialize / notifications/initialized / ping at 2025-06-18, unchanged. notifications/cancelled serves both."
+alternatives = ["Legacy only; defer tasks (the prior inq-9 deferral)", "Modern only (breaks Codex)"]
+rationale = "Tasks need the modern era; Codex and older clients still need the legacy one; the spec allows one dual-era stdio server and clients probe server/discover then fall back."
+consequences = ["A protocol section joins the design", "Request reader dispatches on era per request"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

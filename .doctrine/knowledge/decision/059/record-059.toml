@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 59
+slug = "tasks-carry-ttlms-null-timestamps-from-the-run-record-or-evidence-dir-and-pollintervalms-2000"
+title = "Tasks carry ttlMs null, timestamps from the run record or evidence dir, and pollIntervalMs 2000"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Task requires createdAt, lastUpdatedAt and ttlMs (int|null); pollIntervalMs is optional (EVD-004). Results persist to result.json and survive restarts (DEC-049)."
+choice = "ttlMs: null (retention is the evidence dir's, not the server's). createdAt and lastUpdatedAt come from the run record, or from the evidence dir after a restart. pollIntervalMs: 2000."
+alternatives = ["A finite ttlMs with expiry"]
+rationale = "quotient never expires a result it can read from disk; a fixed poll hint is enough for runs measured in minutes."
+consequences = ["The evidence dir must yield both timestamps after a restart"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 60
+slug = "task-created-runs-are-owned-by-their-caller-and-excluded-from-waits-default-unacknowledged-set"
+title = "Task-created runs are owned by their caller and excluded from wait's default unacknowledged set"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-051's default wait selects every unacknowledged run; a client polling tasks/get owns its run and never acks it."
+choice = "Runs created as tasks are not in wait's default selection; naming one explicitly still works."
+alternatives = ["Include them, so they accumulate unacknowledged"]
+rationale = "Keeps the default set meaning 'runs a bespoke-tool caller has not yet collected'."
+consequences = ["The run record notes how the run was created"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

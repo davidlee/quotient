@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 58
+slug = "run-documents-are-tasks-with-quotient-extras-result2-unchanged-iserror-only-for-refused-calls"
+title = "Run documents are Tasks with quotient extras; result/2 unchanged; envelopes set isError only for refused calls (replaces DEC-052)"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-052 defined pi-run-handle/1, pi-agent-wait/1 and pi-agent-ack/1 with quotient field names. Hewing to the tasks wire format makes the bespoke tools and tasks/get describe a run identically."
+choice = "pi-agent-result/2 is unchanged. A run document is a Task with its field names verbatim (taskId, status, statusMessage, createdAt, lastUpdatedAt, ttlMs, pollIntervalMs) plus snake_case extras: lane, key, session, artifacts {dir}, state (queued|running|settled|lost, the finer state status collapses). pi-run-handle/1 = {schema} & run document; answers start. pi-agent-wait/1 = {schema, until, timed_out, truncated, runs: [run document & {result: the pi-agent-result/2 object or null, status_only}]}; answers wait and cancel. pi-agent-ack/1 = {schema, runs: [{taskId, acknowledged, reason?}]}; not-settled and unknown refused per entry, the request validated whole before any ack applies. A queued run cancelled settles through result/2's failed arm, cause cancelled. Blocking pi_agent and the result carried by a completed task keep today's rule (isError unless completed). The start, wait, ack and cancel envelopes set isError only when the call itself is refused (start's result/2 refusal, an invalid request); handles, envelopes and ack answers are never errors because of the runs inside them. Mixed camelCase/snake_case is accepted."
+alternatives = ["Keep DEC-052's names (run, state) and map at the tasks boundary", "Wait entries carry a string-encoded CallToolResult"]
+rationale = "One shape for one run across both paths; result stays a parsed object so callers do not decode JSON inside JSON."
+consequences = ["Supersedes DEC-052", "Handle field run becomes taskId"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-052"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

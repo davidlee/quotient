@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 65
+slug = "the-cancel-mark-is-intent-only-task-status-follows-the-committed-outcome-taskscancel-acknowledges"
+title = "The cancel mark is intent only; Task status follows the committed outcome; tasks/cancel acknowledges at once"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Tasks: completed, failed and cancelled are terminal and never change; tasks/cancel is acknowledged with an empty result and is cooperative, so a task may still reach a non-cancelled terminal status. The pre-reopening draft marks every cancel target cancelled before awaiting, and DEC-057 did not say whether mark or result decides status."
+choice = "The cancel mark is intent only: it stops lanes launching the run (DEC-053) and drives the ladder, never Task status. Status derives only from the committed outcome: result.json state cancelled -> cancelled; any other settled result -> completed; lost -> failed; until then working, statusMessage 'cancelling' once marked. tasks/cancel marks, starts the ladder and answers the empty ack at once, without awaiting settlement; on a terminal task it is an ack and a no-op; an unknown taskId is -32602. pi_agent_cancel keeps DEC-053 (answers once all targets settle) and reports each run's actual outcome."
+alternatives = ["The mark is the outcome: status cancelled from the mark"]
+rationale = "Terminal immutability holds; the same status is rebuilt from result.json after a restart; the input reader is never blocked by tasks/cancel."
+consequences = ["Refines DEC-057's cancelled row: status follows result.json, not the mark"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

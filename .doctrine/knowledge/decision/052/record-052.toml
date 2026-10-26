@@ -26,7 +26,7 @@ notes       = []
 
 [relationships]                 # verb-written edges (set by doctrine supersede)
 supersedes    = ["DEC-042"]   # record ids this one replaces (set by doctrine supersede)
-superseded_by = []   # set on superseded predecessor (verb-written)
+superseded_by = ["DEC-058"]   # set on superseded predecessor (verb-written)
 
 [[relation]]
 label = "shapes"

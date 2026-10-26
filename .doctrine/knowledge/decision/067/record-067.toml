@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 67
+slug = "runs-record-their-owning-server-a-live-or-unknown-owner-reads-foreign-working-only-a-dead-owner"
+title = "Runs record their owning server; a live or unknown owner reads foreign (working), only a dead owner reads lost (failed)"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Every quotient server of a user shares one run dir. A server resolving another live server's handle on disk finds no result.json and, under the pre-reopening draft, calls it lost -> failed, a terminal status that would later change. session.ts already judges a process alive by pid plus kernel start time (observeLiveness: alive|stale|unknown)."
+choice = "The admitted audit record carries the owning server's pid and kernel start time. A run resolved on disk: valid result.json -> settled; no result and owner alive or unknown -> new state foreign, Task working, statusMessage naming the owner; owner stale -> lost -> failed. Only a confirmed-dead owner yields a terminal status. wait re-reads foreign runs from disk every pollIntervalMs so a result.json is seen when it lands. No cross-process cancellation: tasks/cancel on a foreign run is a no-op ack; pi_agent_cancel reports it foreign, not cancelled."
+alternatives = ["A run without result.json is never terminal (lost runs poll forever)", "Signal the owning server to cancel"]
+rationale = "Every terminal status is true; reuses the liveness check session locks already depend on."
+consequences = ["Adds foreign to DEC-058's state extra and to DEC-057's mapping (foreign -> working)", "wait gains a disk-polling path for foreign runs"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 61
+slug = "tasksget-and-taskscancel-are-served-tasksupdate-is-an-empty-no-op-notificationstasks"
+title = "tasks/get and tasks/cancel are served; tasks/update is an empty no-op; notifications/tasks, subscriptions/listen and MRTR are not implemented"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "tasks/update supplies inputResponses for input_required (EVD-004); pi runs never ask for input. Status notifications are optional."
+choice = "Serve tasks/get and tasks/cancel. tasks/update answers an empty ack and does nothing; no run ever enters input_required. Not implemented: notifications/tasks, subscriptions/listen, MRTR."
+alternatives = ["Refuse tasks/update"]
+rationale = "Minimum conforming surface; polling at pollIntervalMs suffices."
+consequences = ["sec-6 gains tasks/cancel"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

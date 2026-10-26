@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 68
+slug = "unknown-handles-are-listed-apart-from-tasks-in-wait-and-cancel-answers"
+title = "Unknown handles are listed apart from tasks in wait and cancel answers"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "tasks/get answers an unknown taskId with -32602, so it is not a task (DEC-057). DEC-062 reports every wait target and counts unknown as done. A handle reaches a client only after its admitted record exists (DEC-066), so an unknown handle never becomes a real run."
+choice = "pi-agent-wait/1 (wait and cancel) gains unknown: [taskId, ...]; runs holds only Tasks. Every target is still reported; until counts unknown as done. Ack keeps its per-entry refusal {taskId, acknowledged: false, reason: 'unknown'}."
+alternatives = ["An unknown handle as a failed Task with invented timestamps", "Refuse the whole call request-invalid"]
+rationale = "Mirrors tasks/get; every runs entry has one shape; no field is invented."
+consequences = ["Refines DEC-058's pi-agent-wait/1 shape and drops unknown from its state extra"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

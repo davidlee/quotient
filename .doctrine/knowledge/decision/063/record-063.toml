@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 63
+slug = "each-requests-era-comes-from-its-own-meta-modern-validated-unknown-version-32022-absent-served-as"
+title = "Each request's era comes from its own _meta: modern validated, unknown version -32022, absent served as legacy"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "2026-07-28 versioning: a request carrying modern _meta is served statelessly; initialize selects legacy semantics for the process; a dual-era server MAY serve both concurrently; an unsupported version MUST answer -32022 with the supported list. Today quotient gates nothing on initialize and always answers 2025-06-18."
+choice = "Classify each request by its own _meta, with no process-wide era. _meta io.modelcontextprotocol/protocolVersion present and 2026-07-28: modern, validated before admission. Present but unknown or a legacy revision: -32022 {supported: [2026-07-28], requested} (amended 2026-10-26 by the user: legacy is reached only through initialize, so listing it would invite a retry this rule refuses). Malformed _meta (version not a string, clientCapabilities not an object): -32602. Absent: legacy, served exactly as today (no initialize gating). A modern request after initialize is served as modern. server/discover is always modern; without a version in _meta it is -32602."
+alternatives = ["First request latches the era for the process", "As chosen, but legacy calls refused before initialize"]
+rationale = "The spec's own rule applied per request; no new state; Codex and today's tests are unaffected; tasks semantics are unreachable without modern _meta."
+consequences = ["The request reader validates _meta before admission", "Legacy path unchanged"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

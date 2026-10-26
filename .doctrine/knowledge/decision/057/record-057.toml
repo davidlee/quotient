@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 57
+slug = "run-states-map-to-task-status-queuedrunning-working-settled-completed-cancelled-cancelled-lost"
+title = "Run states map to Task status: queued/running working, settled completed, cancelled cancelled, lost failed, unknown -32602"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Task status is working|input_required|completed|failed|cancelled (EVD-004); quotient runs are queued, running, settled, lost or unknown (DEC-052)."
+choice = "queued and running -> working, statusMessage says which. settled -> completed; its result is the CallToolResult pi_agent answers today (isError as today). A run cancelled -> cancelled. lost -> failed, with a JSON-RPC error whose message points at the evidence dir. An unknown taskId in tasks/get or tasks/cancel -> JSON-RPC -32602."
+alternatives = ["settled-but-failed runs -> failed (loses the result/2 document)"]
+rationale = "completed means the call produced its result, mirroring pi_agent's blocking answer; failed is reserved for runs whose outcome is unknown."
+consequences = ["A failed delegated run is a completed task whose result has isError true"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

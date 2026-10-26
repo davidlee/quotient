@@ -50,6 +50,14 @@ pi_agent ── blocks for the whole run    pi_agent_start ── returns a run 
 6. **Contract and docs.** The tool list, the result contract (new document
    version if the shape changes), `quotient help` (tool, agent, orchestrate
    sections) and the README say how to drive concurrent runs.
+7. **MCP tasks binding** (user, 2026-10-26, widened from IDE-003 after
+   EVD-002..004). Serve MCP protocol revision 2026-07-28 statelessly
+   (`server/discover`, per-request `_meta`, `resultType`) beside the legacy
+   `initialize` / 2025-06-18 path, and bind the
+   `io.modelcontextprotocol/tasks` extension over the run registry:
+   `pi_agent` answers a task when the request declares the extension;
+   `tasks/get`, `tasks/cancel`, `tasks/update` are served. The wrapper
+   documents follow the tasks wire format as closely as possible.
 
 ## Non-Goals
 
@@ -71,6 +79,8 @@ Coarse; design fixes the exact set.
   in-flight bound.
 - `src/help/**`, `help/*.md`, `README.md`.
 - `docs/contract/**`: result and policy contracts.
+- The JSON-RPC layer in `server.ts`: protocol era per request,
+  `server/discover`, `tasks/*` methods.
 
 ## Open questions
 
@@ -80,8 +90,10 @@ idempotency key); run records and disk-backed results DEC-049; lanes,
 re-admission at launch, `needs_success` DEC-050; pure wait with byte budget
 DEC-051; contracts and `isError` DEC-052; cancellation and EOF DEC-053;
 annotations DEC-054; docs including a full README pass DEC-045. OQ-4 → not
-now (IDE-005). Deferred: MCP tasks binding (IDE-003), listing acknowledged
-runs (IDE-004). ASM-002 invalidated.
+now (IDE-005). Deferred: listing acknowledged runs (IDE-004). ASM-002
+invalidated. Reopened 2026-10-26 for objective 7 (tasks binding, dual-era
+protocol); the agreed answers are in `notes.md` and supersede DEC-052's
+document shapes and DEC-051's default timeout.
 
 ## Risks
 

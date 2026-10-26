@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 70
+slug = "implicit-wait-selections-lanes-included-exclude-task-created-runs-those-are-reached-only-by-taskid"
+title = "Implicit wait selections, lanes included, select only pi_agent_start runs; owned runs are reached only by name"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-060 excludes task-created runs from wait's default selection, but named lanes contributed every unacknowledged run; pi_agent accepts lane, so a mixed lane accumulates never-acked task runs and until:any returns at once."
+choice = "Every implicit wait selection (the default and named lanes) selects only unacknowledged runs created by pi_agent_start. Runs created by blocking pi_agent (DEC-049) or as tasks (DEC-060) are owned and selected only by naming them. Lanes still order every run: ordering and selection are separate."
+alternatives = ["Task-created runs are ackable; lanes keep selecting all"]
+rationale = "One rule for every implicit selector: owned runs are never implicit targets; task callers carry no ack chore. (Wording corrected 2026-10-26 at the user's instruction: the first text wrongly included blocking pi_agent runs, contradicting DEC-049.)"
+consequences = ["Extends DEC-060 to named lanes; refines DEC-062's lane selection"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 62
+slug = "wait-is-pure-selectors-until-all-or-any-a-45-s-default-timeout-and-a-response-byte-budget-replaces"
+title = "wait is pure: selectors, until all or any, a 45 s default timeout, and a response byte budget (replaces DEC-051)"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "DEC-051 defaulted timeout_s to the policy wall_clock_s. Codex aborts a tool call at 60 s (EVD-003); Claude Code's stdio idle timeout is 30 min (EVD-002)."
+choice = "As DEC-051, except timeout_s defaults to 45 s, still capped by the policy wall_clock_s. Arguments: runs?, lanes?, until?, timeout_s?, status_only?, budget_bytes?. Both selectors omitted = every unacknowledged run not created as a task; an empty array selects nothing; named runs always returned; each named lane contributes its unacknowledged runs at arrival. Unknown handles resolve on disk (settled via result.json, or lost); unknown only with no evidence. until all (default) or any; settled, lost and unknown count as done; every target always reported. On timeout every target is reported in its current state (timed_out true). Order: named runs, lanes, start order; deduplicated. Bounded by budget_bytes (default and cap set by the server); entries that do not fit are status-only and flagged. status_only omits results. notifications/cancelled on a wait ends the wait only. Help states both clients' limits and teaches: loop wait, then ack the settled runs received."
+alternatives = ["Default to wall_clock_s (DEC-051)", "Default 25 s"]
+rationale = "45 s fits inside Codex's 60 s with margin and is far inside Claude Code's window; a caller loops wait."
+consequences = ["Supersedes DEC-051"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-051"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

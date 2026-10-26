@@ -1,0 +1,25 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 3
+slug = "codex-mcp-limits-hard-60s-tool-timeout-read-only-marking-drives-approval-no-tasks-or-2026-07-28"
+title = "Codex MCP limits: hard 60s tool timeout, read-only marking drives approval, no tasks or 2026-07-28 support documented"
+record_kind = "evidence"
+status = "captured"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+datum = "Codex docs (learn.chatgpt.com/docs extend/mcp.md, config-file/config-reference.md; cached ~/dev/doctrine/docs/codex, fetched 2026-10-26). mcp_servers.<id>.tool_timeout_sec defaults to 60 (hard; no idle window or backgrounding documented); startup_timeout_sec 10. default_tools_approval_mode 'writes' prompts for tools not marked read-only. No mention of MCP protocol 2026-07-28, server/discover, the tasks extension, or parallel execution of read-only tools (the parallelism claim rests on one secondary source in SL-004 research). Confidence medium: absence of documentation, not a probe."
+provenance = "citation"
+confidence = "medium"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)

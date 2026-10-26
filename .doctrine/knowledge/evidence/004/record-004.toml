@@ -1,0 +1,25 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 4
+slug = "mcp-2026-07-28-is-stateless-and-carries-tasks-as-an-extension-serverdiscover-per-request-meta-task"
+title = "MCP 2026-07-28 is stateless and carries tasks as an extension: server/discover, per-request _meta, Task wire shape"
+record_kind = "evidence"
+status = "captured"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+datum = "modelcontextprotocol.io specification/2026-07-28 (changelog, server/discover, basic/versioning, basic/transports/stdio) and ext-tasks schema/2026-07-28/schema.ts, read 2026-10-26. 2026-07-28 removes initialize/notifications/initialized and ping; every request carries _meta io.modelcontextprotocol/protocolVersion and clientCapabilities; servers MUST implement server/discover {resultType, supportedVersions, capabilities{extensions}, instructions, _meta serverInfo, ttlMs, cacheScope}; unsupported version -> error -32022 {supported, requested}; all results carry resultType ('complete'); list results carry ttlMs and cacheScope; a dual-era server MAY serve initialize (legacy) and per-request _meta (modern) in one process; stdio clients probe with server/discover and fall back to initialize on any non-modern error. notifications/cancelled remains the stdio cancel. Tasks extension io.modelcontextprotocol/tasks: CreateTaskResult = Result & Task & {resultType:'task'}, Task {taskId, status working|input_required|completed|failed|cancelled, statusMessage?, createdAt, lastUpdatedAt, ttlMs (int|null), pollIntervalMs?}; tasks/get {taskId} -> DetailedTask + resultType 'complete' (completed carries result = original request's result; failed carries JSON-RPC error); tasks/update {taskId, inputResponses} and tasks/cancel {taskId} -> empty ack; cancellation cooperative; task durably created before the response; server must not return a task unless the request declared the extension; notifications/tasks optional via subscriptions/listen."
+provenance = "citation"
+confidence = "high"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)

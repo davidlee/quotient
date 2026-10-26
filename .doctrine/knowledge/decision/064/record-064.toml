@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 64
+slug = "a-client-cancelled-request-gets-no-reply-in-either-era-its-outcome-stays-on-disk"
+title = "A client-cancelled request gets no reply in either era; its outcome stays on disk"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "2025-06-18 cancellation: the receiver SHOULD not send a response for the cancelled request. 2026-07-28 stdio: the server MUST NOT send any further messages for it. Today a cancelled blocking pi_agent answers its cancelled result (server.ts reply gate checks only closure)."
+choice = "A request named by notifications/cancelled gets no reply, in either era, from the moment the notification is read; a reply already sent stands. Its run still takes the one termination ladder (cause cancelled), writes its evidence and result.json, and reads cancelled there. A task-created pi_agent has already answered its CreateTaskResult, so the notification names a completed request and is ignored; tasks/cancel is how a task is cancelled. Operator-switch cancellation is not a client cancellation and still replies."
+alternatives = ["Split by era: legacy keeps today's cancelled reply"]
+rationale = "One rule conformant in both eras; the reply gate needs no era; the outcome stays recoverable from disk."
+consequences = ["The reply gate checks the request's cancelled mark as well as server closure", "Tests assert silence after cancellation"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

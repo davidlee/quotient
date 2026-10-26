@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 66
+slug = "the-admitted-audit-record-is-the-publication-line-after-it-the-run-dir-is-never-deleted-and"
+title = "The admitted audit record is the publication line: after it the run dir is never deleted and result.json is written atomically"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Tasks must be durably created before the response. Start writes an 'admitted' audit record before answering, but runChild deletes the run dir when its later 'spawn' audit fails (spawn.ts removeRun), so a queued, already-published run would become unknown after a restart. Audit records carry ts; result.json is written non-atomically."
+choice = "The 'admitted' audit record is the publication line. Before it, today's rule: discard the dir and refuse audit-failed. After it, nothing deletes the run dir: a launch-time failure (spawn audit, spawn, re-admission refusal at launch) settles the run through pi-agent-result/2's refusal or failed arm and writes result.json; if even that cannot be written the run is lost from that moment, in this server too: Task failed, wait state lost with no result; only a blocking pi_agent call still answers the in-memory audit_failed document (amended 2026-10-26 by the user: a terminal status must not differ before and after a restart). createdAt = the admitted record's ts; lastUpdatedAt = the latest audit record's ts or the result.json write. result.json is written to a temp file and renamed into place."
+alternatives = ["Keep today's deletion; a published run that fails at launch becomes unknown"]
+rationale = "Durable task creation holds on every path; timestamps already exist on disk; readers see no result or a whole one."
+consequences = ["runChild no longer removes a published run's dir", "A launch failure after admission is a settled refusal, not a call refusal"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 56
+slug = "pi-agent-answers-a-createtaskresult-when-the-request-declares-the-tasks-extension-otherwise-it"
+title = "pi_agent answers a CreateTaskResult when the request declares the tasks extension; otherwise it blocks"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Claude Code supports tasks on modern-era requests (EVD-002); Codex has a hard 60 s tool timeout and no tasks (EVD-003). The server must not return a task unless the request declared io.modelcontextprotocol/tasks (EVD-004)."
+choice = "pi_agent answers CreateTaskResult (Task & resultType 'task') when the request's _meta clientCapabilities declares io.modelcontextprotocol/tasks, the run durably recorded before the answer; otherwise it blocks and answers pi-agent-result/2 as today. pi_agent_start, _wait, _ack and _cancel stay, for subagents and Codex. tasks/get and tasks/cancel act on any run, whichever tool started it."
+alternatives = ["Every tool task-capable", "Replace start/wait with tasks only"]
+rationale = "One tool gains the standard non-blocking path without breaking blocking callers; the bespoke tools still serve clients without tasks."
+consequences = ["pi_agent's answer depends on the request's declared capabilities"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"
