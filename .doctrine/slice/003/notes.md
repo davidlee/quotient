@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · audit (RV-011, round 2 open) · 9c75e2b
+fresh-as-of: 2026-10-26 · reconcile (RV-011 concluded, 3 rounds) · 1347f3b
 
 ### Produced
 - PHASE-01..05: 4c3152e, cf3cf74, a2e9fcd, ef83954+cce3d80, 9adcf9a, dc46a9e; VH-1 PASS read+write
@@ -15,19 +15,22 @@ fresh-as-of: 2026-10-26 · audit (RV-011, round 2 open) · 9c75e2b
 - PHASE-07 builder refusals, piFiles in tail, eval-refusal table: e4e8b58
 - PHASE-08 docs examples as fixtures, read-root text fixed: 8fc5495
 - post-phase hardening: 3f50a48 (unquoted $, \$, no \001), 701c96d (.. resolution, \037 separator)
+- RV-011 round 2 fixes: af01198 (F-20..F-26), 443f5f5 (residue/docs text); gate rv011-r2-gate.log
+- RV-011 round 3 fixes: 1347f3b (F-27, F-30, F-31, F-33, F-34; worker agent); gate rv011-r3-gate.log
+- DEC-029 Amendments 2–3, DEC-033 Amendment, DEC-036 Amendments 1–2
 - minted: ISS-002 — hostile-audit QUOTIENT_ guard fails open without compgen; QUE-001 (answered by DEC-036)
 
 ### Learned
 - mem.fact.quotient.no-doctrine-ids-in-shipped-text — drift test fails the gate on ids in nix/ docs/ etc; print the gate's own exit when backgrounding
-- Codex (OpenAI) cyber filter kills turns briefed as "attack"/"make eval execute"; frame as correctness/equivalence review
+- Codex (OpenAI) cyber filter kills turns briefed as "attack"/"make eval execute"; frame as correctness/equivalence review (round 3 brief, scratchpad codex-brief-r3.md, ran clean)
+- bash-as-parser desyncs come from quoting contexts the inert parse cannot see: $(…), ${…}, backticks inside double quotes, tilde provenance (DEC-029 Amendments 2–3); probe by comparing shell_words with bash eval word-for-word
+- builder/checker input contract: anything jail.nix quotes that the checker refuses is a false refusal; refuse it at evaluation (DEC-036) or read it
+- nixfmt over whole files reformats unrelated code here (repo not nixfmt-clean); format only touched lines
 - mem.fact.doctrine.design-apply-payload — design apply --input shape
 
 ### Open
-- RV-011 F-20..F-24 — Codex round 2: glob/brace, unresolved .. equality, piFiles canonical containment, --bind-fd, quoted backtick (fix-now, within DEC-029..032 intent)
-- RV-011 F-25 — multi-line env literal falsely refused: operator decision (builder refusal vs read multi-line statements)
-- RV-011 F-1, F-3, F-6, F-16, F-17 — reconciliation brief items (design.md fold-in of DEC-023..037; residues; x86_64-only; mis-targeted PHASE-02/03 VT mandates; policy contract step-8 sentence)
-- DEC-033 reading — context strings in the store accepted for piFiles; tell operator
-- DEC-017 — --args / add-runtime binds unchecked (declared residue)
+- RV-011 Reconciliation Brief — design.md sec-2/3/5 fold-in of DEC-023..037 (+amendments); residues; x86_64-only Risks line; F-16 notes line; policy contract step-8 sentence (F-17)
+- DEC-017 — --args / add-runtime binds unchecked (declared residue); host symlinks in bound trees (runtime residue)
 - IMP-003 — selection-gap note at close
 - ISS-002 — outside slice
 

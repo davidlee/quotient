@@ -7,7 +7,7 @@ title = "a literal $ in an env value or protect path is refused at evaluation"
 record_kind = "decision"
 status = "accepted"
 created = "2026-10-25"
-updated = "2026-10-25"
+updated = "2026-10-26"
 tags = []
 
 [facet]                         # every field typed; seeded empty (captured later)

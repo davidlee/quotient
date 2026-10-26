@@ -10,6 +10,12 @@ raiser    = "raiser"
 responder = "responder"
 rounds_base = 0
 contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Reconciliation audit of SL-003 over three adversarial rounds (Codex gpt-6.1-sol at 564e081, 701c96d, d7ba2be) plus responder probes: conformance, the full gate (green at af01198 and 1347f3b), design text against DEC-023..037, VH-1, VA-1. All 34 findings terminal: fix-now ones verified against commits and fixtures (122/122, each red before its fix), design-wrong ones routed to the Reconciliation Brief, F-6 and F-32 tolerated with rationale. Synthesis and Reconciliation Brief in review-011.md."
 
 [target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
 ref   = "SL-003"
@@ -779,7 +785,7 @@ note = "af01198; the finding's fixtures were red before the fix and pass after (
 
 [[finding]]
 id = "F-27"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "(j) should distinguish tilde expansion from literal tilde paths; observed: a quoted target aliases masked state"
 detail = """
@@ -804,6 +810,11 @@ act = "dispose"
 role = "responder"
 disposition = "fix-now"
 response = "Reproduced by the raiser at runtime. Fix: a ~ is read as the home only where bash expands it (unquoted, word-initial, followed by / or word end); any other ~ on the bwrap line is refused, so a quoted ~ never compares equal to the home. Regression: the raiser's complete-family fragment. Delegated to a worker; commit cited at verify."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "1347f3b; full gate green (rv011-r3-gate.log GATE_EXIT=0); fixtures 122/122; fixtures tilde-quoted-target, tilde-escaped, tilde-user refuse (c), red before; tilde-unquoted and tilde-in-exposure (builder output with a later ~) pass. Narrowed to word starts per the responder's review."
 
 [[finding]]
 id = "F-28"
@@ -859,7 +870,7 @@ note = "Replacing this entry only to correct secondary source references: mounts
 
 [[finding]]
 id = "F-30"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "mount rules should resolve relative targets as bwrap does; observed: tmp bypasses the /tmp mount rule"
 detail = """
@@ -885,9 +896,14 @@ role = "responder"
 disposition = "fix-now"
 response = "Fix: a mount path operand must be absolute or begin with a symbol the check names (unquoted ~, or a $-variable); an ordinary relative path is refused under (c). Regressions: tmp and ./tmp targets, a relative source."
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "1347f3b; full gate green (rv011-r3-gate.log GATE_EXIT=0); fixtures 122/122; fixtures mount-relative-target, mount-dot-relative-target, mount-relative-source refuse (c), red before."
+
 [[finding]]
 id = "F-31"
-status = "answered"
+status = "verified"
 severity = "major"
 title = "mount comparisons should account for symlink traversal; observed: an explicit symlink redirects an accepted bind onto /tmp"
 detail = """
@@ -915,9 +931,14 @@ role = "responder"
 disposition = "fix-now"
 response = "Fix: a mount whose path lies at or under the destination of an earlier --symlink on the line (as canonical_target resolves both) is refused under (c), the conservative arm the raiser offers. Host symlinks inside bound trees stay a runtime residue (design brief). Regression: the raiser's /tmp/work/alias/. fragment."
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "1347f3b; full gate green (rv011-r3-gate.log GATE_EXIT=0); fixtures 122/122; fixture mount-through-symlink refuses (c), red before; mount-beside-symlink passes."
+
 [[finding]]
 id = "F-32"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "a builder-emitted single-quoted literal should remain text; observed: backslash plus backtick is falsely refused"
 detail = '''
@@ -943,9 +964,14 @@ role = "responder"
 disposition = "tolerated"
 response = '''DEC-029 Amendment 2 item 4 refuses \` anywhere as a deliberate cost, like the escaped operators the first amendment already refuses: inside double quotes it is a backtick the inert byte cannot stand for, and the quote-blind prefilter is what keeps the parser simple. It fails closed, the input (a backslash before a backtick in an env value) is exotic, and docs/nix-forms.md's plain-words bullet already lists \` as refused.'''
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Tolerated with DEC-029 Amendment 2 item 4's rationale; documented in docs/nix-forms.md; synthesis records it."
+
 [[finding]]
 id = "F-33"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "newline limits should cover text mkFormFamily emits; observed: a piFiles key builds a launcher the checker cannot read"
 detail = '''
@@ -973,9 +999,14 @@ role = "responder"
 disposition = "fix-now"
 response = "In the direction the operator chose for F-25 (refuse at evaluation what the checker cannot read): the newline refusal extends to piFiles keys. Eval-refusal case added."
 
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "1347f3b; full gate green (rv011-r3-gate.log GATE_EXIT=0); fixtures 122/122; eval-refusal pifiles-key-newline (form-probe row PASS); DEC-036 Amendment 2."
+
 [[finding]]
 id = "F-34"
-status = "answered"
+status = "verified"
 severity = "minor"
 title = "builder and checker should agree on literal control bytes; observed: a carriage-return env value builds but is falsely refused"
 detail = '''
@@ -998,6 +1029,11 @@ act = "dispose"
 role = "responder"
 disposition = "fix-now"
 response = "Same direction as F-33: the builder refuses, at evaluation, a control character other than tab (which the check reads, fixture tab-in-source) in env values, host paths and piFiles keys, by name; message and docs widened from newline to control character. Eval-refusal case for CR."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "1347f3b; full gate green (rv011-r3-gate.log GATE_EXIT=0); fixtures 122/122; eval-refusal env-carriage-return (form-probe row PASS); DEC-036 Amendment 2."
 
 # Findings are append-only `[[finding]]` tables, added by `review raise`.
 # Empty here at creation — a fresh review is Active, awaiting the raiser.

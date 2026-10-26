@@ -31,3 +31,10 @@ Within the principle (a line bash reads otherwise than its words say is refused)
 2. A backtick stands in the second parse as a quoted space then an unquoted one, so it splits the line unless single quotes hold it: a single-quoted backtick is text (F-24); a double-quoted one opens a command substitution and is refused.
 3. A `$(` or `$[` anywhere refuses the line, and every `${…}` must be a name, `name[@]`, or `name:-default` with no quote, escape, substitution, paren or brace. Inside double quotes these open a quoting context of their own, which the inert parse cannot follow (F-26). The builder emits none of them on the lines read; DEC-036 keeps `$` out of single-quoted caller text.
 4. `\$` and `` \` `` refuse the line.
+
+
+## Amendment 3 (2026-10-26, RV-011 F-27, F-30, F-31)
+Within the principle, as built at round 3. Basis: the responder's dispositions of Codex round-3 findings; not put to the operator separately.
+1. A word that opens with a `~` bash does not expand to the home (quoted, escaped, `~name`, `~+`, `~-`) refuses the line: a third parse restores every `~` with `HOME` set to a mark byte and must agree with the first parse at word starts. A `~` later in a word is text (jail.nix single-quotes such words; sample family `tildeexposure`).
+2. Every mount path operand must be absolute or begin with a symbol (an unquoted `~`, a `$`-variable); an ordinary relative path is refused under (c), since bwrap resolves it against a directory no text names. Descriptor sources are not paths.
+3. A mount whose target or source lies at or under an earlier `--symlink` destination on the line is refused under (c): lexical resolution does not follow symlinks. Host symlinks inside bound trees stay a runtime residue.

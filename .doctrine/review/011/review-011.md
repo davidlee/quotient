@@ -55,7 +55,15 @@ evaluation refusal, DEC-036 amended). While weighing F-24's planned fix the
 responder found F-26: inside double quotes, `$(…)`, `${…:-…}` and a backtick
 open quoting contexts the inert parse cannot follow, so a nested quote hid a
 live bind from every rule. The planned F-24 fix would have widened that hole;
-the landed fix refuses those contexts instead (DEC-029 Amendment 2).
+the landed fix refuses those contexts instead (DEC-029 Amendment 2). Round 3
+(Codex, F-27..F-34, at d7ba2be) found three runtime-reproduced mount gaps — a
+quoted `~` compared equal to the home (F-27), a relative target `tmp` that bwrap
+mounts at `/tmp` (F-30), and a bind through an earlier `--symlink` onto `/tmp`
+(F-31) — and three builder/checker input mismatches: `` \` `` in a single-quoted
+value (F-32, tolerated: DEC-029's accepted cost), a newline in a piFiles key
+(F-33) and a carriage return in an env value (F-34). F-27/F-30/F-31 are refused
+under (c) (DEC-029 Amendment 3); F-33/F-34 are refused at evaluation (DEC-036
+Amendment 2).
 
 **Evidence.** Fixture corpus 112/112 (`check-fixtures`), every new case red
 before its fix; the responder's word-for-word probe of `shell_words` against
@@ -65,6 +73,14 @@ af01198 (log: `.doctrine/state/host/rv011-r2-gate.log`, `GATE_EXIT=0`). The
 follow-up 443f5f5 changed only residue and docs text; it ran the fixture corpus
 (112/112) and `npm test` (428 pass, the docs drift test included), not the full
 gate.
+
+**Round-3 evidence.** Fixtures 122/122 (every new refusal case red before its
+fix), `nix flake check` of the test flake, `npm test` 428 pass, full gate at
+the round-3 fix commit 1347f3b (log: `.doctrine/state/host/rv011-r3-gate.log`,
+`GATE_EXIT=0`). Fixes
+implemented by a worker agent under the responder's dispositions; the responder
+reviewed the diff and narrowed the `~` rule to word starts so builder output
+holding a later `~` (`exposure = [ ".../backup~" ]`) still passes.
 
 **Standing risks and accepted tradeoffs.**
 - The check is a text check (design sec-5 Risks). Its parser is bash with
@@ -77,9 +93,15 @@ gate.
 - x86_64-linux is the only verified platform (F-6, tolerated).
 - PHASE-02/03 VT-1 mandates point at the wrong file (F-16); the behaviour is
   verified by the probe rows.
-- No third adversarial round was run over the round-2 fixes. F-26 was found by
-  the responder, not an independent reviewer; the parser is the surface most
-  likely to hold a further desync.
+- Three adversarial rounds each found parser or path gaps; no fourth round ran
+  over the round-3 fixes. The parser and the path rules remain the surface most
+  likely to hold a further gap.
+- A single-quoted `$name` mount path would read as a symbol, but the builder
+  cannot emit one: writeShellApplication's shellcheck fails the build on it
+  (SC2016). A bind source under a jail `--symlink` is refused although sources
+  resolve on the host (conservative over-refusal).
+- Host symlinks inside a bound tree can redirect a mount at launch; the text
+  check cannot see them (a runtime residue, like every behaviour claim).
 
 **For the human.** Route: `mkFormFamily` emits a form wrapper and a jail.nix
 launcher; `checkFormFamily` runs `check.sh` over their text; `shell_words`
@@ -88,7 +110,7 @@ character swapped for an inert byte, and a second parse with operators widened
 to spaces catches anything unquoted. Every rule (a)–(j) reads that argv. Tests
 that bear on it: `nix/checks/fixtures/cases.sh` (the "line-*" and "alias-*"
 cases), `eval-refusals`, and `scripts/form-probe` for runtime behaviour.
-Sources: `doctrine show DEC-029` (the parser and both amendments — why bash is
+Sources: `doctrine show DEC-029` (the parser and its three amendments — why bash is
 the parser and what it refuses), `doctrine show DEC-031` (the alias rule (j)),
 `doctrine show DEC-036` (what the builder refuses at evaluation).
 
@@ -101,15 +123,17 @@ the parser and what it refuses), `doctrine show DEC-031` (the alias rule (j)),
   DEC-032 (piFiles binds in the deferred tail after the mask), DEC-033 with its
   Amendment (path, derivation, or store-context string), DEC-034 (no `HOME`,
   no `QUOTIENT_*` in env/secretEnv), DEC-035 (no `add-cleanup`), DEC-036 with
-  its Amendment (no `$` in env values or protect paths; no newline in env
-  values or host paths). The Interface return set gains `protect`.
-- design.md sec-3 "Reading a launcher" (F-1, F-7..F-10, F-18..F-24, F-26):
-  replace the normalisation steps with DEC-029 and both amendments (bash as the
+  its Amendments (no `$` in env values or protect paths; no control character
+  other than tab in env values, host paths or piFiles keys — F-25, F-33, F-34). The Interface return set gains `protect`.
+- design.md sec-3 "Reading a launcher" (F-1, F-7..F-10, F-18..F-24, F-26, F-27, F-30, F-31):
+  replace the normalisation steps with DEC-029 and its three amendments (bash as the
   parser, inert bytes, the split parse, the refused constructs); normalisation
   (DEC-025) survives only for the builder's fixed line shapes. `bind_words`
   covers `--dev-bind`, `--overlay` and the descriptor binds (DEC-026, DEC-030,
   F-23). Paths are compared as the kernel resolves them lexically; a mount
-  path that climbs above its anchor is refused under (c) (F-21); piFiles binds
+  path that climbs above its anchor, is relative, or lies under an earlier
+  `--symlink` destination is refused under (c) (F-21, F-30, F-31); a word that
+  opens with a `~` bash does not expand is refused (F-27); piFiles binds
   are admitted only when both operands resolve under the store and
   `~/.pi/agent/` (F-22).
 - design.md sec-3 Interface table (F-1): add `PROTECT` (DEC-027).
@@ -121,7 +145,8 @@ the parser and what it refuses), `doctrine show DEC-031` (the alias rule (j)),
 - design.md sec-3 Residues (F-3, F-26): replace the list with what `check.sh`
   prints — runtime binds via `--args` or `RUNTIME_ARGS`; mounts whose source or
   target is a variable expanded at launch; protected state reached through a
-  literal path into the real home; runtime behaviour. Drop the multi-word and
+  literal path into the real home; runtime behaviour (host symlinks inside
+  bound trees included, F-31). Drop the multi-word and
   command-substitution residues (both now read or refused).
 - design.md sec-3 Negative controls (F-1): the `env.QUOTIENT_DEBUG` row is now
   made by doctor (the builder refuses that name, DEC-034); note the

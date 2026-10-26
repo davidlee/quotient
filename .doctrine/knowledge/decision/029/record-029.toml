@@ -7,7 +7,7 @@ title = "check.sh reads the bwrap line with bash's parser, expansions neutralise
 record_kind = "decision"
 status = "accepted"
 created = "2026-10-25"
-updated = "2026-10-25"
+updated = "2026-10-26"
 tags = []
 
 [facet]                         # every field typed; seeded empty (captured later)
