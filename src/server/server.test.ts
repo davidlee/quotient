@@ -1210,6 +1210,32 @@ test('protocol: modern ping and initialize are -32601; a version other than 2026
   assert.match(rpcError(replyIn(replies, 6), -32602).message, /clientCapabilities/);
 });
 
+test('protocol: a message with an id is classified first, notifications/* included: an unknown version is -32022 and cancels nothing, a modern one is -32601', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  server.write(callLine(1, sleeper(rig, 'a')));
+  await waitStarted(rig, 'a');
+
+  const unknownVersion = { 'io.modelcontextprotocol/protocolVersion': '2099-01-01' };
+  server.write(line({ id: 2, method: 'notifications/cancelled', params: { requestId: 1, _meta: unknownVersion } }));
+  assert.equal(rpcError(await waitForReply(server, 2), -32022).message, 'Unsupported protocol version');
+  server.write(modernLine(3, 'notifications/initialized'));
+  rpcError(await waitForReply(server, 3), -32601);
+  server.write(modernLine(4, 'notifications/cancelled', { requestId: 1 }));
+  rpcError(await waitForReply(server, 4), -32601);
+  assert.equal(isAlive(sleeperPid(rig, 'a')), true, 'no classified message cancelled the call');
+  // Legacy, as it always was: a notification carrying an id is still a notification.
+  server.write(line({ id: 5, method: 'notifications/initialized' }));
+  server.write(line({ id: 6, method: 'ping' }));
+  await waitForReply(server, 6);
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [2, 3, 4, 6], 'a legacy notification is never answered');
+
+  release(rig, 'a');
+  const answered = await waitForReply(server, 1);
+  await closeServer(server);
+  assert.equal(resultDocument(answered).state, 'completed');
+});
+
 test('protocol: a modern tools/call naming an unknown tool answers the request-invalid refusal, decorated resultType complete', async () => {
   const { replies } = await converse(
     [modernLine(1, 'tools/call', { name: 'pi_other', arguments: {} })],

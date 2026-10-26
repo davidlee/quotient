@@ -419,18 +419,12 @@ async function handleLine(line: string, context: Context): Promise<void> {
   const hasId = Object.hasOwn(message, 'id');
   const id = hasId ? (message.id as WireId) : null;
 
-  switch (method) {
-    case 'notifications/initialized':
-      return;
-    case 'notifications/cancelled':
-      // DEC-103: a wire act with a defined outcome. The request id it names is
-      // aborted through the one ladder and reports `cancelled`; an id naming no
-      // in-flight call is ignored — never a protocol error, and never a guess.
-      { abortNamed(message.params, context); return; }
+  if (!hasId) {
+    notification(method, message.params, context);
+    return;
   }
 
-  if (!hasId) {return;} // a notification for a request method: nothing to answer
-
+  // Every message with an id is classified first, whatever its method.
   const era = classifyEra(message.params);
   if ('error' in era) {
     reply(context, { id, error: era.error });
@@ -439,6 +433,15 @@ async function handleLine(line: string, context: Context): Promise<void> {
   const request: Request = { id, method, params: message.params };
   if (era.era === 'legacy') {legacyRequest(request, context);}
   else {modernRequest(request, declaresTasks(era), context);}
+}
+
+/** A notification: never answered, in either era. A request method sent as a
+ *  notification has nothing to answer either. */
+function notification(method: string, params: unknown, context: Context): void {
+  // DEC-103: a wire act with a defined outcome. The request id it names is
+  // aborted through the one ladder and reports `cancelled`; an id naming no
+  // in-flight call is ignored — never a protocol error, and never a guess.
+  if (method === 'notifications/cancelled') {abortNamed(params, context);}
 }
 
 /** One request with an id, past its era's classification. */
@@ -473,6 +476,11 @@ const notFound = ({ id, method }: Request): Record<string, unknown> => ({
 function legacyRequest(request: Request, context: Context): void {
   const { id } = request;
   switch (request.method) {
+    case 'notifications/initialized':
+    case 'notifications/cancelled':
+      // A notification that carries an id is handled as one, as it always was.
+      notification(request.method, request.params, context);
+      return;
     case 'initialize':
       reply(context, {
         id,
