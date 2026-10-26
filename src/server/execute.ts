@@ -10,7 +10,7 @@
 // lock and releases it after this resolves (design sec-4, sec-6).
 import { writeFileSync } from 'node:fs';
 import type { Writable } from 'node:stream';
-import { reduce, type Reduced } from '../reduce/reduce.ts';
+import { EMPTY_STATUS, reduce, type Reduced } from '../reduce/reduce.ts';
 import type { Admitted } from './admission.ts';
 import { appendAttempt, type RunLayout } from './evidence.ts';
 import { createGate, type Gate } from './gate.ts';
@@ -26,10 +26,6 @@ export type ExecuteDeps = {
   profileDigest: string;
   helpDigest: string;
 };
-
-/** The reducer's verdict on a stream nothing wrote: a throw during the run has no
- *  transcript to reduce, and the envelope still owes a status. */
-export const EMPTY_STATUS = reduce([], {}).status;
 
 /** Write the run's reduced transcript and status beside the stream they came
  *  from. An evidence write that fails is reported as a failed append: a run whose

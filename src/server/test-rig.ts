@@ -31,8 +31,11 @@ import { resolveLocations } from '../config.ts';
 import { reduce, type Reduced } from '../reduce/reduce.ts';
 import { serve, type ServeOptions } from './server.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
-import { attemptsPath, sha256Hex, type CallId } from './evidence.ts';
+import type { Admitted, Refused } from './admission.ts';
+import { attemptsPath, readAudit, sha256Hex, type CallId, type RunLayout } from './evidence.ts';
 import type { Filesystem } from './profiles.ts';
+import type { Launch, RunRecord } from './runs.ts';
+import type { RunOwner } from './session.ts';
 import { admitCall, type Admission } from './policy.ts';
 import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
@@ -633,4 +636,222 @@ export function fakeProc(dir: string, staged: FakeProcOwner | 'unreadable'): str
   }
 
   return procDir;
+}
+
+// ── The run registry's fake launch (sec-9) ────────────────────────────────
+//
+// `runs.ts` drives every run from a single seam — the `Launch` it is given — so
+// a suite owns the whole lifecycle with no processes: each launch is a
+// `Pending` the test settles by hand, with a document, a refusal, a rejection
+// or a synchronous throw. The one fact the fixture cannot know by itself is
+// which record a `release()` belongs to, so the release spy is *watched*: the
+// test names the record immediately after `start` returns (a launch runs in a
+// microtask, so nothing has fired yet) and each release records what was true
+// at that instant — whether `result.json` had landed, whether the `lost` record
+// was already published, the record's state and the stack depth. A release that
+// fires before the watch records `unwatched`, which is what a publish failure
+// (no record yet) must look like.
+
+/** What one `release()` saw, measured as it was called. */
+export type ReleaseCall = {
+  /** Whether `result.json` existed then. */
+  resultExists: boolean;
+  /** Whether a `lost` audit record was already readable then. */
+  lostReadable: boolean;
+  /** The record's state then, or 'unwatched' when no record had been named. */
+  state: string;
+  /** `new Error().stack`'s frame count then: `settle` must not recurse (EX-4). */
+  frames: number;
+};
+
+/** The release of one fixture session: where its calls land, and the record they
+ *  speak about. */
+export type ReleaseSpy = {
+  calls: ReleaseCall[];
+  release(): void;
+  /** Name the record releases belong to; call it before the launch's microtask. */
+  watch(record: RunRecord): void;
+};
+
+/** One launched run: what the registry handed the fake, and the ways it ends. */
+export type Pending = {
+  record: RunRecord;
+  admitted: Admitted;
+  /** True iff the launch happened outside the `start` that admitted the run (C4). */
+  queued: boolean;
+  onAudit: (ts: string) => void;
+  /** End the run task with this document. */
+  result(document: AgentResult): void;
+  /** End it as a re-admission refusal: the registry writes the `refused` record. */
+  refuse(refused: Refused): void;
+  /** End it by rejecting, as a run task that threw after launch. */
+  reject(error: Error): void;
+};
+
+/** One fixture admission: what `start` consumes, and the spy to read afterwards. */
+export type FakeAdmission = { admitted: Admitted; release: ReleaseSpy };
+
+/** `fakeLaunch`'s handle: the `Launch` to hand `createRegistry`, and its levers. */
+export type FakeLaunch = {
+  launch: Launch;
+  /** Every launch, in the order the registry made them. */
+  launches: Pending[];
+  /** The run dir every fixture admission shares unless it names its own. */
+  runDir: string;
+  /** Make the next launch call throw synchronously, as a broken run task would. */
+  throwNext(): void;
+  admitted(options?: { runDir?: string; session?: string; callId?: CallId }): FakeAdmission;
+};
+
+/** The owner every fixture admission records: one server, one host. */
+const FIXTURE_OWNER: RunOwner = {
+  pid: 4242,
+  starttime: '1000',
+  boot: 'boot-a',
+  pidns: 'pid:[1]',
+  timens: 'time:[1]',
+  host: 'host-a',
+};
+
+/** The audit record kinds a run left, in order; none when the audit is unreadable. */
+export function auditKinds(layout: RunLayout): string[] {
+  const audit = readAudit(layout);
+  return audit === null ? [] : audit.records.map((record) => record.record);
+}
+
+/** A completed `pi-agent-result/2` document for a run at LAYOUT, from the real
+ *  reducer and builder: exactly what a run that answered and exited 0 writes. */
+export function completedResult(layout: RunLayout, session: string): AgentResult {
+  return resultFor({
+    reduced: reduce([messageEnd('stop'), SETTLED_RECORD], {}),
+    outcome: { exitCode: 0, spawnFailed: false, layout },
+    causes: [],
+    session,
+  });
+}
+
+/** The release spy: one call per release, each measuring the moment it fired. */
+function releaseSpy(): ReleaseSpy {
+  let watched: RunRecord | undefined;
+  const calls: ReleaseCall[] = [];
+  return {
+    calls,
+    watch: (record: RunRecord): void => {
+      watched = record;
+    },
+    release: (): void => {
+      calls.push({
+        state: watched === undefined ? 'unwatched' : watched.state,
+        resultExists: watched !== undefined && existsSync(watched.layout.result),
+        lostReadable: watched !== undefined && auditKinds(watched.layout).includes('lost'),
+        frames: new Error('release').stack?.split('\n').length ?? 0,
+      });
+    },
+  };
+}
+
+/** One `Admitted` at RUN_DIR, whose session reports its release to RELEASE. */
+function admittedFixture(
+  runDir: string,
+  session: string,
+  callId: CallId,
+  release: ReleaseSpy,
+): Admitted {
+  const root = join(runDir, 'root');
+  const sessions = join(runDir, 'sessions');
+  const sessionDir = join(sessions, session);
+  return {
+    request: { prompt: 'work', profile: 'read', cwd: root },
+    root,
+    profile: { name: 'read', source: join(runDir, 'read.md'), filesystem: 'read', model: 'fake/model', tools: [] },
+    form: { kind: 'unconfined', pi: '/bin/pi' },
+    formSource: { kind: 'policy' },
+    ceilings: {},
+    tools: [],
+    session: {
+      ok: true,
+      session,
+      sessionDir,
+      paths: {
+        home: runDir,
+        sessions,
+        sessionDir,
+        lock: join(sessions, `${session}.lock`),
+        binding: join(sessions, `${session}.binding`),
+        claim: join(sessions, `${session}.claim`),
+      },
+      root,
+      capability: 'read',
+      binding: { session, root, capability: 'read', bound: '2026-01-01T00:00:00.000Z' },
+      owner: FIXTURE_OWNER,
+      release: (): void => {
+        release.release();
+      },
+    },
+    policyDigest: 'policy-digest-1',
+    policyPath: join(runDir, 'policy.json'),
+    runDir,
+    transcriptBudget: undefined,
+    callId,
+  };
+}
+
+/**
+ * The fake `Launch` (sec-9): every run waits for the test to end it. Registered
+ * on T, its temp run dir is removed when the test finishes.
+ */
+export function fakeLaunch(t?: TestContext): FakeLaunch {
+  const runDir = mkdtempSync(join(tmpdir(), 'pi-runs-'));
+  if (t !== undefined) {
+    t.after(() => {
+      rmSync(runDir, { recursive: true, force: true });
+    });
+  }
+  const launches: Pending[] = [];
+  let throws: Error | undefined;
+  let minted = 0;
+
+  const launch: Launch = (
+    record: RunRecord,
+    admitted: Admitted,
+    queued: boolean,
+    onAudit: (ts: string) => void,
+  ): Promise<{ refused: Refused } | { result: AgentResult }> => {
+    const throwing = throws;
+    if (throwing !== undefined) {
+      throws = undefined;
+      throw throwing;
+    }
+    return new Promise<{ refused: Refused } | { result: AgentResult }>((resolve, reject) => {
+      launches.push({
+        record,
+        admitted,
+        queued,
+        onAudit,
+        result: (document) => {
+          resolve({ result: document });
+        },
+        refuse: (refused) => {
+          resolve({ refused });
+        },
+        reject,
+      });
+    });
+  };
+
+  return {
+    launch,
+    launches,
+    runDir,
+    throwNext: (): void => {
+      throws = new Error('the launch threw');
+    },
+    admitted: (options = {}): FakeAdmission => {
+      minted += 1;
+      const release = releaseSpy();
+      const session = options.session ?? `sess-${String(minted)}`;
+      const callId = options.callId ?? `call-${String(minted)}`;
+      return { release, admitted: admittedFixture(options.runDir ?? runDir, session, callId, release) };
+    },
+  };
 }

@@ -604,3 +604,8 @@ function firstLine(text: string): string {
 function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
+
+/** The verdict on a stream nothing wrote: a run that ended before any line was
+ *  read still owes a status. Last in the module, so every constant `reduce`
+ *  reads is initialised. */
+export const EMPTY_STATUS = reduce([], {}).status;
