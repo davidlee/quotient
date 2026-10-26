@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-04 completed · 032df24
+fresh-as-of: 2026-10-27 · PHASE-05 in_progress (code done, wrap pending) · 4b48ddf
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -14,6 +14,8 @@ fresh-as-of: 2026-10-27 · PHASE-04 completed · 032df24
 - PHASE-02 done — owner identity, ownerLiveness, shared fakeProc (9ccee47; delta recorded); Codex pass: 3 minor fixed, 2 major raised (§ PHASE-02 execution)
 - PHASE-03 done — callTool extracted to tools/admission/execute/documents (656c57b, cb45a56; delta 9f4d8b1..cb45a56); Codex pass 4 minor fixed (§ PHASE-03 execution)
 - PHASE-04 done — runs.ts registry, fakeLaunch, runs.test.ts (175442c, 032df24; delta 3060d07..032df24); Codex pass 1 high + 1 medium + 1 minor fixed (§ PHASE-04 execution)
+- isRecord consolidated into src/json.ts (ceb2ce3; user request; outside phase range)
+- PHASE-05 code — views.ts, documents.ts + suites (6322f83, fa36bf7, 4b48ddf); Codex 2 high + 2 medium fixed (§ PHASE-05 execution); wrap pending
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -21,10 +23,10 @@ fresh-as-of: 2026-10-27 · PHASE-04 completed · 032df24
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-05 (views.ts; owns EX-6's deferred viewFromDisk assertions on the lost paths)
+- next: PHASE-05 wrap (gate, record-delta ceb2ce3..tip, verify-vt, flip completed), then PHASE-06
+- D-4 — `here` on viewFromDisk/resolveRun; D-5 — failed audit/dir read → `unreadable`; /reconcile amends (§ Divergences)
 - D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
 - D-3 — matchKey in runs.ts; start refuses while closing; /reconcile amends sec-7 (§ Divergences)
-- isRecord: now 7 private copies (tools.ts added one); consolidation candidate, not filed
 - PHASE-02 Codex F1 — recorded on RSK-003 (user: record, don't chase); /reconcile: add to design sec-9 Risks
 - DIVERGENCE (F2, timens) — implementation adds a 4th identity component; /reconcile amends DEC-067 + design (§ Divergences)
 - IMP-004 — satisfied by PHASE-03 (Step<T>, recording at the boundary); resolve at close
@@ -332,3 +334,37 @@ Codex pass (gpt-6.1-sol, high), 3 findings, all fixed in 032df24:
   never settled. messageOf is total; one test.
 - F3 minor: the double-settlement test re-resolved a settled promise. Now
   drives cancel() and close() on a terminal record.
+
+## PHASE-05 execution (2026-10-27)
+
+Pre-phase: ceb2ce3 (isRecord → src/json.ts, all nine copies incl. reduce's
+isEventObject; user: "DRY that up"). Three pi runs (implement), ~$0.19 total:
+views.test.ts ($0.087), documents.test.ts ($0.045, one gateway 500 → session
+continued), views.ts + documents.ts ($0.058, 29 req). Reds recorded in the
+phase sheet. Tests: views 31, documents 27.
+
+What pi got wrong: views.test blocked result.json (unreadable) to simulate an
+unwritable result, then called EX-4's foreign case a flowchart contradiction
+and proposed reordering the flowchart — fixture fault; fixed with
+blockResultWrite (blocks `.result.json.tmp`, result stays absent). Asserted
+updatedAt === mtime (coarse fs clocks; now latest()). Missed resolveRun's
+disk fall-through and the live-settled-unreadable case. documents.test leaked
+a mkdtemp. views.ts read the audit before the first result read (reordered to
+match the flowchart). documents.ts duplicated the "first fault" loop.
+
+Mutation controls: 26 + 7 targeted mutants; all killed but two equivalents
+(live non-settled record reading result.json — none exists while observable;
+the settled-only result check — subsumed by the status agreement check).
+
+Codex pass (gpt-6.1-sol, high), 4 findings:
+- F1 high: published lost → transient audit EIO → foreign (working). D-5.
+- F2 high: malformed owner (pid -1, 4242.5, garbage starttime, boot "")
+  judged stale → lost. Fixed: session.ts parseRunOwner (shares isPid/
+  isStartTime with the lock reader; a non-positive-pid lock is now an
+  unreadable record, fail-closed).
+- F3 medium: directory stat EIO → unknown. D-5.
+- F4 medium: settled wait entry could contradict its result; STATUSES_OF
+  duplicated the table. Fixed: one statusOf; agreementFault; isAgentResult
+  moved to result.ts.
+Gate green 563 at 6322f83; post-fix gate at 4b48ddf: see phase sheet.
+
