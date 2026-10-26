@@ -117,6 +117,9 @@ type Entry = {
   text: string;
 };
 
+/** The transcript's byte ceiling when a caller names none. */
+export const DEFAULT_BUDGET_BYTES = 8192;
+
 const CALL_ARG_CHARS = 120;
 const RESULT_CHARS = 200;
 const ERROR_CHARS = 500;
@@ -124,7 +127,7 @@ const ALERT_TEXT_CHARS = 160;
 const MAX_ALERTS = 50;
 
 export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
-  const budget = opts.budgetBytes ?? 8192;
+  const budget = opts.budgetBytes ?? DEFAULT_BUDGET_BYTES;
   const patterns = (opts.alerts ?? []).map((pattern) => ({
     pattern,
     re: new RegExp(pattern, 'i'),

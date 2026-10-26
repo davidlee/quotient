@@ -14,7 +14,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { reduce, type Status } from './reduce.ts';
+import { DEFAULT_BUDGET_BYTES, reduce, type Status } from './reduce.ts';
 
 type Args = {
   file: string;
@@ -34,7 +34,7 @@ and <out>/status.json. Prints one status line to stdout, or the transcript with 
 exit: 0 completed · 1 failed or incomplete · 2 usage error`;
 
 export function parseArgs(argv: string[]): Args {
-  const args: Args = { file: '-', out: null, budget: 8192, alerts: [], verbose: false, quiet: false };
+  const args: Args = { file: '-', out: null, budget: DEFAULT_BUDGET_BYTES, alerts: [], verbose: false, quiet: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const value = (): string => {

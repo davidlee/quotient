@@ -12,15 +12,17 @@
 //
 // The session lock, once taken in step 7, is held until the answer is decided:
 // every refusal and every throw after that point releases it before returning.
+import { realpathSync } from 'node:fs';
 import { usable, type Locations } from '../config.ts';
 import type { HelpSnapshot } from '../help/help.ts';
+import { DEFAULT_BUDGET_BYTES } from '../reduce/reduce.ts';
 import { checkChildView } from './childview.ts';
 import { appendAttempt, attemptsPath, writeAttemptProbe, type CallId } from './evidence.ts';
 import { chooseForm, lookupProjectForm, type SelectedForm } from './forms.ts';
 import { admitCall, clampCeilings, formExtensions, selectSlot, transcriptBudget, writablePaths, type Admission, type Form, type FormSource, type Maxima, type Policy, type SlotSelection } from './policy.ts';
-import { checkProfileExtensions, effectiveTools, resolveProfile, resolveRoot, type Filesystem, type Profile, type Snapshot } from './profiles.ts';
+import { checkProfileExtensions, effectiveTools, resolveProfile, resolveRoot, type Filesystem, type RootResolution, type Profile, type Snapshot } from './profiles.ts';
 import { acquireSession, type HostIdentity, type SessionAcquisition } from './session.ts';
-import type { AgentRequest } from './tools.ts';
+import { CEILING_FIELDS, type AgentRequest } from './tools.ts';
 
 /** What the server read once at start-up: the profiles, then the help. The
  *  first that does not load puts the server in the start-up-refused state. */
@@ -78,12 +80,15 @@ type Authorised = {
   tools: string[];
 };
 
-/** The values a step reads; explicit, so a later readmit can hand over the
- *  admitted root, ceilings and tools rather than the raw request. */
+/** The values a step reads; explicit, so readmit can hand over the admitted
+ *  root, ceilings and tools rather than the raw request. `exact`: the root must
+ *  still canonicalise to itself. `ceilings` is asked of the policy's
+ *  maxima once they are read. */
 type Asked = {
   profile: string;
   root: string | undefined;
-  ceilings: AgentRequest['ceilings'];
+  exact?: boolean;
+  ceilings: (maxima: Maxima) => AgentRequest['ceilings'];
   tools: string[] | undefined;
 };
 
@@ -129,7 +134,7 @@ export function admit(
   callId: CallId,
 ): Step<{ admitted: Admitted }> {
   const authorised = authorise(
-    { profile: request.profile, root: request.cwd, ceilings: request.ceilings, tools: request.tools },
+    { profile: request.profile, root: request.cwd, ceilings: () => request.ceilings, tools: request.tools },
     context,
     callId,
   );
@@ -151,9 +156,8 @@ export function admit(
   if (!launchable.ok) {
     // Recorded before the lock is given back, so no other call can take the
     // session before this refusal is in the ledger.
-    const { recordable, ...refusal } = launchable;
     try {
-      return recordable ? recorded(ledger, refusal) : refusal;
+      return recordedIfRecordable(ledger, launchable);
     } finally {
       session.release();
     }
@@ -163,15 +167,9 @@ export function admit(
     ok: true,
     admitted: {
       request,
-      root: authorised.root,
-      profile: authorised.profile,
-      form: authorised.form,
-      formSource: authorised.formSource,
-      ceilings: authorised.ceilings,
+      ...decidedNow(authorised),
       tools: authorised.tools,
       session,
-      policyDigest: authorised.policyDigest,
-      policyPath: authorised.policyPath,
       runDir: authorised.runDir,
       // The call's own budget, clamped by the policy's maximum, so neither value
       // is ignored (EX-6).
@@ -179,6 +177,74 @@ export function admit(
       callId,
     },
   };
+}
+
+/**
+ * A queued run, at launch (design sec-4 "Re-admission at launch"): `authorise`
+ * again over the admitted profile and root — which must still canonicalise to
+ * itself — with each admitted ceiling narrowed to the current maximum, then
+ * step 8 and the probe. The session is not re-acquired, and not released on a
+ * refusal: the run has owned it since start, and the registry releases it when
+ * the refusal settles the run. The run keeps its root, session, request, tools,
+ * call id and run directory; what the policy decides is decided anew.
+ */
+export function readmit(admitted: Admitted, context: AdmissionContext): Step<{ admitted: Admitted }> {
+  const authorised = authorise(
+    {
+      profile: admitted.request.profile,
+      root: admitted.root,
+      exact: true,
+      ceilings: (maxima) => narrowed(admitted.ceilings, maxima),
+      tools: admitted.tools,
+    },
+    context,
+    admitted.callId,
+  );
+  if (!authorised.ok) {return authorised;}
+
+  const launchable = checkLaunchable(authorised, admitted.session, context);
+  if (!launchable.ok) {return recordedIfRecordable(ledgerOf(authorised, admitted.callId), launchable);}
+
+  return {
+    ok: true,
+    admitted: {
+      ...admitted,
+      ...decidedNow(authorised),
+      // An admitted budget left to the reducer's default is that default: a
+      // maximum that appeared since may lower it, never raise it.
+      transcriptBudget: transcriptBudget(admitted.transcriptBudget ?? DEFAULT_BUDGET_BYTES, authorised.policy.transcript_budget_bytes),
+    },
+  };
+}
+
+/** What the policy decided for a run, as `admit` and `readmit` both take it. */
+const decidedNow = (authorised: Authorised): Pick<Admitted, 'root' | 'profile' | 'form' | 'formSource' | 'ceilings' | 'policyDigest' | 'policyPath'> => ({
+  root: authorised.root,
+  profile: authorised.profile,
+  form: authorised.form,
+  formSource: authorised.formSource,
+  ceilings: authorised.ceilings,
+  policyDigest: authorised.policyDigest,
+  policyPath: authorised.policyPath,
+});
+
+/** Each unit ADMITTED holds, lowered to MAXIMA's where that is lower: never a
+ *  refusal, only a narrowing. A unit it lacks stays absent, so `clampCeilings`
+ *  gives it the current maximum. */
+function narrowed(admitted: Maxima, maxima: Maxima): Maxima {
+  const ceilings: Maxima = {};
+  for (const unit of CEILING_FIELDS) {
+    const limit = admitted[unit];
+    const maximum = maxima[unit];
+    if (limit !== undefined) {ceilings[unit] = maximum === undefined ? limit : Math.min(limit, maximum);}
+  }
+  return ceilings;
+}
+
+/** A step-8 or probe refusal, recorded unless it is the ledger that failed. */
+function recordedIfRecordable(ledger: Ledger, launchable: Refused & { recordable: boolean }): Refused {
+  const { recordable, ...refusal } = launchable;
+  return recordable ? recorded(ledger, refusal) : refusal;
 }
 
 /**
@@ -207,7 +273,7 @@ function decide(asked: Asked, context: AdmissionContext, granted: Granted): Step
   if (!profile.ok) {return profile;}
 
   // Step 4: the root, canonicalised and allowlisted by components.
-  const root = resolveRoot(asked.root, context.launchDir, granted.policy.roots);
+  const root = rootOf(asked, context, granted.policy.roots);
   if (!root.ok) {return root;}
 
   // Step 5: the capability selects the machine slot, and the slot's declared
@@ -223,7 +289,7 @@ function decide(asked: Asked, context: AdmissionContext, granted: Granted): Step
   if (!form.ok) {return form;}
 
   // Step 6: the ceilings, clamped downward.
-  const ceilings = clampCeilings(asked.ceilings, granted.policy.maxima);
+  const ceilings = clampCeilings(asked.ceilings(granted.policy.maxima), granted.policy.maxima);
   if (!ceilings.ok) {return ceilings;}
 
   // The call's `tools` may only narrow the profile's snapshotted set; the whole
@@ -247,6 +313,27 @@ function decide(asked: Asked, context: AdmissionContext, granted: Granted): Step
     ceilings: ceilings.ceilings,
     tools: tools.tools,
   };
+}
+
+/** Step 4: the asked root, canonicalised and allowlisted. Asked to be exact, it
+ *  must first still canonicalise to itself — one whose component is now a symlink
+ *  is not the root that was admitted, wherever it now leads. */
+function rootOf(asked: Asked, context: AdmissionContext, roots: readonly string[]): RootResolution {
+  const moved = asked.exact === true && asked.root !== undefined ? movedRoot(asked.root) : null;
+  return moved ?? resolveRoot(asked.root, context.launchDir, roots);
+}
+
+/** ROOT's refusal when it no longer canonicalises to itself; null when it does,
+ *  or when it cannot be read at all, which `resolveRoot` then names. */
+function movedRoot(root: string): Extract<RootResolution, { ok: false }> | null {
+  let canonical: string;
+  try {
+    canonical = realpathSync(root);
+  } catch {
+    return null;
+  }
+  if (canonical === root) {return null;}
+  return { ok: false, reason: 'root-missing', detail: `${root} now resolves to ${canonical}: the admitted root no longer exists as itself` };
 }
 
 /**

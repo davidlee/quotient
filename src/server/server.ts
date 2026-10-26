@@ -18,18 +18,21 @@ import { legacyLayers, resolveLocations, usable, type Locations } from '../confi
 import { loadHelp, renderContext, sectionText, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
 import { isRecord } from '../json.ts';
-import { admit, type AdmissionContext, type Refused, type Startup, type StartupFailure } from './admission.ts';
-import { POLL_INTERVAL_MS, toolResult, type ToolResult } from './documents.ts';
+import { admit, readmit, type AdmissionContext, type Refused, type Startup, type StartupFailure } from './admission.ts';
+import { ackDocument, envelopeResult, handleDocument, POLL_INTERVAL_MS, toolResult, type ToolResult } from './documents.ts';
 import { appendAttempt, type CallId } from './evidence.ts';
 import { executeRun, type ExecuteDeps } from './execute.ts';
 import { absent } from './paths.ts';
+import { readPolicy, type Maxima } from './policy.ts';
 import { loadProfiles } from './profiles.ts';
 import { refusedResult } from './result.ts';
-import { createRegistry, type Launch, type Origin, type Registry } from './runs.ts';
-import { readHostIdentity } from './session.ts';
+import { createRegistry, matchKey, type Launch, type Origin, type Registry, type RunRecord } from './runs.ts';
+import { readHostIdentity, type HostIdentity } from './session.ts';
 import { DEFAULT_GRACE_MS } from './spawn.ts';
 import { DEFAULT_IDLE_MS } from './gate.ts';
-import { PI_AGENT_TOOL, readAgentRequest, type AgentRequest } from './tools.ts';
+import { argsDigest, readAgentRequest, readRunIds, readWaitRequest, TOOLS, type AgentRequest, type ToolName } from './tools.ts';
+import { viewOf, resolveRun, type Resolution } from './views.ts';
+import { awaitTargets, resolveTargets, waitBudgetBytes, waitEnvelope, waitTimeoutMs } from './waiting.ts';
 
 export const SERVER_NAME = 'quotient';
 /** The revision `satan/satan-mcp.el` announces. */
@@ -77,21 +80,32 @@ type Context = CallHost & {
   /** The pid table the server reads: `/proc` in production, a fixture in a
    *  test. Session liveness and ownership are read from it. */
   procDir: string;
+  /** This host's identity, read once at start-up: whose runs are this host's. */
+  here: HostIdentity;
   /** How often a foreign or unreadable run is re-read while a call waits on it. */
   pollMs: number;
 };
 
+/** One `tools/call` as its handler sees it: the call's id and its abort signal. */
+type CallContext = { callId: CallId; signal: AbortSignal };
+
+type Handler = (args: unknown, call: CallContext, context: Context) => Answer;
+
+/** The tools that only read and settle runs already published: a start-up-refused
+ *  server still serves them over the runs on disk. */
+const SERVES_WITHOUT_STARTUP: readonly ToolName[] = ['pi_agent_wait', 'pi_agent_ack', 'pi_agent_cancel'];
+
 /** A request id as a map key: `1` and `"1"` name different calls. */
 const callKey = (id: WireId): string => `${typeof id}:${String(id)}`;
 
-/** Unwrap a `tools/call` params object down to the tool's own arguments. */
-function readToolCall(params: unknown): { ok: true; request: AgentRequest } | { ok: false; detail: string } {
+const isToolName = (name: unknown): name is ToolName => typeof name === 'string' && Object.hasOwn(TOOLS, name);
+
+/** Unwrap a `tools/call` params object into the tool it names and its arguments,
+ *  which the tool's own reader checks. */
+function readToolName(params: unknown): { ok: true; name: ToolName; args: unknown } | { ok: false; detail: string } {
   if (!isRecord(params)) {return { ok: false, detail: 'params is not an object' };}
-  if (params.name !== PI_AGENT_TOOL.name) {
-    return { ok: false, detail: `name must be "${PI_AGENT_TOOL.name}"` };
-  }
-  if (!isRecord(params.arguments)) {return { ok: false, detail: 'arguments is not an object' };}
-  return readAgentRequest(params.arguments);
+  if (!isToolName(params.name)) {return { ok: false, detail: `name must be one of ${Object.keys(TOOLS).join(', ')}` };}
+  return { ok: true, name: params.name, args: params.arguments };
 }
 
 // ── The call: the request, admission, the run ───────────────────────────────
@@ -109,16 +123,26 @@ function refused(context: Context, callId: CallId, reason: string, detail: strin
   return toolResult(refusedResult(reason, detail));
 }
 
-/** The server's run task (design sec-3, Launch): the run, for a run that never
- *  waited on a lane. The registry releases the session once the run settles. */
-function launchWith(deps: ExecuteDeps): Launch {
-  return (record, admitted, _queued, onAudit) =>
-    executeRun(admitted, record.layout, record.controller, onAudit, deps).then((result) => ({ result }));
+/** A start-up-refused server's answer to a call it cannot serve: the reason and
+ *  the path, whatever the call's shape. */
+const startupRefused = (context: Context, callId: CallId, failure: StartupFailure): ToolResult =>
+  refused(context, callId, 'profile-invalid', startupFailure(failure));
+
+/**
+ * The server's run task (design sec-3, Launch): a run that waited on a lane is
+ * re-admitted against the policy as it reads now, then run. A start-up-refused
+ * server admits nothing, so it never launches.
+ */
+function launchWith(deps: ExecuteDeps, admission: AdmissionContext | StartupFailure): Launch {
+  return (record, admitted, queued, onAudit) => {
+    const current = queued && !('ok' in admission) ? readmit(admitted, admission) : { ok: true as const, admitted };
+    if (!current.ok) {return Promise.resolve({ refused: current });}
+    return executeRun(current.admitted, record.layout, record.controller, onAudit, deps).then((result) => ({ result }));
+  };
 }
 
 /** Admission, then the registry's start: both synchronous, so the run is
- *  published, or refused, before the call's handler returns. A blocking call has
- *  no key, so nothing ever compares its digest. */
+ *  published, or refused, before the call's handler returns. */
 function admitAndStart(
   context: Context,
   admission: AdmissionContext,
@@ -131,35 +155,40 @@ function admitAndStart(
   return context.registry.start({
     admitted: verdict.admitted,
     origin,
-    lane: null,
-    needsSuccess: false,
-    key: null,
-    argsDigest: '',
+    lane: request.lane ?? null,
+    needsSuccess: request.needs_success ?? false,
+    key: request.key ?? null,
+    argsDigest: argsDigest(request, context.launchDir),
   });
 }
 
-/**
- * A blocking `pi_agent`: start plus wait in-process. The start-up profile
- * snapshot, the request's shape, then admission and publication; the answer is
- * the document the run's settlement wrote to `result.json`. A cancellation
- * becomes the registry's cancel; EOF is left to `registry.close()`.
- */
-function agentRun(params: unknown, callId: CallId, signal: AbortSignal, context: Context): Answer {
-  // A snapshot that did not load is a start-up-refused server, not a per-call
-  // discovery: every call answers the reason and the path, whatever its shape.
+/** A handler that starts runs: none can on a start-up-refused server, which
+ *  answers before the request is read. */
+const admitting = (
+  handler: (args: unknown, call: CallContext, context: Context, admission: AdmissionContext) => Answer,
+): Handler => (args, call, context) => {
   const { admission } = context;
-  if ('ok' in admission) {return refused(context, callId, 'profile-invalid', startupFailure(admission));}
+  return 'ok' in admission ? startupRefused(context, call.callId, admission) : handler(args, call, context, admission);
+};
 
-  const parsed = readToolCall(params);
-  if (!parsed.ok) {return refused(context, callId, 'request-invalid', parsed.detail);}
+/**
+ * A blocking `pi_agent`: start plus wait in-process. The request's shape, then
+ * admission and publication; the answer is the document the run's settlement
+ * wrote to `result.json`. A cancellation becomes the registry's cancel; EOF is
+ * left to `registry.close()`.
+ */
+function agentRun(args: unknown, call: CallContext, context: Context, admission: AdmissionContext): Answer {
+  const parsed = readAgentRequest(args);
+  if (!parsed.ok) {return refused(context, call.callId, 'request-invalid', parsed.detail);}
 
   // Admission and publication recorded their own refusals where they decided
   // them: answering is all that is left, and a second append would double the
   // ledger line.
-  const started = admitAndStart(context, admission, parsed.request, 'blocking', callId);
+  const started = admitAndStart(context, admission, parsed.request, 'blocking', call.callId);
   if (!started.ok) {return toolResult(refusedResult(started.reason, started.detail));}
 
   const { run } = started.record;
+  const { signal } = call;
   signal.addEventListener(
     'abort',
     () => {
@@ -171,6 +200,97 @@ function agentRun(params: unknown, callId: CallId, signal: AbortSignal, context:
     { once: true },
   );
   return started.document.then(toolResult);
+}
+
+/** A run's `pi-run-handle/1`, as it stands now. */
+const handleOf = (record: RunRecord): ToolResult => envelopeResult(handleDocument(viewOf(record)), false);
+
+/**
+ * `pi_agent_start`: a key already held answers its run as it is now, without
+ * admitting anything; otherwise admission and publication, answered with the
+ * handle before the next input line is read.
+ */
+function startRun(args: unknown, call: CallContext, context: Context, admission: AdmissionContext): Answer {
+  const parsed = readAgentRequest(args, { key: true });
+  if (!parsed.ok) {return refused(context, call.callId, 'request-invalid', parsed.detail);}
+  const { request } = parsed;
+
+  if (request.key !== undefined) {
+    const held = matchKey(context.registry.findKey(request.key), argsDigest(request, context.launchDir));
+    if (held !== null) {return 'reuse' in held ? handleOf(held.reuse) : refused(context, call.callId, held.reason, held.detail);}
+  }
+  const started = admitAndStart(context, admission, request, 'start', call.callId);
+  return started.ok ? handleOf(started.record) : toolResult(refusedResult(started.reason, started.detail));
+}
+
+/** What is run X, for this server: its registry, then the evidence on disk. With
+ *  no usable run directory nothing was ever admitted, so nothing resolves. */
+function resolverFor(context: Context): (run: string) => Resolution {
+  const runDir = usable(context.locations.runDir);
+  return (run) => (runDir === null ? null : resolveRun(context.registry, runDir, context.procDir, context.here, run));
+}
+
+/** The policy's maxima as they read now, or null when the policy cannot be read. */
+function currentMaxima(context: Context): Maxima | null {
+  const policyPath = usable(context.locations.policyPath);
+  const read = policyPath === null ? null : readPolicy(policyPath);
+  return read?.ok === true ? read.policy.maxima : null;
+}
+
+/** `pi_agent_wait`: the targets as the wait arrives, awaited until its condition,
+ *  its timeout or its call's abort, then reported as they are. Changes nothing. */
+function waitRuns(args: unknown, call: CallContext, context: Context): Answer {
+  const parsed = readWaitRequest(args);
+  if (!parsed.ok) {return refused(context, call.callId, 'request-invalid', parsed.detail);}
+  const { request } = parsed;
+  const resolve = resolverFor(context);
+  const targets = resolveTargets(context.registry, request, resolve);
+  const timeoutMs = waitTimeoutMs(request.timeout_s, currentMaxima(context));
+  return awaitTargets(targets, request.until, timeoutMs, call.signal, resolve, context.pollMs).then(() =>
+    envelopeResult(
+      waitEnvelope(targets, resolve, { until: request.until, statusOnly: request.status_only, budgetBytes: waitBudgetBytes(request.budget_bytes) }),
+      false,
+    ),
+  );
+}
+
+/** `pi_agent_ack`: every id validated before any acknowledgement applies. */
+function ackRuns(args: unknown, call: CallContext, context: Context): Answer {
+  const parsed = readRunIds(args);
+  if (!parsed.ok) {return refused(context, call.callId, 'request-invalid', parsed.detail);}
+  return envelopeResult(ackDocument(context.registry.ack(parsed.request.runs)), false);
+}
+
+/** `pi_agent_cancel`: every target marked before anything is awaited, then a
+ *  wait over them all, each reported as it actually ended. */
+function cancelRuns(args: unknown, call: CallContext, context: Context): Answer {
+  const parsed = readRunIds(args);
+  if (!parsed.ok) {return refused(context, call.callId, 'request-invalid', parsed.detail);}
+  const { runs } = parsed.request;
+  return context.registry.cancel(runs).then(() => {
+    const resolve = resolverFor(context);
+    const targets = resolveTargets(context.registry, { runs }, resolve);
+    return envelopeResult(waitEnvelope(targets, resolve, { until: 'all', statusOnly: false, budgetBytes: waitBudgetBytes(undefined) }), false);
+  });
+}
+
+const HANDLERS: Readonly<Record<ToolName, Handler>> = {
+  pi_agent: admitting(agentRun),
+  pi_agent_start: admitting(startRun),
+  pi_agent_wait: waitRuns,
+  pi_agent_ack: ackRuns,
+  pi_agent_cancel: cancelRuns,
+};
+
+/** One `tools/call`, dispatched by name. A start-up-refused server answers every
+ *  call it cannot serve — an unknown or malformed name included — before reading it. */
+function callTool(params: unknown, call: CallContext, context: Context): Answer {
+  const tool = readToolName(params);
+  if (!tool.ok) {
+    const { admission } = context;
+    return 'ok' in admission ? startupRefused(context, call.callId, admission) : refused(context, call.callId, 'request-invalid', tool.detail);
+  }
+  return HANDLERS[tool.name](tool.args, call, context);
 }
 
 /** One line from a caught value. */
@@ -285,14 +405,21 @@ async function handleLine(line: string, context: Context): Promise<void> {
     case 'tools/list':
       reply(context, {
         id,
-        result: { tools: [{ name: PI_AGENT_TOOL.name, description: selfDescription(context, 'tool'), inputSchema: PI_AGENT_TOOL.inputSchema }] },
+        result: {
+          tools: Object.entries(TOOLS).map(([name, tool]) => ({
+            name,
+            description: selfDescription(context, tool.section),
+            inputSchema: tool.inputSchema,
+            annotations: tool.annotations,
+          })),
+        },
       });
       return;
     case 'tools/call':
       // The one method that overlaps the reader (design sec-4: "a blocking result
       // never blocks cancellation"); everything else stays synchronous and in
       // order. The call is answered when it settles.
-      runCall(context, id, (signal) => agentRun(message.params, id, signal, context));
+      runCall(context, id, (signal) => callTool(message.params, { callId: id, signal }, context));
       return;
     default:
       reply(context, { id, error: { code: -32601, message: `Method not found: ${method}` } });
@@ -353,18 +480,26 @@ function loadStartup(locations: Locations, launchDir: string): Startup {
 const startupFailure = (failed: { path: string; detail: string }): string =>
   `start-up did not complete: ${failed.path}: ${failed.detail}`;
 
+/** The sections a start-up-refused server still describes from its built-in help:
+ *  those of the tools it still serves. */
+const SERVING_SECTIONS: ReadonlySet<Section> = new Set(SERVES_WITHOUT_STARTUP.map((name) => TOOLS[name].section));
+
 /**
- * The `agent` section (the `initialize` instructions) or the `tool` section
- * (the tool description). The profile table pins capabilities from the policy
- * as read now. A start-up-refused server says so instead, naming the path, so
- * the orchestrator learns why every call refuses.
+ * The `agent` section (the `initialize` instructions) or a tool's section (its
+ * description). The profile table pins capabilities from the policy as read now.
+ * A start-up-refused server says so instead, naming the path, so the orchestrator
+ * learns why its starts refuse; the tools it still serves keep their built-in
+ * section, read without the operator's layers, since those may be what failed.
  */
-function selfDescription(context: Context, section: Extract<Section, 'agent' | 'tool'>): string {
-  if (!context.startup.ok) {
-    return `quotient refused start-up: every pi_agent call answers profile-invalid. ${startupFailure(context.startup)}\n`;
+function selfDescription(context: Context, section: Section): string {
+  const { startup } = context;
+  if (startup.ok) {
+    const profiles = [...startup.profiles.profiles.values()];
+    return sectionText(startup.help, section, renderContext(context.locations, profiles, context.launchDir));
   }
-  const profiles = [...context.startup.profiles.profiles.values()];
-  return sectionText(context.startup.help, section, renderContext(context.locations, profiles, context.launchDir));
+  const refusal = `quotient refused start-up: pi_agent and pi_agent_start answer profile-invalid; ${SERVES_WITHOUT_STARTUP.join(', ')} still serve the runs on disk. ${startupFailure(startup)}\n`;
+  const builtin = SERVING_SECTIONS.has(section) ? loadHelp([]) : null;
+  return builtin?.ok === true ? sectionText(builtin.snapshot, section, renderContext(context.locations, [], context.launchDir)) : refusal;
 }
 
 /** What a caller may override; production takes every default. */
@@ -457,17 +592,20 @@ function serverContext(
   // One line, naming the path: the server refuses from here on, and an operator
   // needs to know which file to fix.
   if (!startup.ok) {diagnostics.write(`quotient: ${startupFailure(startup)}\n`);}
-  const launch = launchWith(runDeps(env, diagnostics, options, startup));
+  const here = readHostIdentity(procDir);
+  const admission = startup.ok ? { startup, locations, launchDir, procDir, here } : startup;
+  const launch = launchWith(runDeps(env, diagnostics, options, startup), admission);
   return {
     output,
     diagnostics,
     env,
     startup,
-    admission: startup.ok ? { startup, locations, launchDir, procDir, here: readHostIdentity(procDir) } : startup,
+    admission,
     registry: createRegistry({ launch, diagnostics }),
     launchDir,
     locations,
     procDir,
+    here,
     pollMs: options.pollMs ?? POLL_INTERVAL_MS,
     inFlight: new Map(),
     closed: false,

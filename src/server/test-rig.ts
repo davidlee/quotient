@@ -23,6 +23,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -35,6 +36,14 @@ import { reduce, type Reduced } from '../reduce/reduce.ts';
 import { isRecord } from '../json.ts';
 import { serve, type ServeOptions } from './server.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
+import {
+  validateAck,
+  validateHandle,
+  validateWait,
+  type AckDocument,
+  type HandleDocument,
+  type WaitDocument,
+} from './documents.ts';
 import { admit as admitRequest, type AdmissionContext, type Admitted, type Refused } from './admission.ts';
 import {
   appendAudit,
@@ -53,7 +62,12 @@ import { loadProfiles, type Filesystem } from './profiles.ts';
 import { createRegistry, type Launch, type Registry, type RunRecord, type StartSpec } from './runs.ts';
 import { readHostIdentity, type HostIdentity, type RunOwner } from './session.ts';
 import { admitCall, type Admission } from './policy.ts';
-import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
+import {
+  isAgentResult,
+  resultFor,
+  validateAgentResult,
+  type AgentResult,
+  type Validation, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
 export type Env = Record<string, string | undefined>;
 
@@ -91,8 +105,18 @@ export function admittedCall(rig: Rig, callId: CallId): Admitted {
 export const serverCommand: [string, string[]] = [process.execPath, [new URL('../cli.ts', import.meta.url).pathname]];
 
 export const line = (message: Record<string, unknown>): string => JSON.stringify({ jsonrpc: '2.0', ...message });
-export const callLine = (id: number | string, args: Record<string, unknown>): string =>
-  line({ id, method: 'tools/call', params: { name: 'pi_agent', arguments: args } });
+
+/** A `tools/call` line for the tool NAME: one builder per tool below. */
+const toolLine =
+  (name: string) =>
+  (id: number | string, args: Record<string, unknown>): string =>
+    line({ id, method: 'tools/call', params: { name, arguments: args } });
+
+export const callLine = toolLine('pi_agent');
+export const startLine = toolLine('pi_agent_start');
+export const waitLine = toolLine('pi_agent_wait');
+export const ackLine = toolLine('pi_agent_ack');
+export const cancelLine = toolLine('pi_agent_cancel');
 
 /** A bash line that writes one event record on stdout, newline-terminated. */
 export function emit(record: Record<string, unknown>): string {
@@ -570,6 +594,20 @@ export async function waitForReplies(server: LiveServer, count: number, timeoutM
   return server.replies();
 }
 
+/** The reply to request ID, once it is written: calls that overlap answer in
+ *  the order they finish, not the order they were read. */
+export async function waitForReply(server: LiveServer, id: number | string, timeoutMs = 10000): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  const answered = (): Record<string, unknown> | undefined => server.replies().find((reply) => reply.id === id);
+  let found = answered();
+  while (found === undefined) {
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for the reply to ${String(id)}: ${server.stderr()}`);}
+    await pause(5);
+    found = answered();
+  }
+  return found;
+}
+
 /** End one server after its answers, and wait for its cleanup. */
 export async function closeServer(server: LiveServer): Promise<void> {
   server.end();
@@ -619,6 +657,98 @@ export async function converse(
 export function resultDocument(reply: Record<string, any>): Record<string, any> {
   assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
   return JSON.parse(reply.result.content[0].text) as Record<string, any>;
+}
+
+/** The document each envelope schema names (design sec-2). */
+type Envelopes = { 'pi-run-handle/1': HandleDocument; 'pi-agent-wait/1': WaitDocument; 'pi-agent-ack/1': AckDocument };
+
+/** The validator each envelope schema is held to. */
+const ENVELOPES: { [S in keyof Envelopes]: (doc: unknown) => Validation } = {
+  'pi-run-handle/1': validateHandle,
+  'pi-agent-wait/1': validateWait,
+  'pi-agent-ack/1': validateAck,
+};
+
+/** The `isError` flag of one tool result. */
+const isErrorOf = (reply: Record<string, unknown>): unknown => (isRecord(reply.result) ? reply.result.isError : undefined);
+
+/** What a failed check says, or nothing when it passed. */
+const faultOf = (verdict: Validation): string => (verdict.ok ? '' : verdict.detail);
+
+/** DOC is a SCHEMA document by that schema's validator. */
+function conforms<S extends keyof Envelopes>(doc: unknown, schema: S): doc is Envelopes[S] {
+  return isRecord(doc) && doc.schema === schema && ENVELOPES[schema](doc).ok;
+}
+
+/** The handle, wait or ack document inside one tool result: of SCHEMA, passing
+ *  its validator, and never an error because of the runs inside it. */
+export function envelopeDocument<S extends keyof Envelopes>(reply: Record<string, unknown>, schema: S): Envelopes[S] {
+  const doc: unknown = resultDocument(reply);
+  if (!conforms(doc, schema)) {
+    assert.fail(`expected a valid ${schema}: ${faultOf(ENVELOPES[schema](doc))}: ${JSON.stringify(doc)}`);
+  }
+  assert.equal(isErrorOf(reply), false, 'an envelope is an error only when the call was refused');
+  return doc;
+}
+
+/** The refusal inside one tool result: a valid `pi-agent-result/2` that ran
+ *  nothing, answered with `isError`. */
+export function refusalDocument(reply: Record<string, unknown>): AgentResult & { refusal: { reason: string; detail: string } } {
+  const doc: unknown = resultDocument(reply);
+  if (!isAgentResult(doc)) {assert.fail(`expected a valid pi-agent-result/2: ${faultOf(validateAgentResult(doc))}`);}
+  if (doc.state !== 'refused' || doc.refusal === null) {assert.fail(`expected a refusal: ${JSON.stringify(doc)}`);}
+  assert.equal(isErrorOf(reply), true, 'a refused call is an error');
+  return { ...doc, refusal: doc.refusal };
+}
+
+// ── The sleeper form (SL-004 PHASE-08 C12) ────────────────────────────────
+//
+// Overlap, lane order and cancel races without timing guesses. The child sees
+// neither its run nor its run dir (`childEnv` strips both), but its prompt rides
+// its stdin, so a sleeper is named by its prompt. On launch it records its pid
+// (`<name>.pid`, which teardown kills), appends its name to `started` (the launch
+// order) and touches `<name>.started`; it then polls for `<name>.release` and
+// settles — or, when the release says `fail`, exits 3 without settling.
+
+/** The sleeper's body, `@MARKER@` substituted as for any rig form. */
+export const SLEEPER = [
+  'name=$(cat)',
+  'printf \'%s\\n\' $$ > "@MARKER@/$name.pid"',
+  'printf \'%s\\n\' "$name" >> "@MARKER@/started"',
+  ': > "@MARKER@/$name.started"',
+  'while [ ! -e "@MARKER@/$name.release" ]; do sleep 0.01; done',
+  'if [ "$(cat "@MARKER@/$name.release")" = fail ]; then exit 3; fi',
+  `printf '%s\\n' '${messageEnd('stop', 'slept')}'`,
+  SETTLED,
+  'exit 0',
+].join('\n');
+
+/** A rig whose read and write forms are both the sleeper. */
+export const sleeperRig = (t: TestContext, options: Parameters<typeof newRig>[1] = {}): Rig =>
+  newRig(t, { read: SLEEPER, write: SLEEPER, ...options });
+
+/** Whether the sleeper NAME has launched. */
+export const hasStarted = (rig: Rig, name: string): boolean => existsSync(join(rig.markerDir, `${name}.started`));
+
+/** Once the sleeper NAME has launched. */
+export const waitStarted = (rig: Rig, name: string): Promise<void> =>
+  waitForPath(join(rig.markerDir, `${name}.started`), `the sleeper ${name}`);
+
+/** The sleepers that launched, in launch order. */
+export function launchOrder(rig: Rig): string[] {
+  const text = markerText(rig, 'started');
+  return text.length === 0 ? [] : text.split('\n');
+}
+
+/** The pid of the sleeper NAME, once it has launched. */
+export const sleeperPid = (rig: Rig, name: string): number => Number(markerText(rig, `${name}.pid`));
+
+/** Let the sleeper NAME end: settled, or failed without settling. The release is
+ *  renamed into place, so the sleeper never reads it half written. */
+export function release(rig: Rig, name: string, outcome: 'settle' | 'fail' = 'settle'): void {
+  const temporary = join(rig.markerDir, `.${name}.release`);
+  writeFileSync(temporary, outcome);
+  renameSync(temporary, join(rig.markerDir, `${name}.release`));
 }
 
 /** One process as a fake pid table should show it: its start time, and the host

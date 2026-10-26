@@ -28,6 +28,7 @@ import {
   xdgProfileLayer,
   type Env,
 } from '../server/test-rig.ts';
+import { TOOLS } from '../server/tools.ts';
 import { HELP_SECTIONS, clientsSnippets, loadHelp, maximaTable, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type RenderContext } from './help.ts';
 
 /** Two empty override layers, higher first: the loader still takes a list, though
@@ -99,7 +100,22 @@ function callDocument(reply: unknown): unknown {
 }
 
 test('help: every section resolves; refusals is an alias of result; an unknown name is none', () => {
-  assert.deepEqual(HELP_SECTIONS, ['agent', 'tool', 'orchestrate', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce']);
+  assert.deepEqual(HELP_SECTIONS, [
+    'agent',
+    'tool',
+    'tool-start',
+    'tool-wait',
+    'tool-ack',
+    'tool-cancel',
+    'orchestrate',
+    'result',
+    'policy',
+    'form',
+    'profiles',
+    'setup',
+    'clients',
+    'reduce',
+  ]);
   assert.equal(sectionName('refusals'), 'result');
   assert.equal(sectionName('policy'), 'policy');
   assert.equal(sectionName('nope'), null);
@@ -138,6 +154,35 @@ test('help: a file override wins for agent, the higher layer over the lower; an 
   assert.equal(sectionText(snapshot, 'tool', CONTEXT), 'higher tool\n', 'the higher layer wins');
   assert.equal(sectionText(snapshot, 'setup', CONTEXT), builtin('help/setup.md'), 'absent everywhere falls through');
   assert.equal(snapshot.sources.get('tool'), join(over, 'tool.md'));
+});
+
+/** The sections that describe the four task tools, one each (design sec-8). */
+const TOOL_SECTIONS = ['tool-start', 'tool-wait', 'tool-ack', 'tool-cancel'] as const;
+
+test('help: each task tool section resolves by name to its non-empty built-in file', () => {
+  const snapshot = loaded(layers().all);
+  for (const section of TOOL_SECTIONS) {
+    assert.equal(sectionName(section), section);
+    const text = sectionText(snapshot, section, CONTEXT);
+    assert.ok(text.trim().length > 0, `${section} is not empty`);
+    assert.equal(text, builtin(`help/${section}.md`), section);
+  }
+});
+
+test('help: an operator layer overrides each task tool section, as it does tool', () => {
+  const { over, all } = layers();
+  for (const section of TOOL_SECTIONS) {write(over, section, `operator ${section}\n`);}
+  const snapshot = loaded(all);
+  for (const section of TOOL_SECTIONS) {
+    assert.equal(sectionText(snapshot, section, CONTEXT), `operator ${section}\n`);
+    assert.equal(snapshot.sources.get(section), join(over, `${section}.md`));
+  }
+});
+
+test('help: every tool\'s description section is a help section', () => {
+  for (const [name, tool] of Object.entries(TOOLS)) {
+    assert.ok(HELP_SECTIONS.includes(tool.section), `${name}: ${tool.section}`);
+  }
 });
 
 test('help: an override replaces a rendered section verbatim', () => {

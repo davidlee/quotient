@@ -1,6 +1,6 @@
 // The built-in help (design sec-2): one sectioned source that serves the human
-// (`quotient help`) and the model (the MCP `initialize` instructions and the
-// `pi_agent` tool description).
+// (`quotient help`) and the model (the MCP `initialize` instructions and each
+// tool's description).
 //
 // Each overridable section resolves per section from the XDG layer,
 // `<xdgConfig>/quotient/help/<section>.md`, then the built-in; a launch-dir
@@ -23,7 +23,22 @@ import type { Filesystem, Profile } from '../server/profiles.ts';
 import type { Locations, Resolved } from '../config.ts';
 import { USAGE as REDUCE_USAGE } from '../reduce/cli.ts';
 
-export const HELP_SECTIONS = ['agent', 'tool', 'orchestrate', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce'] as const;
+export const HELP_SECTIONS = [
+  'agent',
+  'tool',
+  'tool-start',
+  'tool-wait',
+  'tool-ack',
+  'tool-cancel',
+  'orchestrate',
+  'result',
+  'policy',
+  'form',
+  'profiles',
+  'setup',
+  'clients',
+  'reduce',
+] as const;
 
 export type Section = (typeof HELP_SECTIONS)[number];
 
@@ -36,6 +51,10 @@ type Source = { kind: 'file'; path: string } | { kind: 'contract'; path: string 
 const SOURCES: Readonly<Record<Section, Source>> = {
   agent: { kind: 'file', path: 'help/agent.md' },
   tool: { kind: 'file', path: 'help/tool.md' },
+  'tool-start': { kind: 'file', path: 'help/tool-start.md' },
+  'tool-wait': { kind: 'file', path: 'help/tool-wait.md' },
+  'tool-ack': { kind: 'file', path: 'help/tool-ack.md' },
+  'tool-cancel': { kind: 'file', path: 'help/tool-cancel.md' },
   orchestrate: { kind: 'file', path: 'help/orchestrate.md' },
   result: { kind: 'contract', path: 'docs/contract/pi-agent-result-2.md' },
   policy: { kind: 'contract', path: 'docs/contract/quotient-policy-2.md' },

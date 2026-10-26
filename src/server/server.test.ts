@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -23,21 +24,44 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
+import { resolveLocations } from '../config.ts';
+import { loadHelp, renderContext, sectionText, type Section } from '../help/help.ts';
 import { isRecord } from '../json.ts';
 import { packageVersion } from '../root.ts';
-import { toolResult, type ToolResult } from './documents.ts';
-import { layoutFor } from './evidence.ts';
-import { refusedResult } from './result.ts';
-import { abortNamed, PROTOCOL_VERSION, runCall, serve, type CallHost, type InFlightCall } from './server.ts';
-import { PI_AGENT_TOOL } from './tools.ts';
 import {
+  toolResult,
+  type AckDocument,
+  type HandleDocument,
+  type ToolResult,
+  type WaitDocument,
+  type WaitEntry,
+} from './documents.ts';
+import { layoutFor } from './evidence.ts';
+import { refusedResult, type AgentResult } from './result.ts';
+import { abortNamed, PROTOCOL_VERSION, runCall, serve, type CallHost, type InFlightCall } from './server.ts';
+import { TOOLS } from './tools.ts';
+import {
+  ackLine,
+  admissionContext,
   attempts,
   auditKinds,
   callLine,
+  cancelLine,
   closeServer,
   converse,
+  envelopeDocument,
   executableAt,
+  hasStarted,
   isAlive,
+  launchOrder,
+  refusalDocument,
+  release,
+  sleeperPid,
+  sleeperRig,
+  startLine,
+  waitForReply,
+  waitLine,
+  waitStarted,
   jsonLines,
   line,
   markerPids,
@@ -53,6 +77,7 @@ import {
   rigApprovalsPath,
   rigForm,
   runDirs,
+  runIn,
   runOf,
   SETTLED,
   serveRig,
@@ -66,7 +91,7 @@ import {
   writeApprovals,
   writeProfiles,
   xdgHelpLayer,
-  xdgProfileLayer, type Env, type Rig, type RigForm 
+  xdgProfileLayer, type Env, type LiveServer, type Rig, type RigForm 
 } from './test-rig.ts';
 
 const moduleDir = new URL('.', import.meta.url).pathname;
@@ -128,21 +153,64 @@ test('notifications/cancelled is accepted as a no-op, not rejected as an unknown
   assert.equal(stderr, '');
 });
 
-test('tools/list exposes exactly one tool, pi_agent, with its declared inputSchema', async () => {
-  const { replies } = await converse([line({ id: 4, method: 'tools/list' })], workspace().env);
-  const tools = replies[0].result.tools as Record<string, any>[];
-  assert.equal(tools.length, 1);
-  assert.equal(tools[0].name, 'pi_agent');
-  assert.deepEqual(Object.keys(tools[0]), ['name', 'description', 'inputSchema']);
-  assert.deepEqual(tools[0].inputSchema, PI_AGENT_TOOL.inputSchema);
-  assert.deepEqual(tools[0].inputSchema.required, ['prompt', 'profile']);
-  assert.equal(tools[0].inputSchema.additionalProperties, false);
-  assert.equal(tools[0].inputSchema.properties.ceilings.additionalProperties, false);
-  assert.deepEqual(Object.keys(tools[0].inputSchema.properties.ceilings.properties), [
-    'requests', 'context_tokens', 'cost_usd', 'wall_clock_s',
-  ]);
-  assert.equal(tools[0].inputSchema.properties.transcript_budget_bytes.type, 'integer');
-  assert.equal(tools[0].inputSchema.properties.tools.items.type, 'string');
+/** Sec-2's tool table, in the order tools/list lists it. */
+const TOOL_NAMES = ['pi_agent', 'pi_agent_start', 'pi_agent_wait', 'pi_agent_ack', 'pi_agent_cancel'] as const;
+
+/** Each tool's annotations, exactly sec-2's: only wait is read-only. */
+const ANNOTATIONS: Record<(typeof TOOL_NAMES)[number], Record<string, boolean>> = {
+  pi_agent: { readOnlyHint: false, openWorldHint: true },
+  pi_agent_start: { readOnlyHint: false, openWorldHint: true },
+  pi_agent_wait: { readOnlyHint: true },
+  pi_agent_ack: { readOnlyHint: false, idempotentHint: true },
+  pi_agent_cancel: { readOnlyHint: false, idempotentHint: true },
+};
+
+/** The tools a tools/list reply lists. */
+function listedTools(reply: unknown): Record<string, unknown>[] {
+  const tools = field(field(reply, 'result'), 'tools');
+  if (!Array.isArray(tools)) {assert.fail(`tools/list answers a list: ${JSON.stringify(reply)}`);}
+  return tools.filter(isRecord);
+}
+
+/** The help section text RIG's server renders for SECTION: the same snapshot
+ *  and render context the server builds at start-up. */
+function renderedSection(rig: Rig, section: Section): string {
+  const { startup, locations, launchDir } = admissionContext(rig);
+  return sectionText(startup.help, section, renderContext(locations, [...startup.profiles.profiles.values()], launchDir));
+}
+
+test('tools/list lists the five tools in sec-2 order, each with its help section, its schema and its annotations', async (t) => {
+  const rig = newRig(t);
+  const { replies } = await converse([line({ id: 4, method: 'tools/list' })], rig.env, { launchDir: rig.launchDir });
+  const tools = listedTools(replies[0]);
+  assert.deepEqual(tools.map((tool) => tool.name), [...TOOL_NAMES]);
+  TOOL_NAMES.forEach((name, index) => {
+    const tool = tools[index];
+    assert.deepEqual(Object.keys(tool), ['name', 'description', 'inputSchema', 'annotations'], name);
+    assert.equal(tool.description, renderedSection(rig, TOOLS[name].section), `${name}'s description is its help section`);
+    assert.ok(typeof tool.description === 'string' && tool.description.length > 0, name);
+    assert.deepEqual(tool.inputSchema, TOOLS[name].inputSchema, name);
+    assert.deepEqual(tool.annotations, ANNOTATIONS[name], `${name}'s annotations are exactly sec-2's`);
+  });
+  assert.equal(new Set(tools.map((tool) => tool.description)).size, tools.length, 'no two tools share a description');
+
+  // The schemas listed are the declared ones (above); pi_agent's keeps today's
+  // shape and gains lane and needs_success, and start's adds key to the same set.
+  const agent = TOOLS.pi_agent.inputSchema;
+  assert.deepEqual(agent.required, ['prompt', 'profile']);
+  assert.equal(agent.additionalProperties, false);
+  assert.equal(agent.properties.ceilings.additionalProperties, false);
+  assert.deepEqual(Object.keys(agent.properties.ceilings.properties), ['requests', 'context_tokens', 'cost_usd', 'wall_clock_s']);
+  assert.equal(agent.properties.transcript_budget_bytes.type, 'integer');
+  assert.equal(agent.properties.tools.items.type, 'string');
+  const fields = Object.keys(agent.properties);
+  assert.ok(fields.includes('lane') && fields.includes('needs_success'), fields.join(', '));
+  assert.equal(fields.includes('key'), false, 'key is start\'s alone');
+  assert.deepEqual(
+    Object.keys(TOOLS.pi_agent_start.inputSchema.properties).filter((name) => name !== 'key'),
+    fields,
+    'start shares pi_agent\'s property set and adds key',
+  );
 });
 
 test('an unknown method answers -32601 with the request id', async () => {
@@ -556,6 +624,465 @@ test('a call is in the in-flight index while it runs and gone from it once done'
   await call.done;
   assert.equal(host.inFlight.size, 0, 'deregistered once done');
 });
+
+// ── Start, wait, ack, cancel and lanes (SL-004 PHASE-08) ─────────────────
+//
+// Driven through the real server with the sleeper form: each run is named by its
+// prompt, launches visibly (a marker) and ends only when the test releases it, so
+// overlap, lane order and cancel races are asserted from markers, never timing.
+// Every handle, wait and ack document is read through `envelopeDocument`, which
+// holds it to its validator.
+
+/** Fast gate ticks and a short ladder: no case waits on a default interval. */
+const SERVE = { graceMs: 200, gateIdleMs: 20 };
+
+/** A well-formed id that names no run. */
+const UNKNOWN_RUN = 'run-20261024T080000000Z-1-aaaaaaaaaaaa';
+
+/** A sleeper's arguments: its prompt is its name. */
+const sleeper = (rig: Rig, name: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  prompt: name,
+  profile: 'read',
+  cwd: rig.root,
+  ...extra,
+});
+
+/** Start one run and read the handle start answered. */
+async function startOf(server: LiveServer, id: number, args: Record<string, unknown>): Promise<HandleDocument> {
+  server.write(startLine(id, args));
+  return envelopeDocument(await waitForReply(server, id), 'pi-run-handle/1');
+}
+
+/** One wait, and the pi-agent-wait/1 document it answered. */
+async function waitOf(server: LiveServer, id: number, args: Record<string, unknown>): Promise<WaitDocument> {
+  server.write(waitLine(id, args));
+  return envelopeDocument(await waitForReply(server, id), 'pi-agent-wait/1');
+}
+
+/** One cancel, and the pi-agent-wait/1 document it answered. */
+async function cancelOf(server: LiveServer, id: number, runs: string[]): Promise<WaitDocument> {
+  server.write(cancelLine(id, { runs }));
+  return envelopeDocument(await waitForReply(server, id), 'pi-agent-wait/1');
+}
+
+/** One ack, and the pi-agent-ack/1 document it answered. */
+async function ackOf(server: LiveServer, id: number, runs: string[]): Promise<AckDocument> {
+  server.write(ackLine(id, { runs }));
+  return envelopeDocument(await waitForReply(server, id), 'pi-agent-ack/1');
+}
+
+/** The entry a wait document holds for RUN. */
+function entryOf(waited: WaitDocument, run: string): WaitEntry {
+  return waited.runs.find((entry) => entry.taskId === run) ?? assert.fail(`no entry for ${run} in ${JSON.stringify(waited)}`);
+}
+
+/** The result a wait document carries for RUN. */
+function resultOf(waited: WaitDocument, run: string): AgentResult {
+  return entryOf(waited, run).result ?? assert.fail(`no result for ${run} in ${JSON.stringify(waited)}`);
+}
+
+/** The ids a selector-less listing reports: every unacknowledged started run. */
+async function listed(server: LiveServer, id: number): Promise<string[]> {
+  const listing = await waitOf(server, id, { timeout_s: 0, status_only: true });
+  return listing.runs.map((entry) => entry.taskId);
+}
+
+/** RUN's first audit record of KIND, as written. */
+function auditRecord(rig: Rig, run: string, kind: string): unknown {
+  return jsonLines(layoutFor(rig.runDir, run).audit).find((record) => field(record, 'record') === kind);
+}
+
+test('start answers a pi-run-handle/1 at once, and a wait on its id answers pi-agent-wait/1 with the settled run and its result', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const handle = await startOf(server, 1, sleeper(rig, 'a'));
+  assert.equal(handle.state, 'running', 'an unlaned run launches at once');
+  assert.equal(handle.status, 'working');
+  assert.equal(handle.lane, null);
+  assert.equal(handle.key, null);
+  assert.ok(existsSync(handle.artifacts.dir), 'the run is published before start answers');
+  assert.equal(field(auditRecord(rig, handle.taskId, 'admitted'), 'origin'), 'start', 'the run came through the start door');
+
+  await waitStarted(rig, 'a');
+  release(rig, 'a');
+  const waited = await waitOf(server, 2, { runs: [handle.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.equal(waited.until, 'all');
+  assert.equal(waited.timed_out, false);
+  assert.deepEqual(waited.unknown, []);
+  assert.equal(waited.runs.length, 1);
+  const entry = entryOf(waited, handle.taskId);
+  assert.equal(entry.state, 'settled');
+  assert.equal(entry.status, 'completed');
+  assert.equal(entry.status_only, false);
+  assert.equal(entry.result?.state, 'completed', JSON.stringify(entry.result));
+  assert.deepEqual(entry.result, resultJson(rig.runDir, handle.taskId), 'the entry carries the committed result');
+});
+
+test('two write runs started under different roots overlap: both launch before either is released, and one wait returns both', async (t) => {
+  const rig = sleeperRig(t);
+  const second = join(rig.dir, 'second-root');
+  mkdirSync(second);
+  patchPolicy(rig, 'roots', [rig.root, second]);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, { prompt: 'a', profile: 'write', cwd: rig.root });
+  const b = await startOf(server, 2, { prompt: 'b', profile: 'write', cwd: second });
+
+  await waitStarted(rig, 'a');
+  await waitStarted(rig, 'b');
+  release(rig, 'a');
+  release(rig, 'b');
+  const waited = await waitOf(server, 3, { runs: [a.taskId, b.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.equal(waited.timed_out, false);
+  assert.deepEqual(waited.runs.map((entry) => entry.taskId), [a.taskId, b.taskId]);
+  for (const run of [a.taskId, b.taskId]) {assert.equal(resultOf(waited, run).state, 'completed', run);}
+});
+
+test('three starts in one lane launch one at a time in start order, while an unlaned run started after them launches at once', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a', { lane: 'build' }));
+  const b = await startOf(server, 2, sleeper(rig, 'b', { lane: 'build' }));
+  const c = await startOf(server, 3, sleeper(rig, 'c', { lane: 'build' }));
+  assert.equal(a.state, 'running', 'an idle lane launches its first run');
+  assert.equal(a.lane, 'build');
+  assert.equal(b.state, 'queued');
+  assert.equal(b.statusMessage, `queued in lane build behind ${a.taskId}`);
+  assert.equal(c.statusMessage, `queued in lane build behind ${b.taskId}`);
+  const d = await startOf(server, 4, sleeper(rig, 'd'));
+  assert.equal(d.state, 'running', 'a busy lane holds back no unlaned run');
+
+  await waitStarted(rig, 'a');
+  await waitStarted(rig, 'd');
+  assert.equal(hasStarted(rig, 'b'), false, 'b waits for a');
+  release(rig, 'a');
+  await waitStarted(rig, 'b');
+  assert.notEqual(resultJson(rig.runDir, a.taskId), null, 'b launched only once a had settled');
+  assert.equal(hasStarted(rig, 'c'), false, 'c waits for b');
+  release(rig, 'b');
+  await waitStarted(rig, 'c');
+  assert.notEqual(resultJson(rig.runDir, b.taskId), null, 'c launched only once b had settled');
+  release(rig, 'c');
+  release(rig, 'd');
+  const waited = await waitOf(server, 5, { lanes: ['build'], runs: [d.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.equal(waited.timed_out, false);
+  assert.deepEqual(waited.runs.map((entry) => entry.taskId), [d.taskId, a.taskId, b.taskId, c.taskId], 'named runs first, then the lane in start order');
+  for (const entry of waited.runs) {assert.equal(entry.result?.state, 'completed', entry.taskId);}
+  const order = launchOrder(rig);
+  assert.deepEqual(order.filter((name) => name !== 'd'), ['a', 'b', 'c'], 'the lane launched in start order');
+  assert.ok(order.indexOf('d') < order.indexOf('b'), 'the unlaned run overlapped the busy lane');
+});
+
+test('needs_success through the server: a laned run whose predecessor failed settles refused lane-predecessor-failed, never launched', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a', { lane: 'build' }));
+  const b = await startOf(server, 2, sleeper(rig, 'b', { lane: 'build', needs_success: true }));
+  assert.equal(b.state, 'queued');
+
+  await waitStarted(rig, 'a');
+  release(rig, 'a', 'fail');
+  const waited = await waitOf(server, 3, { runs: [a.taskId, b.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.notEqual(resultOf(waited, a.taskId).state, 'completed', 'the predecessor failed');
+  assert.equal(entryOf(waited, b.taskId).state, 'settled');
+  const refused = resultOf(waited, b.taskId);
+  assert.equal(refused.state, 'refused');
+  assert.equal(refused.refusal?.reason, 'lane-predecessor-failed');
+  assert.ok(refused.refusal.detail.includes(a.taskId), refused.refusal.detail);
+  assert.equal(hasStarted(rig, 'b'), false, 'b never launched');
+});
+
+test('cancel: a queued laned run settles cancelled without launching and the lane moves on past it; a running one settles cancelled', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a', { lane: 'build' }));
+  const b = await startOf(server, 2, sleeper(rig, 'b', { lane: 'build' }));
+  const c = await startOf(server, 3, sleeper(rig, 'c', { lane: 'build' }));
+  assert.equal(a.state, 'running');
+  await waitStarted(rig, 'a');
+
+  const queued = await cancelOf(server, 4, [b.taskId]);
+  assert.equal(queued.until, 'all');
+  assert.equal(queued.timed_out, false);
+  assert.equal(entryOf(queued, b.taskId).state, 'settled');
+  assert.equal(entryOf(queued, b.taskId).status, 'cancelled');
+  assert.equal(resultOf(queued, b.taskId).state, 'cancelled');
+  const kinds = auditKinds(layoutFor(rig.runDir, b.taskId));
+  assert.ok(kinds.includes('cancelled'), kinds.join(', '));
+  assert.equal(kinds.includes('spawn'), false, 'the queued run never spawned');
+
+  release(rig, 'a');
+  await waitStarted(rig, 'c');
+  assert.deepEqual(launchOrder(rig), ['a', 'c'], 'the lane skipped the cancelled run');
+
+  const pid = sleeperPid(rig, 'c');
+  const running = await cancelOf(server, 5, [c.taskId]);
+  await closeServer(server);
+  assert.equal(resultOf(running, c.taskId).state, 'cancelled');
+  assert.equal(isAlive(pid), false, 'the cancelled run left no child behind');
+  assert.equal(hasStarted(rig, 'b'), false);
+});
+
+test('start refuses exactly as pi_agent does for the same bad request: same refusal, isError, pi-agent-result/2', async (t) => {
+  const rig = newRig(t);
+  const requests: { name: string; args: Record<string, unknown>; reason?: string }[] = [
+    { name: 'unknown profile', args: { prompt: 'x', profile: 'nope', cwd: rig.root } },
+    { name: 'root outside roots', args: { prompt: 'x', profile: 'read', cwd: rig.dir } },
+    { name: 'malformed lane', args: { prompt: 'x', profile: 'read', cwd: rig.root, lane: '-bad lane-' }, reason: 'request-invalid' },
+    {
+      name: 'needs_success without lane',
+      args: { prompt: 'x', profile: 'read', cwd: rig.root, needs_success: true },
+      reason: 'request-invalid',
+    },
+  ];
+  for (const { name, args, reason } of requests) {
+    const { replies } = await converse([callLine(1, args), startLine(2, args)], rig.env, { launchDir: rig.launchDir });
+    const blocking = refusalDocument(replies.find((reply) => reply.id === 1) ?? assert.fail(name));
+    const started = refusalDocument(replies.find((reply) => reply.id === 2) ?? assert.fail(name));
+    assert.equal(started.schema, 'pi-agent-result/2', name);
+    assert.deepEqual(started.refusal, blocking.refusal, name);
+    if (reason !== undefined) {assert.equal(started.refusal.reason, reason, name);}
+  }
+  assert.deepEqual(runDirs(rig.runDir), [], 'no refusal published a run');
+});
+
+test('a key replays: the same key and arguments answer the same run, different arguments refuse request-invalid', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const first = await startOf(server, 1, sleeper(rig, 'k', { key: 'step-1' }));
+  assert.equal(first.key, 'step-1');
+  const again = await startOf(server, 2, sleeper(rig, 'k', { key: 'step-1' }));
+  assert.equal(again.taskId, first.taskId, 'the replay answers the run the key already names');
+  assert.equal(runDirs(rig.runDir).length, 1, 'and admits nothing new');
+
+  server.write(startLine(3, sleeper(rig, 'other', { key: 'step-1' })));
+  assert.equal(refusalDocument(await waitForReply(server, 3)).refusal.reason, 'request-invalid');
+  assert.equal(runDirs(rig.runDir).length, 1);
+
+  release(rig, 'k');
+  await closeServer(server);
+  assert.deepEqual(launchOrder(rig), ['k'], 'neither the replay nor the clash launched anything');
+});
+
+test('ack: settled → acknowledged, running → not-settled, unknown id → unknown; a malformed id refuses whole; acked runs leave the listing', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a'));
+  const b = await startOf(server, 2, sleeper(rig, 'b'));
+  release(rig, 'a');
+  await waitOf(server, 3, { runs: [a.taskId], timeout_s: 8 });
+
+  server.write(ackLine(4, { runs: [a.taskId, '../escape'] }));
+  assert.equal(refusalDocument(await waitForReply(server, 4)).refusal.reason, 'request-invalid');
+  assert.deepEqual(await listed(server, 5), [a.taskId, b.taskId], 'a malformed request applied no acknowledgement');
+  assert.deepEqual(await listed(server, 50), [a.taskId, b.taskId], 'a wait acknowledges nothing: the listing reads the same twice');
+
+  const acked = await ackOf(server, 6, [a.taskId, b.taskId, UNKNOWN_RUN]);
+  assert.deepEqual(acked.runs, [
+    { taskId: a.taskId, acknowledged: true },
+    { taskId: b.taskId, acknowledged: false, reason: 'not-settled' },
+    { taskId: UNKNOWN_RUN, acknowledged: false, reason: 'unknown' },
+  ]);
+  assert.deepEqual(await listed(server, 7), [b.taskId], 'the selector-less wait excludes the acknowledged run');
+  assert.deepEqual((await ackOf(server, 8, [a.taskId])).runs, [{ taskId: a.taskId, acknowledged: true }], 'ack is idempotent');
+  const named = await waitOf(server, 9, { runs: [a.taskId], timeout_s: 0 });
+  assert.equal(resultOf(named, a.taskId).state, 'completed', 'a named wait still reports an acknowledged run');
+
+  release(rig, 'b');
+  await closeServer(server);
+});
+
+test('wait with timeout_s 0 over a running run answers at once, timed out, with the run status-only', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a'));
+  await waitStarted(rig, 'a');
+  const waited = await waitOf(server, 2, { runs: [a.taskId], timeout_s: 0 });
+  release(rig, 'a');
+  await closeServer(server);
+
+  assert.equal(waited.timed_out, true);
+  const entry = entryOf(waited, a.taskId);
+  assert.equal(entry.state, 'running');
+  assert.equal(entry.status, 'working');
+  assert.equal(entry.status_only, true);
+  assert.equal(entry.result, null);
+});
+
+test('notifications/cancelled naming a wait ends it with no reply, and its run keeps running to settlement', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a'));
+  await waitStarted(rig, 'a');
+  const pid = sleeperPid(rig, 'a');
+
+  server.write(waitLine(2, { runs: [a.taskId], timeout_s: 8 }));
+  server.write(line({ method: 'notifications/cancelled', params: { requestId: 2 } }));
+  server.write(line({ id: 3, method: 'ping' }));
+  await waitForReply(server, 3);
+  assert.equal(isAlive(pid), true, 'cancelling the wait left its run running');
+  assert.equal(resultJson(rig.runDir, a.taskId), null);
+
+  release(rig, 'a');
+  const settled = await waitForResult(rig.runDir, a.taskId);
+  // Read after the run settled: an uncancelled wait would have answered first.
+  server.write(line({ id: 4, method: 'ping' }));
+  await waitForReply(server, 4);
+  await closeServer(server);
+
+  assert.equal(settled.state, 'completed', JSON.stringify(settled));
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [1, 3, 4], 'the cancelled wait got no reply, ever');
+});
+
+test('EOF ends a wait on a run another server owns at once, without sitting out its timeout', async (t) => {
+  const rig = newRig(t);
+  // The fixture's owner is on another host, so this server reads the run foreign:
+  // nothing in this process will ever settle it.
+  const foreign = runIn(rig.runDir, {});
+  const server = serveRig(rig, SERVE);
+  server.write(waitLine(1, { runs: [foreign.run], timeout_s: 30 }));
+  server.write(line({ id: 2, method: 'ping' }));
+  await waitForReply(server, 2);
+
+  const started = Date.now();
+  await closeServer(server);
+  assert.ok(Date.now() - started < 5000, `serve returned ${String(Date.now() - started)} ms after EOF`);
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [2], 'the wait wrote no reply down the closed channel');
+});
+
+test('re-admission: a queued run launches under maxima lowered while it waited, and the head admitted before keeps its own', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a', { lane: 'build' }));
+  const b = await startOf(server, 2, sleeper(rig, 'b', { lane: 'build' }));
+  await waitStarted(rig, 'a');
+  // The sleeper's one request costs 0.01: under the lowered maximum, only a
+  // run judged by the current policy crosses it.
+  patchPolicy(rig, 'maxima', { requests: 20, context_tokens: 100000, cost_usd: 0.005, wall_clock_s: 600 });
+
+  release(rig, 'a');
+  await waitStarted(rig, 'b');
+  release(rig, 'b');
+  const waited = await waitOf(server, 3, { runs: [a.taskId, b.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.equal(resultOf(waited, a.taskId).state, 'completed', 'the head runs under what it was admitted with');
+  assert.equal(resultOf(waited, b.taskId).state, 'ceiling_exceeded', JSON.stringify(resultOf(waited, b.taskId)));
+  const abort = auditRecord(rig, b.taskId, 'abort');
+  assert.equal(field(abort, 'unit'), 'cost_usd');
+  assert.equal(field(abort, 'limit'), 0.005, 'the ceiling is the current maximum, not the admitted one');
+});
+
+test('re-admission: a queued run\'s wall clock counts from its launch, not from its start', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a', { lane: 'build' }));
+  const b = await startOf(server, 2, sleeper(rig, 'b', { lane: 'build', ceilings: { wall_clock_s: 0.5 } }));
+  // The control: the same clock, held past it once launched, must end the run —
+  // so b's completion shows where the clock starts, not that it is ignored.
+  const c = await startOf(server, 3, sleeper(rig, 'c', { lane: 'build', ceilings: { wall_clock_s: 0.5 } }));
+  await waitStarted(rig, 'a');
+  // Durations, not ordering: the head outlives the queued run's whole wall clock,
+  // then the queued run runs for ten gate ticks. Counted from start, the gate
+  // would end it at its first tick.
+  await pause(800);
+  release(rig, 'a');
+  await waitStarted(rig, 'b');
+  await pause(200);
+  release(rig, 'b');
+  // c is never released: only its wall clock can end it.
+  const waited = await waitOf(server, 4, { runs: [a.taskId, b.taskId, c.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.equal(resultOf(waited, b.taskId).state, 'completed', JSON.stringify(resultOf(waited, b.taskId)));
+  assert.equal(resultOf(waited, c.taskId).state, 'timeout', JSON.stringify(resultOf(waited, c.taskId)));
+  assert.equal(field(auditRecord(rig, c.taskId, 'abort'), 'unit'), 'wall_clock_s');
+});
+
+test('re-admission: a queued run refuses at launch once the policy is disabled, recorded and never launched', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const a = await startOf(server, 1, sleeper(rig, 'a', { lane: 'build' }));
+  const b = await startOf(server, 2, sleeper(rig, 'b', { lane: 'build' }));
+  await waitStarted(rig, 'a');
+
+  // The switch also ends the head at its next gate tick, which is what lets b reach launch.
+  patchPolicy(rig, 'enabled', false);
+  const waited = await waitOf(server, 3, { runs: [a.taskId, b.taskId], timeout_s: 8 });
+  await closeServer(server);
+
+  assert.equal(entryOf(waited, b.taskId).state, 'settled');
+  const refused = resultOf(waited, b.taskId);
+  assert.equal(refused.state, 'refused', JSON.stringify(refused));
+  assert.equal(refused.refusal?.reason, 'disabled');
+  assert.deepEqual(resultJson(rig.runDir, b.taskId), refused, 'the refusal is the run\'s result.json');
+  const ledger = attempts(rig.runDir).map((attempt) => [field(attempt, 'call_id'), field(attempt, 'reason')]);
+  assert.ok(ledger.some(([callId, reason]) => callId === 2 && reason === 'disabled'), JSON.stringify(ledger));
+  const kinds = auditKinds(layoutFor(rig.runDir, b.taskId));
+  assert.ok(kinds.includes('refused'), kinds.join(', '));
+  assert.equal(kinds.includes('spawn'), false);
+  assert.equal(hasStarted(rig, 'b'), false, 'b never launched');
+});
+
+test('a start-up-refused server: pi_agent (malformed too), start and unknown tools answer profile-invalid; wait, ack and cancel serve', async (t) => {
+  const rig = newRig(t);
+  const layer = plantLegacy(rig, 'profiles');
+  const { replies } = await converse(
+    [
+      line({ id: 1, method: 'tools/list' }),
+      line({ id: 2, method: 'tools/call', params: { name: 'pi_agent', arguments: 7 } }),
+      startLine(3, { prompt: 'hi', profile: 'read', cwd: rig.root }),
+      line({ id: 4, method: 'tools/call', params: { name: 'pi_other', arguments: {} } }),
+      waitLine(5, { timeout_s: 0 }),
+      ackLine(6, { runs: [UNKNOWN_RUN] }),
+      cancelLine(7, { runs: [UNKNOWN_RUN] }),
+    ],
+    rig.env,
+    { launchDir: rig.launchDir },
+  );
+  const replyTo = (id: number): Record<string, unknown> => replies.find((reply) => reply.id === id) ?? assert.fail(`no reply ${String(id)}`);
+
+  for (const id of [2, 3, 4]) {
+    const { refusal } = refusalDocument(replyTo(id));
+    assert.equal(refusal.reason, 'profile-invalid', `call ${String(id)}`);
+    assert.ok(refusal.detail.includes(layer), refusal.detail);
+  }
+  const waited = envelopeDocument(replyTo(5), 'pi-agent-wait/1');
+  assert.deepEqual(waited.runs, []);
+  assert.equal(waited.timed_out, false);
+  assert.deepEqual(envelopeDocument(replyTo(6), 'pi-agent-ack/1').runs, [
+    { taskId: UNKNOWN_RUN, acknowledged: false, reason: 'unknown' },
+  ]);
+  assert.deepEqual(envelopeDocument(replyTo(7), 'pi-agent-wait/1').unknown, [UNKNOWN_RUN]);
+
+  const tools = listedTools(replyTo(1));
+  const described = (name: string): string => String(tools.find((tool) => tool.name === name)?.description);
+  for (const refusing of ['pi_agent', 'pi_agent_start']) {
+    assert.ok(described(refusing).includes(layer), described(refusing));
+    assert.match(described(refusing), /pi_agent_start/, 'the refusal names start among the refusing tools');
+  }
+  const builtin = loadHelp([]);
+  if (!builtin.ok) {assert.fail(builtin.detail);}
+  const context = renderContext(resolveLocations(rig.env), [], rig.launchDir);
+  for (const serving of ['pi_agent_wait', 'pi_agent_ack', 'pi_agent_cancel'] as const) {
+    assert.equal(described(serving), sectionText(builtin.snapshot, TOOLS[serving].section, context), `${serving} keeps its own section`);
+  }
+});
+
+// M4 (PHASE-08 C14), a lane head settling between the client-gone trigger and
+// `registry.close()` launching no successor, is not driven here: through `serve`
+// the only head that settles after the trigger deterministically is one the EOF
+// itself aborts, and `close()` drops the queued tail in the same sweep, so the
+// case would pass without `closing()`. The window between the trigger and
+// `close()` has no hook a test can hold open. `runs.test.ts` covers it ("after
+// closing() a head that settles launches no successor").
 
 // ── A malformed request is a tool result, never a JSON-RPC error (EX-2) ─────
 
