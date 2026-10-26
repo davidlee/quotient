@@ -1,0 +1,46 @@
+memory_uid = "mem_01a17a218d467b80ae8f9c1a53a3258b"
+memory_key = "mem.fact.quotient.readable-end-before-dispatch"
+schema_version = 1
+memory_type = "fact"
+status = "active"
+title = "A Readable's end event can fire before the for-await consumer dispatches lines it already holds"
+summary = "Input 'end' is not 'the reader reached EOF': a closed flag set at 'end' cuts off buffered lines nondeterministically"
+created = "2026-10-26"
+updated = "2026-10-26"
+
+[scope]
+paths = ["src/server/server.ts"]
+globs = []
+commands = []
+tags = ["node-streams", "eof"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "ffc5962d0237435976c93b2f44632e51d8b359b5"
+ref_name = "refs/heads/main"
+checkout_state_id = "81552d00f4eaa82ff876c24de1f9eb21b18a1c38434f9a9db47b590fbe77c8cb"
+base_commit = "70e02a4ef544f867d8dfec78da65917740f445ab"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "medium"
+weight = 0
+
+[[source]]
+kind = "commit"
+ref = "70e02a4"
+

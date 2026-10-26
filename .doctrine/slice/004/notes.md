@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-06 completed; PHASE-07 next · e5c1b3b
+fresh-as-of: 2026-10-27 · PHASE-07 completed; PHASE-08 next · 70e02a4
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -17,14 +17,18 @@ fresh-as-of: 2026-10-27 · PHASE-06 completed; PHASE-07 next · e5c1b3b
 - isRecord consolidated into src/json.ts (ceb2ce3; user request; outside phase range)
 - PHASE-05 done — views.ts, documents.ts + suites (6322f83, fa36bf7, 4b48ddf; delta ceb2ce3..4b48ddf); Codex 2 high + 2 medium fixed (§ PHASE-05 execution)
 - PHASE-06 done — waiting.ts + suite, shared run fixtures in test-rig (4e3fe68, b8f6950, e5c1b3b; delta e3fb817..e5c1b3b); Codex 3 medium (2 fixed, F1 accepted) + 1 low fixed (§ PHASE-06 execution)
+- PHASE-07 done — blocking pi_agent through the registry; call driver + reply gate; EOF at the trigger (3095a6f, 70e02a4; delta 5d8e37c..70e02a4); Codex 1 medium fixed (§ PHASE-07 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
 - mem.fact.quotient.client-concurrency-readonlyhint — clients overlap calls only with readOnlyHint
+- mem.fact.quotient.readable-end-before-dispatch — input `end` can precede dispatch of lines already read (70e02a4)
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-07 (blocking pi_agent through the registry)
+- next: PHASE-08 (start, wait, ack, cancel and lanes over the server)
+- PHASE-07 → PHASE-08 carries: argsDigest '' for blocking starts; M4 control (at-trigger closing) once lanes exist; closingRefusal ledger line if any start path can reach it (§ PHASE-07 execution)
+- D-6 — Context.admission is `AdmissionContext | StartupFailure`; D-7 — runCall handler is `(signal) => Answer`; D-8 — EX-6's auditKinds(runDir, run) kept as auditKinds(layout) (C5); /reconcile amends (§ PHASE-07 execution)
 - PHASE-06 drift — sec-5 `awaitTargets` returns Promise<boolean> vs sec-7 Promise<void>; code follows sec-7; /reconcile amends sec-5 (§ PHASE-06 execution)
 - PHASE-06 F1 — wait reactions retained on live `settled` until settle; accepted (bounded); /reconcile: add to sec-9 Risks
 - D-4 — `here` on viewFromDisk/resolveRun; D-5 — failed audit/dir read → `unreadable`; /reconcile amends (§ Divergences)
@@ -417,3 +421,55 @@ Codex pass (gpt-6.1-sol, high), 0 high, 3 medium, 1 low:
   (tests).
 
 Gate green 593 at e5c1b3b. Delta e3fb817..e5c1b3b; verify-vt VT-1, VT-2 pass; completed 2026-10-27.
+
+## PHASE-07 execution (2026-10-27)
+
+T1 red by an Opus subagent (~229k tokens; regression-net rewrites + new cases,
+rig: resultJson, waitForResult, runOf, admittedCall, admissionContext); T2 review
+and red (26 failing of 177); T3 green in-session; T4 mutation controls; T5 Codex.
+Tests: 605 (593 at PHASE-06 + 12 new server cases).
+
+Choices C1–C8 (phase sheet): launch = executeRun for a never-queued run; blocking
+handler admitAndStart → document promise; cancel forwarded on abort reason
+`cancelled` only; one call driver `runCall` exported with `abortNamed` for a
+direct test of the catch arm; catch-arm detail "the server failed while handling
+this call"; EOF closing at signal/end/error; runChild keeps the directory on a
+failed spawn record; auditFailed says nothing was launched.
+
+Divergences for /reconcile:
+- D-6: sec-7 says Context gains `admission: AdmissionContext`; a start-up-refused
+  server has no snapshot to build one from, so it is
+  `AdmissionContext | StartupFailure` (narrowed by `'ok' in`).
+- D-7: sec-7's handler shape is `(args, call: CallContext) => Answer`; runCall
+  takes `(signal) => Answer` and the server closes over args. PHASE-08's HANDLERS
+  table adapts at the call site.
+- D-8: PHASE-07 EX-6 names `auditKinds(runDir, run)`; C5 kept the one existing
+  `auditKinds(layout)` and callers pass `layoutFor(runDir, run)`.
+
+Interim: `argsDigest: ''` for a blocking start (no key, so matchKey never reads
+it); PHASE-08's tools.ts argsDigest replaces it.
+
+Mutation controls (9 + 1): reply gate (silenced, closed), abortNamed silencing,
+cancel forwarding, registry.close() awaited (killed by hang), runChild removeRun
+all killed. Post-loop close survived → new case "an input destroyed without an
+error" (destroy() emits neither end nor error). At-trigger closing (M4)
+survives: nothing in PHASE-07 acts between trigger and loop unwind; PHASE-08's
+lanes make it observable.
+
+Codex pass (gpt-6.1-sol, high): 0 high, 1 medium, 0 low.
+- F1 medium: records already read were still dispatched after the trigger
+  (ping replies after EOF; a buffered tools/call admitted, then a closing
+  refusal with no ledger line). Verified by probe. Fixed 70e02a4:
+  dispatchLines stops once closed (design sec-6 step 1). Proven via the signal
+  path; an EOF-ordering case passed vacuously (whether `end` precedes a
+  buffered line is environment-timed) and was dropped. Consequence: a client
+  that writes and closes stdin at once may get some or none of its replies.
+
+Sharp edge: a Readable's `end` event can fire before the async-iterator
+consumer has dispatched the chunk it already yielded — "observed at `end`" is
+earlier than "the reader reached EOF".
+
+Lint (HEAD → after): server.ts 9 → 7 (serve's complexity error gone),
+server.test 32 → 31, spawn.test 38 → 34, test-rig 27 → 27, spawn.ts 20 → 20.
+Gate at 70e02a4: 605/605, pack-check 4/4. VT-1..3 pass; VA-1 grep: removeRun's
+one call is runs.ts publishFailed.
