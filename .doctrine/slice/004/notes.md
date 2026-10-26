@@ -6,13 +6,14 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · PHASE-03 completed · 151099d
+fresh-as-of: 2026-10-27 · PHASE-04 completed · 032df24
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
 - PHASE-01 done — evidence foundations, reducer guard, lane refusal reason (f9944c6; delta recorded); Codex pass 6 findings fixed; choices in § PHASE-01 execution
 - PHASE-02 done — owner identity, ownerLiveness, shared fakeProc (9ccee47; delta recorded); Codex pass: 3 minor fixed, 2 major raised (§ PHASE-02 execution)
 - PHASE-03 done — callTool extracted to tools/admission/execute/documents (656c57b, cb45a56; delta 9f4d8b1..cb45a56); Codex pass 4 minor fixed (§ PHASE-03 execution)
+- PHASE-04 done — runs.ts registry, fakeLaunch, runs.test.ts (175442c, 032df24; delta 3060d07..032df24); Codex pass 1 high + 1 medium + 1 minor fixed (§ PHASE-04 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -20,8 +21,9 @@ fresh-as-of: 2026-10-26 · PHASE-03 completed · 151099d
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-04 (run registry)
+- next: PHASE-05 (views.ts; owns EX-6's deferred viewFromDisk assertions on the lost paths)
 - D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
+- D-3 — matchKey in runs.ts; start refuses while closing; /reconcile amends sec-7 (§ Divergences)
 - isRecord: now 7 private copies (tools.ts added one); consolidation candidate, not filed
 - PHASE-02 Codex F1 — recorded on RSK-003 (user: record, don't chase); /reconcile: add to design sec-9 Risks
 - DIVERGENCE (F2, timens) — implementation adds a 4th identity component; /reconcile amends DEC-067 + design (§ Divergences)
@@ -80,6 +82,21 @@ unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → p
   `here: HostIdentity` beside `procDir`, because admit calls acquireSession,
   which requires the identity read once at start-up. Reconcile must amend:
   design sec-7 `admission.ts` type.
+
+- **D-3 runs.ts additions beyond sec-7's `Registry` (2026-10-27, PHASE-04).**
+  Agent's choice, reported to the user, not yet assented. (a) `matchKey(found,
+  argsDigest)` exported from runs.ts: sec-7 puts the key lookup in server's
+  `startRun` (before admission, which must not run for a reuse), yet sec-9
+  lists "different arguments refuse" under runs.test.ts; the rule now has one
+  pure home that `startRun` calls as `matchKey(registry.findKey(key), digest)`.
+  `Registry` is unchanged. (b) After Codex F1: `start()` on a closing registry
+  refuses `server-error` and releases the session, and a launch whose
+  microtask fires after `closing()` is dropped (`dropped` record, `eof`)
+  rather than launched. Sec-6 says the server admits no line after `closed`;
+  this makes the registry hold that invariant itself, so `close()` never
+  misses a record. (c) `AckEntry` lives in runs.ts (sec-7's documents.ts
+  `ackDocument` will import it). Reconcile must amend: sec-7 `runs.ts` type
+  block and its Publish/launch-guard prose; sec-9 Keys bullet.
 
 ## Plan amendments
 
@@ -247,3 +264,42 @@ Codex pass (gpt-6.1-sol, high), 4 findings, all fixed in cb45a56:
 - F3 tests ignored ledger detail and digest; now pinned.
 - F4 no first-failure precedence; three competing-failure cases added.
 
+## PHASE-04 execution (2026-10-26/27)
+
+Two pi runs (implement), $0.188 total. T1 wrote fakeLaunch and runs.test.ts
+from the spec (red: ERR_MODULE_NOT_FOUND for runs.ts; recorded in the phase
+sheet); T2 wrote runs.ts (17 requests, one write). runs.ts, runs.test.ts lint
+0; test-rig.ts 27 (baseline); reduce.ts 125 (baseline). Gate green, 507 tests.
+
+Choices (phase sheet C1–C7): EMPTY_STATUS moved to reduce.ts; matchKey (D-3);
+ack with any malformed id applies none and answers `unknown` for all;
+`queued` = launched outside the admitting start(); EX-4's depth measured as
+stack frames at the release spy (launch runs in a microtask, release is
+synchronous inside settle), no production hook; unwritable files made by
+replacing the path with a non-empty directory (works as root). Private
+functions live at module level over a RegistryState (max-lines-per-function);
+advance's pending flag is a `due` Set of lanes plus one `advancing` flag.
+`now` stays in createRegistry's deps unused (appendAudit/writeResult own the
+clock).
+
+What pi got wrong (T1): release-state 'running' for never-launched runs
+(they are 'queued'); an updatedAt assertion contradicting "the result write
+wins"; key tests driving start() with a duplicate key (contradicts C2); no
+abort-reason assertions on cancel; stamps checked only on admitted/refused
+records. Fixed by me before T2. T2 correctly reported my C6 was unachievable
+for audit.jsonl (already a file); block() now replaces the path.
+
+Mutation controls: 24 mutants. 22 killed. 2 survivors, both equivalent:
+interleaving mark and ending in cancel (inside the registry a queued settle's
+advance stops at the running head, and an abort settles only via the async
+launch promise), and removing settle's terminal guard (no public path
+re-settles a terminal record; kept as the design's exactly-once line).
+
+Codex pass (gpt-6.1-sol, high), 3 findings, all fixed in 032df24:
+- F1 high: closing() did not stop a launch already queued as a microtask (run
+  left `running` with no ladder, close() hangs); a start after closing()
+  escaped close()'s snapshot. Fixed per D-3(b); two tests.
+- F2 medium: messageOf threw on an unprintable rejection value, so the run
+  never settled. messageOf is total; one test.
+- F3 minor: the double-settlement test re-resolved a settled promise. Now
+  drives cancel() and close() on a terminal record.
