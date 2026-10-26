@@ -69,7 +69,7 @@ test('reduce passes the rest of argv to the reducer and returns its exit code', 
 test('help lists the sections; an unknown section exits 2', () => {
   const list = quotient(['help']);
   assert.equal(list.status, 0);
-  for (const section of ['agent', 'tool', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce']) {
+  for (const section of ['agent', 'tool', 'orchestrate', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce']) {
     assert.match(list.stdout, new RegExp(`^  ${section}\\b`, 'm'));
   }
   assert.equal(quotient(['help', 'policy']).status, 0);

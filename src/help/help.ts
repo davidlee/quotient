@@ -23,7 +23,7 @@ import type { Filesystem, Profile } from '../server/profiles.ts';
 import type { Locations, Resolved } from '../config.ts';
 import { USAGE as REDUCE_USAGE } from '../reduce/cli.ts';
 
-export const HELP_SECTIONS = ['agent', 'tool', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce'] as const;
+export const HELP_SECTIONS = ['agent', 'tool', 'orchestrate', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce'] as const;
 
 export type Section = (typeof HELP_SECTIONS)[number];
 
@@ -36,6 +36,7 @@ type Source = { kind: 'file'; path: string } | { kind: 'contract'; path: string 
 const SOURCES: Readonly<Record<Section, Source>> = {
   agent: { kind: 'file', path: 'help/agent.md' },
   tool: { kind: 'file', path: 'help/tool.md' },
+  orchestrate: { kind: 'file', path: 'help/orchestrate.md' },
   result: { kind: 'contract', path: 'docs/contract/pi-agent-result-2.md' },
   policy: { kind: 'contract', path: 'docs/contract/quotient-policy-2.md' },
   form: { kind: 'contract', path: 'docs/contract/form-1.md' },

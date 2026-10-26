@@ -79,4 +79,4 @@ the only one read; an earlier version's `<launch dir>/.quotient/help/`
 fails start-up, telling a directory to move its documents and anything else to
 remove or replace it. `agent` is what an MCP client
 receives as the server's instructions, and `tool` is the `pi_agent` tool's
-description.
+description. `orchestrate` is read on demand, by a caller driving many runs.

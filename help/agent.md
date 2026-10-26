@@ -25,5 +25,8 @@ means.
   a measured context footprint. Check `status.context.requests_unmeasured` and
   `status.context.peak_tokens`; a context gap leaves the peak as a lower bound.
 
+`quotient help orchestrate` is the guide for driving many runs: briefs,
+recovering a run that stopped short, and the verification that stays yours.
+
 `quotient help result` is the full result/2 and status/3 contract, including
 context gaps, cost accounting, states, causes and refusals.

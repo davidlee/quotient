@@ -98,7 +98,7 @@ function callDocument(reply: unknown): unknown {
 }
 
 test('help: every section resolves; refusals is an alias of result; an unknown name is none', () => {
-  assert.deepEqual(HELP_SECTIONS, ['agent', 'tool', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce']);
+  assert.deepEqual(HELP_SECTIONS, ['agent', 'tool', 'orchestrate', 'result', 'policy', 'form', 'profiles', 'setup', 'clients', 'reduce']);
   assert.equal(sectionName('refusals'), 'result');
   assert.equal(sectionName('policy'), 'policy');
   assert.equal(sectionName('nope'), null);
@@ -109,6 +109,7 @@ test('help: every section resolves; refusals is an alias of result; an unknown n
 test('help: with no override each section is its built-in source', () => {
   const snapshot = loaded(layers().all);
   assert.equal(sectionText(snapshot, 'tool', CONTEXT), builtin('help/tool.md'));
+  assert.equal(sectionText(snapshot, 'orchestrate', CONTEXT), builtin('help/orchestrate.md'));
   assert.equal(sectionText(snapshot, 'profiles', CONTEXT), builtin('help/profiles.md'));
   assert.ok(sectionText(snapshot, 'agent', CONTEXT).startsWith(builtin('help/agent.md')));
   assert.match(sectionText(snapshot, 'reduce', CONTEXT), /usage: quotient reduce/);
@@ -198,6 +199,17 @@ test('help: the agent section carries the delegation guidance', () => {
   for (const phrase of ['final', 'state', 'causes', 'transcript', 'refused', 'session']) {
     assert.ok(agent.includes(`\`${phrase}\``), `agent names \`${phrase}\``);
   }
+});
+
+test('help: the agent section points at the orchestration guide', () => {
+  assert.ok(builtin('help/agent.md').includes('`quotient help orchestrate`'));
+});
+
+test('help: the orchestration guide names no profile: profiles are the operator\'s', () => {
+  const orchestrate = builtin('help/orchestrate.md');
+  const examples = readdirSync(join(packageRoot, 'examples/profiles')).map((file) => file.replace(/\.md$/, ''));
+  assert.ok(examples.length > 0, 'the scan has example profiles to look for');
+  for (const name of examples) {assert.ok(!orchestrate.includes(`\`${name}\``), `orchestrate names \`${name}\``);}
 });
 
 test('help: the profile table renders each profile with its pinned capability, or unknown', () => {

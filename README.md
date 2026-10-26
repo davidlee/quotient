@@ -288,7 +288,8 @@ protected stores, project forms),
 ## Documentation
 
 - `quotient help`: built-in help, including the agent-facing guide, which is
-  also what the server tells the calling agent.
+  also what the server tells the calling agent, and `quotient help orchestrate`,
+  a guide for a caller driving many runs.
 - [`docs/contract/pi-agent-result-1.md`](docs/contract/pi-agent-result-1.md):
   historical result fields, states, causes and refusals. The active result
   contract is [`docs/contract/pi-agent-result-2.md`](docs/contract/pi-agent-result-2.md)

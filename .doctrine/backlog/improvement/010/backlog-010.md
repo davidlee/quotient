@@ -70,3 +70,13 @@ Done when: the section renders via `quotient help orchestrate` and is listed
 by `quotient help`; `help.test.ts` covers it and the override layer; the README
 help list names it; the user-level skill can be replaced by a three-line
 pointer plus the doctrine overlay.
+
+## Resolution (2026-10-26)
+
+- `help/orchestrate.md`, a `file` source in `src/help/help.ts`, listed after
+  `tool`. Overridable like the other file sections.
+- `help/agent.md` points at it; `help/setup.md` and the README name it.
+- Tests: the section list (help and CLI), the built-in source, the agent
+  pointer, and a guard that the guide names none of `examples/profiles/`.
+- Not done here: replacing the user-level `~/.claude/skills/pi-orchestrate`
+  with a pointer plus doctrine overlay — outside this repository.
