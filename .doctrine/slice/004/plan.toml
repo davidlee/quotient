@@ -84,7 +84,7 @@ exit_criteria = [
   { id = "EX-7", text = "`just gate` green. tools.ts, admission.ts, execute.ts, documents.ts and admission.test.ts lint clean (moved code is brought to zero errors as it moves); server.ts gains no lint errors over the baseline." },
 ]
 verification = [
-  { id = "VT-1", expects = "admission.test.ts: admit refuses at each of steps 1–8 as callTool did, and releases the session after a refusal following step 7.", test_file = "src/server/admission.test.ts", keywords = ["admit(", "release", "request-invalid", "session-busy"], waived = false },
+  { id = "VT-1", expects = "admission.test.ts: admit refuses at each of steps 1–8 as callTool did, and releases the session after a refusal following step 7.", test_file = "src/server/admission.test.ts", keywords = ["admit(", "release", "session-invalid", "session-busy"], waived = false },
   { id = "VT-2", expects = "admit and its two private steps exist in admission.ts.", test_file = "src/server/admission.ts", keywords = ["export function admit", "function authorise", "function checkLaunchable"], waived = false },
   { id = "VT-3", expects = "executeRun holds the tail.", test_file = "src/server/execute.ts", keywords = ["export function executeRun", "createGate", "runChild", "resultFor", "EMPTY_STATUS"], waived = false },
   { id = "VA-1", expects = "The diff shows moves, not copies: no second implementation of any admission step, of readAgentRequest or of toolResult remains in server.ts (`git diff --stat` plus a grep of the moved function names, recorded in the phase sheet)." },

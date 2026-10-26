@@ -70,6 +70,20 @@ unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → p
   outside any phase range; gate green, 451 tests; 4 mutation controls killed.
   No Codex pass on this follow-up (small, test-pinned).
 
+- **D-2 `here` on AdmissionContext (2026-10-26, PHASE-03 planning).** User
+  chose "Add `here`" when asked whether admit's host identity should ride
+  AdmissionContext. What diverges: sec-7's `AdmissionContext` is
+  `{ startup, locations, launchDir, procDir }`; code adds
+  `here: HostIdentity` beside `procDir`, because admit calls acquireSession,
+  which requires the identity read once at start-up. Reconcile must amend:
+  design sec-7 `admission.ts` type.
+
+## Plan amendments
+
+- **VT-1 keyword (2026-10-26, PHASE-03 planning).** `request-invalid` →
+  `session-invalid`: admit cannot produce `request-invalid` (readToolCall
+  decides it in server.ts before admit runs). User: "Swap to session-invalid".
+
 ## Reopened scope: tasks binding (2026-10-26)
 
 Superseded 2026-10-26: answers 1–8 below were minted as inq-10..17 →
