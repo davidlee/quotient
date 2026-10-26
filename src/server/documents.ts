@@ -33,13 +33,8 @@ export type TaskStatus = 'working' | 'completed' | 'cancelled' | 'failed';
 /** One status row of sec-2's table: the collapsed status and the message beside it. */
 type TaskStatusRow = { status: TaskStatus; statusMessage: string };
 
-/**
- * One run document (design sec-2): a Task's field names verbatim — `taskId`,
- * `status`, `statusMessage`, `createdAt`, `lastUpdatedAt`, `ttlMs`,
- * `pollIntervalMs` — plus quotient's extras in snake_case, `state` being the finer
- * quotient state that `status` collapses.
- */
-export type RunDocument = {
+/** A Task (design sec-2): the extension's field names verbatim. */
+export type Task = {
   taskId: string;
   status: TaskStatus;
   statusMessage: string;
@@ -47,6 +42,13 @@ export type RunDocument = {
   lastUpdatedAt: string;
   ttlMs: null;
   pollIntervalMs: number;
+};
+
+/**
+ * One run document (design sec-2): a Task, plus quotient's extras in snake_case,
+ * `state` being the finer quotient state that `status` collapses.
+ */
+export type RunDocument = Task & {
   state: ViewState;
   lane: string | null;
   key: string | null;
@@ -170,8 +172,9 @@ function settledMessage(outcome: RunView['outcome']): string {
   return outcome.state === 'cancelled' ? outcome.causes.join(', ') : outcome.state;
 }
 
-/** One run's document (design sec-2): the Task fields and quotient's extras, exactly. */
-export function runDocument(view: RunView): RunDocument {
+/** One run as a Task (design sec-2): the seven Task fields, which a created task,
+ *  `tasks/get` and every run document share. */
+export function taskOf(view: RunView): Task {
   const { status, statusMessage } = taskStatus(view);
   return {
     taskId: view.run,
@@ -181,6 +184,13 @@ export function runDocument(view: RunView): RunDocument {
     lastUpdatedAt: view.updatedAt,
     ttlMs: null,
     pollIntervalMs: POLL_INTERVAL_MS,
+  };
+}
+
+/** One run's document (design sec-2): the Task fields and quotient's extras, exactly. */
+export function runDocument(view: RunView): RunDocument {
+  return {
+    ...taskOf(view),
     state: view.state,
     lane: view.lane,
     key: view.key,

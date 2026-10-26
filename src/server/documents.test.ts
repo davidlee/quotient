@@ -17,6 +17,7 @@ import {
   envelopeResult,
   handleDocument,
   runDocument,
+  taskOf,
   taskStatus,
   toolResult,
   validateAck,
@@ -198,6 +199,22 @@ test('runDocument is the Task fields plus quotient\'s extras, exactly', () => {
     session: 'sess-1',
     artifacts: { dir: running.layout.dir },
   });
+});
+
+test('taskOf is exactly the seven Task fields, and runDocument starts with them', () => {
+  for (const runView of [view({ state: 'queued', lane: 'build', predecessor: PREDECESSOR }), view({ state: 'lost' })]) {
+    const task = taskOf(runView);
+    assert.deepEqual(Object.keys(task), [
+      'taskId',
+      'status',
+      'statusMessage',
+      'createdAt',
+      'lastUpdatedAt',
+      'ttlMs',
+      'pollIntervalMs',
+    ]);
+    assert.deepEqual(task, Object.fromEntries(Object.entries(runDocument(runView)).slice(0, 7)));
+  }
 });
 
 test('runDocument takes its extras from the view', () => {

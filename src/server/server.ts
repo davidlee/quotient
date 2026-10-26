@@ -1,9 +1,12 @@
-// The stdio server: LF-framed JSON-RPC 2.0 in, one tool out.
+// The stdio server: LF-framed JSON-RPC 2.0 in, five tools out.
 //
-// Shaped after `satan/satan-mcp.el`'s wire: `initialize` answers a protocol
-// version, a tools capability and serverInfo; `notifications/initialized` is a
-// no-op; `ping` answers `{pong: true}`; `tools/list` lists the tool; an unknown
-// method answers -32601. One difference is the contract: a `tools/call` always
+// Each request is classified into an era by its own `_meta` (protocol.ts). The
+// legacy era is shaped after `satan/satan-mcp.el`'s wire: `initialize` answers a
+// protocol version, a tools capability and serverInfo; `notifications/initialized`
+// is a no-op; `ping` answers `{pong: true}`; `tools/list` lists the tools. The
+// modern era (2026-07-28) has no handshake: `server/discover`, `tools/list`,
+// `tools/call` and the `tasks/*` methods, every result carrying `resultType`. An
+// unknown method answers -32601 in either. One difference is the contract: a `tools/call` always
 // answers a tool result (`content` + `isError`) carrying a `pi-agent-result/2`
 // document — a refusal is a successful call that ran nothing, never a JSON-RPC
 // error (design sec-5).
@@ -19,12 +22,24 @@ import { loadHelp, renderContext, sectionText, type Section } from '../help/help
 import { packageVersion } from '../root.ts';
 import { isRecord } from '../json.ts';
 import { admit, readmit, type AdmissionContext, type Refused, type Startup, type StartupFailure } from './admission.ts';
-import { ackDocument, envelopeResult, handleDocument, POLL_INTERVAL_MS, toolResult, type ToolResult } from './documents.ts';
+import { ackDocument, envelopeResult, handleDocument, POLL_INTERVAL_MS, taskOf, toolResult, type Task, type ToolResult } from './documents.ts';
 import { appendAttempt, type CallId } from './evidence.ts';
 import { executeRun, type ExecuteDeps } from './execute.ts';
 import { absent } from './paths.ts';
 import { readPolicy, type Maxima } from './policy.ts';
 import { loadProfiles } from './profiles.ts';
+import {
+  classifyEra,
+  declaresTasks,
+  discoverResult,
+  LEGACY_VERSION,
+  LIST_CACHE,
+  modernResult,
+  tasksCancel,
+  tasksGet,
+  tasksUpdate,
+  type TaskDeps,
+} from './protocol.ts';
 import { refusedResult } from './result.ts';
 import { createRegistry, matchKey, type Launch, type Origin, type Registry, type RunRecord } from './runs.ts';
 import { readHostIdentity, type HostIdentity } from './session.ts';
@@ -35,8 +50,6 @@ import { viewOf, resolveRun, type Resolution } from './views.ts';
 import { awaitTargets, resolveTargets, waitBudgetBytes, waitEnvelope, waitTimeoutMs } from './waiting.ts';
 
 export const SERVER_NAME = 'quotient';
-/** The revision `satan/satan-mcp.el` announces. */
-export const PROTOCOL_VERSION = '2025-06-18';
 
 type WireId = string | number | null;
 
@@ -45,8 +58,22 @@ type WireId = string | number | null;
  *  child outlives the server. */
 export type InFlightCall = { controller: AbortController; silenced: boolean; done: Promise<void> };
 
+/** A `pi_agent` answered as a task: the run's Task, as it stands at creation. */
+type CreatedTask = { task: Task };
+
 /** What a handler answers: a value is answered now, a promise when it settles. */
-export type Answer = ToolResult | Promise<ToolResult>;
+export type Answered = ToolResult | CreatedTask;
+export type Answer = Answered | Promise<Answered>;
+
+/** How an answer goes on the wire, by the call's era. */
+type Present = (answered: Answered) => object;
+
+/** The legacy era: a tool result as it is (a legacy call never declares tasks). */
+const asIs: Present = (answered) => answered;
+
+/** The modern era: every result says what it is. */
+const asModern: Present = (answered) =>
+  'task' in answered ? modernResult(answered.task, 'task') : modernResult(answered, 'complete');
 
 /** What the call driver needs of the server: where replies go, and the calls in flight. */
 export type CallHost = {
@@ -86,8 +113,9 @@ type Context = CallHost & {
   pollMs: number;
 };
 
-/** One `tools/call` as its handler sees it: the call's id and its abort signal. */
-type CallContext = { callId: CallId; signal: AbortSignal };
+/** One `tools/call` as its handler sees it: the call's id, its abort signal, and
+ *  whether its request may be answered with a task. */
+type CallContext = { callId: CallId; signal: AbortSignal; tasks: boolean };
 
 type Handler = (args: unknown, call: CallContext, context: Context) => Answer;
 
@@ -172,10 +200,12 @@ const admitting = (
 };
 
 /**
- * A blocking `pi_agent`: start plus wait in-process. The request's shape, then
- * admission and publication; the answer is the document the run's settlement
- * wrote to `result.json`. A cancellation becomes the registry's cancel; EOF is
- * left to `registry.close()`.
+ * `pi_agent`: the request's shape, then admission and publication. A request that
+ * declares tasks is answered with the run's Task at once, before the next input
+ * line is read, so no cancellation can name it before its answer is out; it is
+ * followed with `tasks/*`. Otherwise it blocks — start plus wait in-process: the
+ * answer is the document the run's settlement wrote to `result.json`, a
+ * cancellation becomes the registry's cancel, and EOF is left to `registry.close()`.
  */
 function agentRun(args: unknown, call: CallContext, context: Context, admission: AdmissionContext): Answer {
   const parsed = readAgentRequest(args);
@@ -184,8 +214,9 @@ function agentRun(args: unknown, call: CallContext, context: Context, admission:
   // Admission and publication recorded their own refusals where they decided
   // them: answering is all that is left, and a second append would double the
   // ledger line.
-  const started = admitAndStart(context, admission, parsed.request, 'blocking', call.callId);
+  const started = admitAndStart(context, admission, parsed.request, call.tasks ? 'task' : 'blocking', call.callId);
   if (!started.ok) {return toolResult(refusedResult(started.reason, started.detail));}
+  if (call.tasks) {return { task: taskOf(viewOf(started.record)) };}
 
   const { run } = started.record;
   const { signal } = call;
@@ -228,6 +259,19 @@ function startRun(args: unknown, call: CallContext, context: Context, admission:
 function resolverFor(context: Context): (run: string) => Resolution {
   const runDir = usable(context.locations.runDir);
   return (run) => (runDir === null ? null : resolveRun(context.registry, runDir, context.procDir, context.here, run));
+}
+
+/** What the task methods read and cancel: runs as this server resolves them, and
+ *  the registry's cancel, which marks synchronously and is never awaited. */
+function taskDeps(context: Context): TaskDeps {
+  return {
+    resolve: resolverFor(context),
+    cancel: (run): void => {
+      context.registry.cancel([run]).catch((error: unknown) => {
+        context.diagnostics.write(`quotient: cancelling ${run} failed: ${messageOf(error)}\n`);
+      });
+    },
+  };
 }
 
 /** The policy's maxima as they read now, or null when the policy cannot be read. */
@@ -306,7 +350,7 @@ function reply(host: CallHost, message: Record<string, unknown>): void {
  * precedes the next input line. Every reply passes the one gate in `answer`: a
  * closed host or a silenced call writes nothing, whichever way the handler ended.
  */
-export function runCall(host: CallHost, id: WireId, handler: (signal: AbortSignal) => Answer): InFlightCall {
+export function runCall(host: CallHost, id: WireId, handler: (signal: AbortSignal) => Answer, present: Present = asIs): InFlightCall {
   const call: InFlightCall = { controller: new AbortController(), silenced: false, done: Promise.resolve() };
   const key = callKey(id);
   // Registered before the handler runs, so a cancellation arriving in the same
@@ -317,8 +361,8 @@ export function runCall(host: CallHost, id: WireId, handler: (signal: AbortSigna
   if (already === undefined) {host.inFlight.set(key, [call]);}
   else {already.push(call);}
 
-  const answer = (result: ToolResult): void => {
-    if (!host.closed && !call.silenced) {reply(host, { id, result });}
+  const answer = (answered: Answered): void => {
+    if (!host.closed && !call.silenced) {reply(host, { id, result: present(answered) });}
   };
   // The handler failed: it may have done so after its run was published, so the
   // refusal names the failure and claims nothing about what ran.
@@ -387,12 +431,53 @@ async function handleLine(line: string, context: Context): Promise<void> {
 
   if (!hasId) {return;} // a notification for a request method: nothing to answer
 
-  switch (method) {
+  const era = classifyEra(message.params);
+  if ('error' in era) {
+    reply(context, { id, error: era.error });
+    return;
+  }
+  const request: Request = { id, method, params: message.params };
+  if (era.era === 'legacy') {legacyRequest(request, context);}
+  else {modernRequest(request, declaresTasks(era), context);}
+}
+
+/** One request with an id, past its era's classification. */
+type Request = { id: WireId; method: string; params: unknown };
+
+/** The tools as `tools/list` lists them, in either era. */
+function toolList(context: Context): { tools: object[] } {
+  return {
+    tools: Object.entries(TOOLS).map(([name, tool]) => ({
+      name,
+      description: selfDescription(context, tool.section),
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
+    })),
+  };
+}
+
+/** A `tools/call`: the one method that overlaps the reader (design sec-4: "a
+ *  blocking result never blocks cancellation"); everything else stays synchronous
+ *  and in order. The call is answered when it settles, as its era presents it. */
+function toolCall({ id, params }: Request, tasks: boolean, present: Present, context: Context): void {
+  runCall(context, id, (signal) => callTool(params, { callId: id, signal, tasks }, context), present);
+}
+
+const notFound = ({ id, method }: Request): Record<string, unknown> => ({
+  id,
+  error: { code: -32601, message: `Method not found: ${method}` },
+});
+
+/** The legacy era, as `satan/satan-mcp.el` speaks it. Tasks exist only in the
+ *  modern era, so `tasks/*` are not found here. */
+function legacyRequest(request: Request, context: Context): void {
+  const { id } = request;
+  switch (request.method) {
     case 'initialize':
       reply(context, {
         id,
         result: {
-          protocolVersion: PROTOCOL_VERSION,
+          protocolVersion: LEGACY_VERSION,
           capabilities: { tools: {} },
           serverInfo: { name: SERVER_NAME, version: packageVersion() },
           instructions: selfDescription(context, 'agent'),
@@ -402,27 +487,48 @@ async function handleLine(line: string, context: Context): Promise<void> {
     case 'ping':
       reply(context, { id, result: { pong: true } });
       return;
+    case 'server/discover':
+      reply(context, { id, error: { code: -32602, message: 'server/discover needs a protocol version in _meta' } });
+      return;
     case 'tools/list':
-      reply(context, {
-        id,
-        result: {
-          tools: Object.entries(TOOLS).map(([name, tool]) => ({
-            name,
-            description: selfDescription(context, tool.section),
-            inputSchema: tool.inputSchema,
-            annotations: tool.annotations,
-          })),
-        },
-      });
+      reply(context, { id, result: toolList(context) });
       return;
     case 'tools/call':
-      // The one method that overlaps the reader (design sec-4: "a blocking result
-      // never blocks cancellation"); everything else stays synchronous and in
-      // order. The call is answered when it settles.
-      runCall(context, id, (signal) => callTool(message.params, { callId: id, signal }, context));
+      toolCall(request, false, asIs, context);
       return;
     default:
-      reply(context, { id, error: { code: -32601, message: `Method not found: ${method}` } });
+      reply(context, notFound(request));
+  }
+}
+
+/** The modern era (2026-07-28): no handshake, so `initialize` and `ping` are not
+ *  found; every result carries `resultType`. */
+function modernRequest(request: Request, tasks: boolean, context: Context): void {
+  const { id, params } = request;
+  const answerTask = (answer: { result: object } | { error: object }): void => {
+    reply(context, { id, ...answer });
+  };
+  switch (request.method) {
+    case 'server/discover':
+      reply(context, { id, result: discoverResult(selfDescription(context, 'agent'), { name: SERVER_NAME, version: packageVersion() }) });
+      return;
+    case 'tools/list':
+      reply(context, { id, result: modernResult({ ...toolList(context), ...LIST_CACHE }, 'complete') });
+      return;
+    case 'tools/call':
+      toolCall(request, tasks, asModern, context);
+      return;
+    case 'tasks/get':
+      answerTask(tasksGet(params, taskDeps(context)));
+      return;
+    case 'tasks/cancel':
+      answerTask(tasksCancel(params, taskDeps(context)));
+      return;
+    case 'tasks/update':
+      answerTask(tasksUpdate(params, taskDeps(context)));
+      return;
+    default:
+      reply(context, notFound(request));
   }
 }
 

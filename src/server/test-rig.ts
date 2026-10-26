@@ -35,6 +35,7 @@ import { loadHelp } from '../help/help.ts';
 import { reduce, type Reduced } from '../reduce/reduce.ts';
 import { isRecord } from '../json.ts';
 import { serve, type ServeOptions } from './server.ts';
+import { MODERN_VERSION, TASKS_EXTENSION } from './protocol.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
 import {
   validateAck,
@@ -117,6 +118,45 @@ export const startLine = toolLine('pi_agent_start');
 export const waitLine = toolLine('pi_agent_wait');
 export const ackLine = toolLine('pi_agent_ack');
 export const cancelLine = toolLine('pi_agent_cancel');
+
+/**
+ * A modern-era request (design sec-2, Eras): PARAMS plus the `_meta` that makes
+ * it modern — the 2026-07-28 version and client capabilities that declare the
+ * tasks extension when TASKS is set, and nothing otherwise.
+ */
+export function modernLine(
+  id: number | string,
+  method: string,
+  params: Record<string, unknown> = {},
+  { tasks = false }: { tasks?: boolean } = {},
+): string {
+  const clientCapabilities = tasks ? { extensions: { [TASKS_EXTENSION]: {} } } : {};
+  const meta = {
+    'io.modelcontextprotocol/protocolVersion': MODERN_VERSION,
+    'io.modelcontextprotocol/clientCapabilities': clientCapabilities,
+  };
+  return line({ id, method, params: { ...params, _meta: meta } });
+}
+
+/** The result of one modern reply: never a JSON-RPC error, and decorated with
+ *  RESULT_TYPE (`complete`, or `task` for a created task). */
+export function modernAnswer(reply: Record<string, unknown>, resultType: 'complete' | 'task'): Record<string, unknown> {
+  assert.equal(reply.error, undefined, `a modern reply, not an error: ${JSON.stringify(reply)}`);
+  const { result } = reply;
+  if (!isRecord(result)) {assert.fail(`a modern reply carries a result: ${JSON.stringify(reply)}`);}
+  assert.equal(result.resultType, resultType, `resultType: ${JSON.stringify(result)}`);
+  return result;
+}
+
+/** The JSON-RPC error of one reply: CODE, never a result. */
+export function rpcError(reply: Record<string, unknown>, code: number): { code: number; message: string; data?: unknown } {
+  assert.equal(reply.result, undefined, `an error, not a result: ${JSON.stringify(reply)}`);
+  const { error } = reply;
+  if (!isRecord(error)) {assert.fail(`a reply carries an error: ${JSON.stringify(reply)}`);}
+  assert.equal(error.code, code, JSON.stringify(error));
+  if (typeof error.message !== 'string') {assert.fail(`an error carries a message: ${JSON.stringify(error)}`);}
+  return { code, message: error.message, data: error.data };
+}
 
 /** A bash line that writes one event record on stdout, newline-terminated. */
 export function emit(record: Record<string, unknown>): string {

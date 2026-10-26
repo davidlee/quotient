@@ -38,7 +38,8 @@ import {
 } from './documents.ts';
 import { layoutFor } from './evidence.ts';
 import { refusedResult, type AgentResult } from './result.ts';
-import { abortNamed, PROTOCOL_VERSION, runCall, serve, type CallHost, type InFlightCall } from './server.ts';
+import { LEGACY_VERSION, MODERN_VERSION, TASKS_EXTENSION } from './protocol.ts';
+import { abortNamed, runCall, serve, type CallHost, type InFlightCall } from './server.ts';
 import { TOOLS } from './tools.ts';
 import {
   ackLine,
@@ -65,6 +66,8 @@ import {
   jsonLines,
   line,
   markerPids,
+  modernLine,
+  modernAnswer,
   newRig,
   onlyRunDir,
   patchPolicy,
@@ -76,10 +79,12 @@ import {
   resultJson,
   rigApprovalsPath,
   rigForm,
+  rpcError,
   runDirs,
   runIn,
   runOf,
   SETTLED,
+  SLEEPER,
   serveRig,
   serverCommand,
   spawnRecord,
@@ -123,8 +128,13 @@ test('initialize answers protocolVersion, a tools capability and serverInfo: quo
   assert.equal(replies.length, 1);
   assert.equal(replies[0].jsonrpc, '2.0');
   assert.equal(replies[0].id, 1);
-  assert.equal(replies[0].result.protocolVersion, PROTOCOL_VERSION);
-  assert.equal(PROTOCOL_VERSION, '2025-06-18');
+  assert.equal(replies[0].result.protocolVersion, LEGACY_VERSION);
+  assert.equal(LEGACY_VERSION, '2025-06-18');
+  assert.deepEqual(
+    keysOf(field(replies[0], 'result')),
+    ['protocolVersion', 'capabilities', 'serverInfo', 'instructions'],
+    'a legacy initialize answers exactly as before the modern era: no resultType, _meta, ttlMs or cacheScope',
+  );
   assert.deepEqual(replies[0].result.capabilities, { tools: {} });
   assert.deepEqual(replies[0].result.serverInfo, { name: 'quotient', version: packageVersion() });
 });
@@ -1083,6 +1093,408 @@ test('a start-up-refused server: pi_agent (malformed too), start and unknown too
 // case would pass without `closing()`. The window between the trigger and
 // `close()` has no hook a test can hold open. `runs.test.ts` covers it ("after
 // closing() a head that settles launches no successor").
+
+// ── Protocol eras (SL-004 PHASE-09) ──────────────────────────────────────
+//
+// Each request is classified by its own `params._meta` (design sec-2, Eras):
+// no version key is legacy and served as before; the 2026-07-28 version with
+// client capabilities is modern, decorated with `resultType`. `modernLine`
+// builds a modern request; a legacy one is a plain `line`.
+
+/** The reply to ID among REPLIES. */
+const replyIn = (replies: Record<string, unknown>[], id: number): Record<string, unknown> =>
+  replies.find((reply) => reply.id === id) ?? assert.fail(`no reply ${String(id)} in ${JSON.stringify(replies)}`);
+
+/** The own keys of VALUE, which must be an object. */
+function keysOf(value: unknown): string[] {
+  if (!isRecord(value)) {assert.fail(`not an object: ${JSON.stringify(value)}`);}
+  return Object.keys(value);
+}
+
+/** The `result` member of one reply. */
+const resultOfReply = (reply: unknown): unknown => field(reply, 'result');
+
+/** A request whose `_meta` is META verbatim: the rows `modernLine` cannot build. */
+const metaLine = (id: number, method: string, meta: Record<string, unknown>): string =>
+  line({ id, method, params: { _meta: meta } });
+
+/** A modern `pi_agent` call, declaring the tasks extension when TASKS is set. */
+const modernCall = (id: number, args: unknown, options: { tasks?: boolean } = {}): string =>
+  modernLine(id, 'tools/call', { name: 'pi_agent', arguments: args }, options);
+
+test('protocol: the era constants are the two revisions and the tasks extension', () => {
+  assert.equal(MODERN_VERSION, '2026-07-28');
+  assert.equal(LEGACY_VERSION, '2025-06-18');
+  assert.equal(TASKS_EXTENSION, 'io.modelcontextprotocol/tasks');
+});
+
+test('protocol: a modern tools/list adds resultType, ttlMs 0 and cacheScope private to the legacy list\'s five tools; the legacy list carries none of them', async (t) => {
+  const rig = newRig(t);
+  const { replies } = await converse([line({ id: 1, method: 'tools/list' }), modernLine(2, 'tools/list')], rig.env, {
+    launchDir: rig.launchDir,
+  });
+  const legacy = replyIn(replies, 1);
+  assert.deepEqual(keysOf(resultOfReply(legacy)), ['tools'], 'no resultType, ttlMs, cacheScope or _meta on a legacy list');
+  assert.deepEqual(listedTools(legacy).map((tool) => tool.name), [...TOOL_NAMES]);
+
+  const modern = modernAnswer(replyIn(replies, 2), 'complete');
+  assert.equal(modern.ttlMs, 0);
+  assert.equal(modern.cacheScope, 'private');
+  assert.deepEqual(Object.keys(modern).sort(), ['cacheScope', 'resultType', 'tools', 'ttlMs'], 'server info rides on server/discover only');
+  assert.deepEqual(modern.tools, field(resultOfReply(legacy), 'tools'), 'the tools are the same in both eras');
+});
+
+test('protocol: a modern request after a legacy initialize is still served modern, and a legacy one after it still legacy', async () => {
+  const { replies } = await converse(
+    [line({ id: 1, method: 'initialize' }), modernLine(2, 'tools/list'), line({ id: 3, method: 'tools/list' })],
+    workspace().env,
+  );
+  assert.equal(field(resultOfReply(replyIn(replies, 1)), 'protocolVersion'), LEGACY_VERSION);
+  assert.equal(modernAnswer(replyIn(replies, 2), 'complete').cacheScope, 'private');
+  assert.deepEqual(keysOf(resultOfReply(replyIn(replies, 3))), ['tools'], 'one era per request: the modern one changed nothing');
+});
+
+test('protocol: tasks/* are -32601 in the legacy era; server/discover with no version is -32602, and modern answers every field with serverInfo in _meta', async (t) => {
+  const rig = newRig(t);
+  const { replies } = await converse(
+    [
+      line({ id: 1, method: 'initialize' }),
+      line({ id: 2, method: 'server/discover' }),
+      modernLine(3, 'server/discover'),
+      line({ id: 4, method: 'tasks/get', params: { taskId: UNKNOWN_RUN } }),
+      line({ id: 5, method: 'tasks/cancel', params: { taskId: UNKNOWN_RUN } }),
+      line({ id: 6, method: 'tasks/update', params: { taskId: UNKNOWN_RUN } }),
+    ],
+    rig.env,
+    { launchDir: rig.launchDir },
+  );
+  for (const id of [4, 5, 6]) {rpcError(replyIn(replies, id), -32601);}
+  assert.match(rpcError(replyIn(replies, 2), -32602).message, /protocol version/);
+
+  const instructions = field(resultOfReply(replyIn(replies, 1)), 'instructions');
+  assert.equal(instructions, renderedSection(rig, 'agent'));
+  assert.deepEqual(modernAnswer(replyIn(replies, 3), 'complete'), {
+    resultType: 'complete',
+    supportedVersions: [MODERN_VERSION],
+    capabilities: { tools: {}, extensions: { [TASKS_EXTENSION]: {} } },
+    instructions,
+    _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'quotient', version: packageVersion() } },
+    ttlMs: 0,
+    cacheScope: 'private',
+  });
+});
+
+test('protocol: modern ping and initialize are -32601; a version other than 2026-07-28 is -32022 even with no capabilities; a non-string version is -32602', async () => {
+  const { replies } = await converse(
+    [
+      modernLine(1, 'ping'),
+      modernLine(2, 'initialize'),
+      metaLine(3, 'tools/list', { 'io.modelcontextprotocol/protocolVersion': '2099-01-01' }),
+      metaLine(4, 'tools/list', {
+        'io.modelcontextprotocol/protocolVersion': LEGACY_VERSION,
+        'io.modelcontextprotocol/clientCapabilities': {},
+      }),
+      metaLine(5, 'tools/list', { 'io.modelcontextprotocol/protocolVersion': 20260728, 'io.modelcontextprotocol/clientCapabilities': {} }),
+      metaLine(6, 'tools/list', { 'io.modelcontextprotocol/protocolVersion': MODERN_VERSION }),
+    ],
+    workspace().env,
+  );
+  rpcError(replyIn(replies, 1), -32601);
+  rpcError(replyIn(replies, 2), -32601);
+  for (const [id, requested] of [[3, '2099-01-01'], [4, LEGACY_VERSION]] as const) {
+    const error = rpcError(replyIn(replies, id), -32022);
+    assert.match(error.message, /Unsupported protocol version/);
+    assert.deepEqual(error.data, { supported: [MODERN_VERSION], requested }, `request ${String(id)}`);
+  }
+  assert.match(rpcError(replyIn(replies, 5), -32602).message, /protocolVersion/);
+  assert.match(rpcError(replyIn(replies, 6), -32602).message, /clientCapabilities/);
+});
+
+test('protocol: a modern tools/call naming an unknown tool answers the request-invalid refusal, decorated resultType complete', async () => {
+  const { replies } = await converse(
+    [modernLine(1, 'tools/call', { name: 'pi_other', arguments: {} })],
+    workspace().env,
+  );
+  const reply = replyIn(replies, 1);
+  modernAnswer(reply, 'complete');
+  assert.equal(refusalDocument(reply).refusal.reason, 'request-invalid');
+});
+
+test('protocol: a start-up-refused server, modern: a malformed pi_agent (tasks declared or not) is profile-invalid, a wait answers, tasks/get on an unknown id is -32602', async (t) => {
+  const rig = newRig(t);
+  const layer = plantLegacy(rig, 'profiles');
+  const { replies } = await converse(
+    [
+      modernCall(1, 7),
+      modernCall(2, 7, { tasks: true }),
+      modernLine(3, 'tools/call', { name: 'pi_agent_wait', arguments: { timeout_s: 0 } }),
+      modernLine(4, 'tasks/get', { taskId: UNKNOWN_RUN }),
+    ],
+    rig.env,
+    { launchDir: rig.launchDir },
+  );
+  for (const id of [1, 2]) {
+    const reply = replyIn(replies, id);
+    modernAnswer(reply, 'complete');
+    const { refusal } = refusalDocument(reply);
+    assert.equal(refusal.reason, 'profile-invalid', `call ${String(id)}`);
+    assert.ok(refusal.detail.includes(layer), refusal.detail);
+  }
+  const wait = replyIn(replies, 3);
+  modernAnswer(wait, 'complete');
+  assert.deepEqual(envelopeDocument(wait, 'pi-agent-wait/1').runs, []);
+  rpcError(replyIn(replies, 4), -32602);
+});
+
+// ── Runs as tasks (SL-004 PHASE-09) ──────────────────────────────────────
+//
+// A modern `pi_agent` that declares the tasks extension answers a
+// CreateTaskResult at once; the client follows it with tasks/get and stops it
+// with tasks/cancel (design sec-2, Runs as tasks; sec-6). Sleeper forms hold
+// each run until the test releases it.
+
+/** The seven Task fields, verbatim (design sec-2, Run documents). */
+const TASK_FIELDS = ['taskId', 'status', 'statusMessage', 'createdAt', 'lastUpdatedAt', 'ttlMs', 'pollIntervalMs'];
+
+/** A sleeper that ignores SIGTERM: only the ladder's SIGKILL, a grace later, ends it. */
+const STUBBORN_SLEEPER = ["trap '' TERM", SLEEPER].join('\n');
+
+/** One task-answered pi_agent, and the CreateTaskResult it answered. */
+async function createTask(server: LiveServer, id: number, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  server.write(modernCall(id, args, { tasks: true }));
+  return modernAnswer(await waitForReply(server, id), 'task');
+}
+
+/** One tasks/get, and the Task it answered. */
+async function taskGet(server: LiveServer, id: number, taskId: string): Promise<Record<string, unknown>> {
+  server.write(modernLine(id, 'tasks/get', { taskId }));
+  return modernAnswer(await waitForReply(server, id), 'complete');
+}
+
+/** RUN's `admitted` record's ts: what a Task's createdAt is. */
+const admittedTs = (rig: Rig, run: string): unknown => field(auditRecord(rig, run, 'admitted'), 'ts');
+
+test('tasks: a modern pi_agent declaring tasks answers a CreateTaskResult at once while its run is held: working, createdAt the admitted ts, the run published', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const created = await createTask(server, 1, sleeper(rig, 'a'));
+  const run = String(created.taskId);
+  const published = existsSync(layoutFor(rig.runDir, run).dir);
+  const held = resultJson(rig.runDir, run) === null;
+
+  assert.ok(published, 'the run directory exists when the CreateTaskResult is read');
+  assert.ok(held, 'the run had not settled: the answer did not wait for it');
+  assert.deepEqual(Object.keys(created).sort(), [...TASK_FIELDS, 'resultType'].sort(), JSON.stringify(created));
+  assert.match(run, /^run-/);
+  assert.equal(created.status, 'working');
+  assert.equal(created.statusMessage, 'running');
+  assert.equal(created.ttlMs, null);
+  assert.equal(created.pollIntervalMs, 2000);
+  assert.equal(created.createdAt, admittedTs(rig, run));
+  assert.equal(typeof created.lastUpdatedAt, 'string');
+  assert.equal(field(auditRecord(rig, run, 'admitted'), 'origin'), 'task', 'the run came through the task door');
+
+  release(rig, 'a');
+  await waitForResult(rig.runDir, run);
+  await closeServer(server);
+});
+
+test('tasks: a task request and a notifications/cancelled naming it in one write: the CreateTaskResult still arrives and the run keeps running to completed', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  server.send(
+    [
+      modernCall(1, sleeper(rig, 'a'), { tasks: true }),
+      line({ method: 'notifications/cancelled', params: { requestId: 1 } }),
+      line({ id: 2, method: 'ping' }),
+    ]
+      .map((record) => `${record}\n`)
+      .join(''),
+  );
+  // The ping is read after the notification, so its reply proves the
+  // notification was processed.
+  await waitForReply(server, 2);
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [1, 2], 'the CreateTaskResult was written before the next line was read');
+  const run = String(modernAnswer(server.replies()[0], 'task').taskId);
+
+  await waitStarted(rig, 'a');
+  assert.equal(isAlive(sleeperPid(rig, 'a')), true, 'the notification named a completed request: the run runs');
+  assert.equal(resultJson(rig.runDir, run), null);
+
+  release(rig, 'a');
+  const settled = await waitForResult(rig.runDir, run);
+  const got = await taskGet(server, 3, run);
+  await closeServer(server);
+  assert.equal(settled.state, 'completed', JSON.stringify(settled));
+  assert.equal(got.status, 'completed');
+});
+
+test('tasks: without the declaration, a modern and a legacy pi_agent both block and answer pi-agent-result/2, the modern one decorated', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  server.write(modernCall(1, sleeper(rig, 'm')));
+  server.write(callLine(2, sleeper(rig, 'l')));
+  await waitStarted(rig, 'm');
+  await waitStarted(rig, 'l');
+  server.write(line({ id: 3, method: 'ping' }));
+  await waitForReply(server, 3);
+  assert.deepEqual(server.replies().map((reply): unknown => reply.id), [3], 'neither call answered while its run was held');
+
+  release(rig, 'm');
+  release(rig, 'l');
+  const modern = await waitForReply(server, 1);
+  const legacy = await waitForReply(server, 2);
+  await closeServer(server);
+
+  assert.deepEqual(Object.keys(modernAnswer(modern, 'complete')).sort(), ['content', 'isError', 'resultType']);
+  assert.deepEqual(keysOf(resultOfReply(legacy)).sort(), ['content', 'isError'], 'a legacy result carries no resultType');
+  for (const [reply, id] of [[modern, 1], [legacy, 2]] as const) {
+    const run = runOf(rig.runDir, id);
+    const doc = resultDocument(reply);
+    assert.equal(doc.schema, 'pi-agent-result/2');
+    assert.equal(doc.state, 'completed', JSON.stringify(doc));
+    assert.deepEqual(doc, resultJson(rig.runDir, run), 'the call answers the document the commit wrote');
+    assert.equal(field(auditRecord(rig, run, 'admitted'), 'origin'), 'blocking');
+  }
+});
+
+test('tasks: tasks/get reads working while the run is held, then completed with the result a modern blocking pi_agent answers', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const created = await createTask(server, 1, sleeper(rig, 'a'));
+  const run = String(created.taskId);
+  await waitStarted(rig, 'a');
+
+  const working = await taskGet(server, 2, run);
+  assert.equal(working.taskId, run);
+  assert.equal(working.status, 'working');
+  assert.equal(working.statusMessage, 'running');
+  assert.equal(working.createdAt, created.createdAt);
+  assert.equal(Object.hasOwn(working, 'result'), false, 'a working task carries no result');
+  assert.equal(Object.hasOwn(working, 'error'), false);
+
+  // The same kind of run, answered by the blocking door, for the shape to match.
+  server.write(modernCall(3, sleeper(rig, 'b')));
+  await waitStarted(rig, 'b');
+  release(rig, 'a');
+  release(rig, 'b');
+  const blocking = modernAnswer(await waitForReply(server, 3), 'complete');
+  const settled = await waitForResult(rig.runDir, run);
+  const done = await taskGet(server, 4, run);
+  await closeServer(server);
+
+  assert.equal(done.taskId, run);
+  assert.equal(done.status, 'completed');
+  assert.equal(done.statusMessage, 'completed');
+  assert.equal(done.createdAt, admittedTs(rig, run));
+  assert.equal(done.ttlMs, null);
+  assert.equal(done.pollIntervalMs, 2000);
+  const result = field(done, 'result');
+  assert.deepEqual(keysOf(result).sort(), keysOf(blocking).sort(), 'the CallToolResult a modern blocking pi_agent answers');
+  assert.equal(field(result, 'resultType'), 'complete');
+  assert.equal(field(result, 'isError'), false);
+  assert.equal(blocking.isError, false);
+  const content = field(result, 'content');
+  assert.ok(Array.isArray(content) && content.length === 1, JSON.stringify(content));
+  assert.equal(field(element(content, 0), 'type'), 'text');
+  assert.deepEqual(resultDocument({ result }), settled, 'its text is the run\'s pi-agent-result/2');
+});
+
+test('tasks: a run that failed is a completed task whose result is an error', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const created = await createTask(server, 1, sleeper(rig, 'a'));
+  const run = String(created.taskId);
+  await waitStarted(rig, 'a');
+  release(rig, 'a', 'fail');
+  const settled = await waitForResult(rig.runDir, run);
+  const done = await taskGet(server, 2, run);
+  await closeServer(server);
+
+  assert.notEqual(settled.state, 'completed', JSON.stringify(settled));
+  assert.equal(done.status, 'completed', 'the task finished and produced the blocking call\'s answer');
+  assert.equal(done.statusMessage, settled.state);
+  const result = field(done, 'result');
+  assert.equal(field(result, 'resultType'), 'complete');
+  assert.equal(field(result, 'isError'), true);
+  assert.deepEqual(resultDocument({ result }), settled);
+});
+
+test('tasks: tasks/cancel on a held run answers empty before the run ends; tasks/get reads cancelling, then cancelled with its causes', async (t) => {
+  const rig = newRig(t, { read: STUBBORN_SLEEPER, write: STUBBORN_SLEEPER });
+  // A long grace: the run cannot settle before the SIGKILL, so an answer read
+  // before result.json exists was written without waiting for the run.
+  const server = serveRig(rig, { ...SERVE, graceMs: 1500 });
+  const created = await createTask(server, 1, sleeper(rig, 'a'));
+  const run = String(created.taskId);
+  await waitStarted(rig, 'a');
+  const pid = sleeperPid(rig, 'a');
+
+  server.write(modernLine(2, 'tasks/cancel', { taskId: run }));
+  const answer = await waitForReply(server, 2);
+  const unsettled = resultJson(rig.runDir, run) === null;
+  const cancelling = await taskGet(server, 3, run);
+  assert.deepEqual(answer.result, { resultType: 'complete' });
+  assert.ok(unsettled, 'tasks/cancel answered before its run settled');
+  assert.equal(cancelling.status, 'working');
+  assert.equal(cancelling.statusMessage, 'cancelling');
+
+  const settled = await waitForResult(rig.runDir, run);
+  const got = await taskGet(server, 4, run);
+  await closeServer(server);
+  assert.equal(settled.state, 'cancelled', JSON.stringify(settled));
+  assert.equal(got.status, 'cancelled');
+  assert.deepEqual(settled.causes, ['cancelled']);
+  assert.equal(got.statusMessage, 'cancelled', 'the result\'s causes, joined');
+  assert.equal(Object.hasOwn(got, 'result'), false, 'a cancelled task carries no result member');
+  assert.equal(Object.hasOwn(got, 'error'), false);
+  assert.equal(isAlive(pid), false, 'the cancelled run left no child behind');
+});
+
+test('tasks: tasks/cancel after the run completed answers empty and changes nothing: tasks/get still reads completed', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const created = await createTask(server, 1, sleeper(rig, 'a'));
+  const run = String(created.taskId);
+  release(rig, 'a');
+  await waitForResult(rig.runDir, run);
+
+  server.write(modernLine(2, 'tasks/cancel', { taskId: run }));
+  assert.deepEqual((await waitForReply(server, 2)).result, { resultType: 'complete' });
+  const got = await taskGet(server, 3, run);
+  await closeServer(server);
+  assert.equal(got.status, 'completed', 'the mark never decides status');
+  assert.equal(field(field(got, 'result'), 'isError'), false);
+  assert.equal(auditKinds(layoutFor(rig.runDir, run)).includes('cancelled'), false, 'a terminal task is not marked');
+});
+
+test('tasks: tasks/get, tasks/cancel and tasks/update refuse a malformed or unknown taskId -32602; tasks/update on a live task answers empty and changes nothing', async (t) => {
+  const rig = sleeperRig(t);
+  const server = serveRig(rig, SERVE);
+  const created = await createTask(server, 1, sleeper(rig, 'a'));
+  const run = String(created.taskId);
+  await waitStarted(rig, 'a');
+
+  const bad: Record<string, unknown>[] = [{}, { taskId: 7 }, { taskId: '' }, { taskId: '../escape' }, { taskId: UNKNOWN_RUN }];
+  let id = 10;
+  for (const method of ['tasks/get', 'tasks/cancel', 'tasks/update']) {
+    for (const params of bad) {
+      server.write(modernLine(id, method, params));
+      rpcError(await waitForReply(server, id), -32602);
+      id += 1;
+    }
+  }
+
+  server.write(modernLine(2, 'tasks/update', { taskId: run, inputResponses: {} }));
+  assert.deepEqual((await waitForReply(server, 2)).result, { resultType: 'complete' });
+  const got = await taskGet(server, 3, run);
+  assert.equal(got.status, 'working');
+  assert.equal(got.statusMessage, 'running', 'neither update nor a refused cancel marked the run');
+
+  release(rig, 'a');
+  assert.equal((await waitForResult(rig.runDir, run)).state, 'completed');
+  await closeServer(server);
+});
 
 // ── A malformed request is a tool result, never a JSON-RPC error (EX-2) ─────
 
