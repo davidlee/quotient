@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · design:drafting (rev 53) · committed: "doctrine(SL-004): bind MCP tasks" (parent e165dc6)
+fresh-as-of: 2026-10-26 · lifecycle plan · design locked (rev 72) · uncommitted on b6a1217 (design.md, slice-004.md, slice-004.toml, notes.md, RV-013, DEC-049/066/067, EVD-004, RSK-003)
 
 ### Produced
 - design run dr-01a17694: reopened scope minted as inq-10..17 → DEC-055..062; DEC-058 supersedes DEC-052, DEC-062 supersedes DEC-051
@@ -14,6 +14,19 @@ fresh-as-of: 2026-10-26 · design:drafting (rev 53) · committed: "doctrine(SL-0
 - graph-reviewed (rev 34), sufficiency-accepted (rev 44), stage drafting (rev 45)
 - `design.md` sec-1, sec-2 (now protocol + tools + documents; no separate protocol section), sec-3, sec-5, sec-6 redrafted; Codex pass 2 (same thread) folded in; DEC-063 and DEC-066 amended by the user from that pass
 - IDE-003 resolved (promoted into SL-004)
+- sec-7, sec-8, sec-9 redrafted against DEC-055..070; sec-3 RunRecord.outcome widened to state+causes and its fallback/cross-server wording corrected; Codex pass 3 (fresh thread, gpt-6.1-sol high) — 10 findings, all fixed within decisions, none on a ledger
+- 11 design-target selectors added (protocol.ts, views.ts, spawn.ts, session.ts, test-rig.ts, 6 test files); stage reviewing (rev 56), pass ledger RV-013 opened, no findings yet
+- RV-013 pass: 3 unanchored Opus reviewers (timing/races; protocol/interfaces; structure/failure/tests) → F-1..F-21 raised; F-1..F-11, F-13..F-21 answered fix-now (F-7 contested in substance, refresh EVD-004); F-12 left open, settled by the DEC-067 amendment
+- Codex check of the redraft (thread 01a1778d-fd61-79b2-b539-30289b8d9cd2, gpt-6.1-sol high) — 13 findings: 11 fixed within decisions (F-6, F-14 responses amended), 2 raised to the user
+- user replied '1a 2a 3a': DEC-066 (published `lost` audit record), DEC-067 (owner identity + ownerLiveness across hosts/boots/pid namespaces), DEC-049 (ack once terminal) amended; EVD-004 extended with SEP-2663 (no per-tool taskSupport)
+- sec-1..9 redrafted and recorded (rev 57), design.md materialised (rev 58)
+- RSK-003 — session locks keep pid+starttime liveness across namespaces (follow-up)
+- Codex check of the amendment fold (thread 01a177ae-a0d3-7382-9729-d079b3e16b66, gpt-6.1-sol high): 5 findings fixed within DEC-049/066/067 (pidns via NSpid; readResult found/absent/unreadable; audit lines start fresh, torn lines skipped; lost-ordering and dual-failure tests; bookkeeping) — sec-3/7/8/9 at rev 62
+- RV-013: F-12 disposed (DEC-067 amendment); F-1..F-21 verified against rev 64; concluded at rev 69
+- DEC-068 amended (user reply 'a'): pi-agent-wait/1 gains an `unreadable` list; Codex rounds 2–3 on the same thread closed the NSpid and unreadable folds (rev 66–68)
+- governance-confirmed re-recorded (rev 65, user: "governance: confirmed")
+- review.passes discharged; RV-013 disposed conducted; all 9 sections attested; design accepted and locked (rev 72, user: "agreed, lock it and handover for plan"); slice status → plan
+- runbook review.scope (slice-004.md reconciled; SL-004 references RSK-002, RSK-003) and review.selectors (+ ack contract, gate.test.ts, childview.test.ts) discharged
 
 ### Learned
 - mem.fact.quotient.client-concurrency-readonlyhint — clients overlap calls only with readOnlyHint
@@ -21,7 +34,8 @@ fresh-as-of: 2026-10-26 · design:drafting (rev 53) · committed: "doctrine(SL-0
 - spec facts used by sec-2 (cited there): clientCapabilities required (-32602 if missing); caching ttlMs/cacheScope; stdio cancellation MUST NOT reply; tasks terminal states immutable, tasks/cancel cooperative
 
 ### Open
-- sec-7 (code structure), sec-8 (docs), sec-9 (impact/verification/risks) still the pre-reopen draft — redraft against DEC-055..070 and sec-1..6; then Codex pass on them; sec-4 stands
+- next: /plan — author plan.toml/plan.md and phases from the locked design.md (sec-7 modules, sec-9 code impact and verification)
+- plan constraint: the first phase touching session.ts confirms NSpid / boot_id / ns-link behaviour on the target host (notes § Further review passes)
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
 - DEC-045, DEC-048..050, DEC-053..070 — the governing decisions (sec-1 table)
@@ -72,3 +86,15 @@ seeks sufficiency and redrafts.
 Sections to redraft: sec-2, sec-3, sec-5, sec-7, sec-8, sec-9, plus a new
 protocol section. sec-4 (lanes) and sec-6 (cancellation) stand, with
 `tasks/cancel` added to sec-6's table.
+
+## Further review passes (2026-10-26, after RV-013 concluded)
+
+None needed before the lock. RV-013 and three Codex rounds covered timing and
+races, the protocol surface, structure, failure paths and tests, and every
+amendment fold was re-checked. What a further pass would probe, if wanted:
+the Linux facts the liveness rule rests on (`NSpid` ordering,
+`/proc/sys/kernel/random/boot_id`, pid-namespace links readable by the
+process itself) are documented behaviour, not yet exercised; the first phase
+that touches `session.ts` should confirm them on the target host. The
+2026-07-28 wire details beyond EVD-004 rest on the server's own choices
+(sec-2), which a client-interop probe after implementation would test.

@@ -1,0 +1,701 @@
+id    = 13
+slug  = "design-review-of-sl-004"
+title = "design review of SL-004"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "design"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = "Design review of SL-004 at rev 69: three unanchored Opus reviewers (timing/races; protocol/interfaces; structure/failure/tests) raised F-1..F-21, all answered fix-now and verified against the redraft; F-12 settled by the DEC-067 amendment. Codex (gpt-6.1-sol, high) checked the redraft and the DEC-049/066/067/068 amendment folds over three rounds; its findings were fixed within the decisions or settled by the user (DEC-068 unreadable list, reply 'a')."
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-004"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "blocker"
+title = "A run task's failure has no owner: a throw or rejection in launch/readmit/settle leaves a run neither settled nor lost"
+detail = """
+sec-7 runs.ts / sec-3 invariants. Today every throw in a run is caught by the tools/call IIFE (server.ts:553-579). In the design the run task belongs to no call; only executeRun is said never to throw. `launch` = readmit then executeRun, and readmit is today's admission code; `settle` uses `admittedOf.get(...)!` and releases the session with no finally; tasks/cancel calls registry.cancel without awaiting.
+Failure: readmit throws during advance (inside the predecessor's settle). The record stays `running` with no promise behind it: its session lock never frees (session-busy forever), waits time out forever, its lane stalls, and registry.close() awaits a settled that never resolves, so EOF hangs. If the rejection is unhandled instead, Node's default terminates the server with detached children alive.
+Repair sketch: one guard in runs.ts — Promise.resolve().then(() => launch(...)).catch(e => failedResult('error', ...)).then(doc => settle(...)); settle total (no non-null assertions, idempotent on a terminal record, release and resolve in finally); every un-awaited promise gets a catch. Tests: a fakeLaunch that rejects and one that throws synchronously each settle failed/error, free the session, and let close() resolve.
+Sources: reviewers A (F3) and C (F1), verified against server.ts.
+"""
+disposition = "fix-now"
+route = "review"
+response = "Verified: today's IIFE catch (server.ts:557-569) is the only guard, and the design moves the run task out of every call. Repair in sec-7 runs.ts: the registry owns one launch guard — the launch is invoked through a promise chain whose rejection or synchronous throw becomes failedResult('error', ...) and is handed to settle; settle is total (no non-null assertions, a no-op on a terminal record, session release and settled resolution in a finally); every promise the server does not await (tasks/cancel) carries a catch to diagnostics. sec-3 invariants gain: every published run reaches settle exactly once. sec-9 runs.test gains: a fakeLaunch that rejects and one that throws synchronously each settle failed with cause error, free the session, advance the lane, and let close() resolve."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified: today's IIFE catch (server.ts:557-569) is the only guard, and the design moves the run task out of every call. Repair in sec-7 runs.ts: the registry owns one launch guard — the launch is invoked through a promise chain whose rejection or synchronous throw becomes failedResult('error', ...) and is handed to settle; settle is total (no non-null assertions, a no-op on a terminal record, session release and settled resolution in a finally); every promise the server does not await (tasks/cancel) carries a catch to diagnostics. sec-3 invariants gain: every published run reaches settle exactly once. sec-9 runs.test gains: a fakeLaunch that rejects and one that throws synchronously each settle failed with cause error, free the session, advance the lane, and let close() resolve."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present at rev 64: sec-7 runs.ts launch guard (Promise.resolve().then, rejection and synchronous throw settle failed/error), settle a no-op on a terminal record with writers that cannot throw, catch on un-awaited promises; sec-3 invariant (every published run reaches the commit once); sec-9 runs.test reject/throw cases."
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "major"
+title = "needs_success is skipped when a run is started after its predecessor has already settled"
+detail = """
+sec-3 start step 5, sec-4, sec-7 advance. The needs_success check lives only in advance, which is called only from settle. Start step 5 launches at once when the lane is idle. advance drops settled runs from the head, so "the lane's last run at the moment it was started" is either null (list tail empty) or the failed run that the immediate path never checks.
+Failure: start A(lane L); A fails and settles; start B(L, needs_success:true). L is idle, so B launches and runs its writes. Started a moment earlier, B would have refused lane-predecessor-failed. Same calls, opposite outcome, decided by a race with A's settlement; violates DEC-050.
+Repair sketch: keep a per-lane last-started pointer separate from the FIFO list and use it as predecessor; place a new run by inserting and calling the same advance step, so one function decides launch or refuse. Test: B with needs_success started after A failed -> lane-predecessor-failed.
+Sources: reviewers A (F2) and C (F2); confirmed from the design text.
+"""
+disposition = "fix-now"
+route = "review"
+response = "Verified from the design text; DEC-050 requires the check whenever the predecessor settled other than completed. Repair in sec-3 step 5, sec-4 rules and sec-7: each lane keeps a last-started pointer separate from its FIFO list, and that pointer is the new run's predecessor (it survives the head being dropped). start places a run by appending it and calling advance, so one loop decides launch, queue or refuse for every run; the needs_success check therefore runs on immediate placement too. sec-9 runs.test: B with needs_success started after A already settled failed refuses lane-predecessor-failed; started after A completed, it launches."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified from the design text; DEC-050 requires the check whenever the predecessor settled other than completed. Repair in sec-3 step 5, sec-4 rules and sec-7: each lane keeps a last-started pointer separate from its FIFO list, and that pointer is the new run's predecessor (it survives the head being dropped). start places a run by appending it and calling advance, so one loop decides launch, queue or refuse for every run; the needs_success check therefore runs on immediate placement too. sec-9 runs.test: B with needs_success started after A already settled failed refuses lane-predecessor-failed; started after A completed, it launches."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-4 predecessor = lane's last-started run; sec-7 placement appends and calls advance so needs_success is checked on immediate placement; sec-9 runs.test covers B started after A already failed."
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "major"
+title = "The CreateTaskResult reply is not guaranteed to be written before the next input line is handled"
+detail = """
+sec-1 deferred note, sec-2 Runs as tasks, sec-6, sec-7 server.ts. The design (and DEC-064's premise) says admission, publication and writing the CreateTaskResult happen "in one synchronous step". But the design keeps today's reply structure: the one reply site is after `await` of the handler (server.ts:555-556), and the input loop handles every line of a chunk with `await handleLine` (server.ts:751-757). Whether the next buffered line runs before the reply continuation depends on how many async layers sit between the IIFE and the handler; reviewer A's microtask experiment shows one wrapper is enough for the next line to win.
+Failure: tools/call pi_agent (tasks declared) and notifications/cancelled for it arrive in one chunk. The run is published and launched; the notification is handled first and sets silenced; the CreateTaskResult is suppressed. sec-6 says a task call ignores its abort, so the run executes to completion with origin 'task' (never an implicit wait target). The client has no task id and its cancel was ignored.
+Repair sketch: write the reply for a synchronously answered call inside handleLine before it returns (handler returns { now: result }), or mark the call answered synchronously so the notification cannot silence it; either way assert it with a one-chunk test via test-rig's send.
+Sources: reviewer A (F1), verified against server.ts.
+"""
+disposition = "fix-now"
+route = "review"
+response = "Verified: server.ts:555-556 replies only after awaiting the handler, and the input loop handles a chunk's lines back to back. The design's claim that the CreateTaskResult is written in one synchronous step is therefore not delivered by the structure it keeps. Repair in sec-6 and sec-7 server.ts: a handler may answer synchronously (it returns an immediate answer rather than a promise), and handleLine writes that reply before it returns — CreateTaskResult and start's handle both take this path. The reply gate is unchanged; a notification read afterwards names an answered request and is ignored, which is exactly DEC-064's premise. sec-9 server.test: tools/call pi_agent declaring tasks followed by notifications/cancelled for it, in one write, answers the CreateTaskResult and leaves the run running."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified: server.ts:555-556 replies only after awaiting the handler, and the input loop handles a chunk's lines back to back. The design's claim that the CreateTaskResult is written in one synchronous step is therefore not delivered by the structure it keeps. Repair in sec-6 and sec-7 server.ts: a handler may answer synchronously (it returns an immediate answer rather than a promise), and handleLine writes that reply before it returns — CreateTaskResult and start's handle both take this path. The reply gate is unchanged; a notification read afterwards names an answered request and is ignored, which is exactly DEC-064's premise. sec-9 server.test: tools/call pi_agent declaring tasks followed by notifications/cancelled for it, in one write, answers the CreateTaskResult and leaves the run running."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 server.ts handlers answer a value and handleLine writes the reply before returning; sec-2 and sec-6 rely on it; sec-9 server.test one-write CreateTaskResult plus notifications/cancelled case."
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "major"
+title = "Re-admission re-resolves the admitted root through realpath, so a queued run can launch in a different directory"
+detail = """
+sec-4 table row 4, sec-7 readmit. resolveRoot canonicalises with realpathSync (profiles.ts:349-397). readmit is "authorise over the admitted root"; if a component of that path became a symlink while the run was queued, authorise returns a different canonical root that may still be allowlisted. sec-4 says re-admission "never moves it" and DEC-050 keeps the admitted root, but no comparison is specified.
+Failure: a write run is queued with root /work/a; /work/a is replaced by a symlink to /work/b (also allowlisted); at launch the run executes in /work/b under a session bound to /work/a.
+Repair sketch: readmit refuses unless resolveRoot(admitted.root).root === admitted.root, and always passes admitted.root to the run. admission.test case for it.
+Sources: reviewer C (F3), verified against profiles.ts.
+"""
+disposition = "fix-now"
+route = "review"
+response = "Verified: resolveRoot returns the realpath of the candidate (profiles.ts:349-397), so re-resolving an admitted root can yield a different directory. DEC-050 keeps the admitted root. Repair in sec-4 row 4 and sec-7 readmit: re-resolve the admitted root and refuse root-missing (detail: the root no longer resolves to itself) unless the canonical result equals the admitted root; the run always uses the admitted root. sec-9 admission.test: a root replaced by a symlink to another allowlisted root refuses at readmit."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified: resolveRoot returns the realpath of the candidate (profiles.ts:349-397), so re-resolving an admitted root can yield a different directory. DEC-050 keeps the admitted root. Repair in sec-4 row 4 and sec-7 readmit: re-resolve the admitted root and refuse root-missing (detail: the root no longer resolves to itself) unless the canonical result equals the admitted root; the run always uses the admitted root. sec-9 admission.test: a root replaced by a symlink to another allowlisted root refuses at readmit."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-4 row 4 and sec-7 readmit refuse root-missing unless the admitted root canonicalises to itself; sec-9 admission.test symlinked-root case."
+
+[[finding]]
+id = "F-5"
+status = "verified"
+severity = "major"
+title = "Acknowledgement fails for terminal runs it should accept; the taught loop can spin"
+detail = """
+sec-2 ack reasons, sec-3, sec-5 loop, sec-7 implicit(). Two related gaps:
+(a) A `lost` record in this server is neither `not-settled` nor `unknown`, and runs.test says ack accepts only settled runs; yet implicit() returns every unacknowledged start run and lost counts as done. One unwritable result.json (ENOSPC) makes every selector-less until:any wait return at once for the server's life.
+(b) ack's `unknown` means "no record in this server" while wait's `unknown` means "no record and no evidence directory". A run resolved from disk as settled (after a reconnect = new server) acks `unknown`; the sec-5 loop drops ids only if acknowledged, lost or in w.unknown, so it keeps them and every wait returns the same results at once, forever.
+Repair sketch: acknowledgement applies to any terminal record (settled or lost) — DEC-049's "once settled" read as "once terminal"; a disk-resolved run gets a distinct reason (e.g. not-held) or is treated as acknowledged; the loop drops ids the caller has used rather than ids the ack confirmed.
+Sources: reviewers B (F1) and C (F5); confirmed from the design text.
+"""
+disposition = "fix-now"
+route = "review"
+response = """Both arms verified from the design text. (a) lost postdates DEC-049's "only once settled" (lost came with DEC-066); reading it as "once terminal" keeps DEC-049's purpose — ack removes a run from implicit selection — and removes a permanent spinning target. Repair: ack accepts settled and lost records; not-settled stays for queued, running and foreign. (b) DEC-068 fixes ack's unknown reason for runs this server does not hold, so the reason stays; the defect is the taught loop's exit rule. Repair in sec-5: the loop drops every id it has finished with — settled entries whose result it used, lost entries and unknown ids — whatever ack answered; ack only matters for selector-less waits (see F-6). sec-9: ack of a lost record answers acknowledged true and removes it from implicit(); a loop over disk-resolved settled ids terminates."""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = """Both arms verified from the design text. (a) lost postdates DEC-049's "only once settled" (lost came with DEC-066); reading it as "once terminal" keeps DEC-049's purpose — ack removes a run from implicit selection — and removes a permanent spinning target. Repair: ack accepts settled and lost records; not-settled stays for queued, running and foreign. (b) DEC-068 fixes ack's unknown reason for runs this server does not hold, so the reason stays; the defect is the taught loop's exit rule. Repair in sec-5: the loop drops every id it has finished with — settled entries whose result it used, lost entries and unknown ids — whatever ack answered; ack only matters for selector-less waits (see F-6). sec-9: ack of a lost record answers acknowledged true and removes it from implicit(); a loop over disk-resolved settled ids terminates."""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-2 ack accepts settled and lost; sec-5 loop exits on what the caller used; sec-9 runs.test ack of a lost record and waiting.test by-name loop over disk-resolved ids terminating."
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "major"
+title = "The taught wait loop calls ack, which does nothing when waiting by name and costs an approval prompt per turn in Codex"
+detail = """
+sec-5 loop, sec-8. Named runs are "always reported, whatever their ... acknowledgement", so in the taught loop (wait(runs: ids)) ack changes nothing the caller sees; "acknowledging after use makes a lost reply harmless" holds only for selector-less waits. ack is not read-only (DEC-054), so clients serialise it and Codex's default 'writes' approval mode prompts for it (EVD-003).
+Failure: a Codex user runs the taught loop over five runs and gets an approval prompt each iteration for a call with no effect.
+Repair sketch: teach two patterns — by name (keep ids yourself, no ack) and selector-less (wait without runs, ack what you used); state the approval consequence in help/setup.md and the README client guidance. Note also (reviewer A F6) that implicit selection and acks are server-wide, not per caller: two subagents sharing one server cross-collect and cross-ack; teach explicit ids for anything concurrent.
+Sources: reviewers B (F2), A (F6).
+"""
+disposition = "fix-now"
+route = "review"
+response = """
+Observation verified (ack does not change what a named wait returns; DEC-054 makes ack non-read-only), prescription narrowed. DEC-062 binds the help loop to wait, then ack the settled runs received, and the ack has a real use beside a named wait: it keeps used runs out of a later selector-less recovery wait. So sec-5 keeps the ack in the taught loop, and the repair is: the loop exits on what the caller used (with F-5), sec-5 states what the ack is for (recovery) and its cost (one non-read-only call that some clients prompt for), sec-5 states that implicit selection and acknowledgement are per server, not per caller, and help/setup.md and the README client guidance name the tools a prompting client will ask to approve.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "review"
+response = "Verified: sec-5 reports named runs whatever their acknowledgement, so ack is inert in the named loop; DEC-054 makes ack non-read-only. Repair in sec-5 and sec-8: help teaches two loops — by name (keep the ids, no ack: the default for any caller that started its own runs) and selector-less (wait with no runs, ack what was used: for recovering runs whose ids were lost). sec-5 states that implicit selection and acknowledgement are per server, not per caller: concurrent callers sharing a server must use named waits. help/setup.md and the README client guidance note that clients prompting for non-read-only tools will prompt for start, ack and cancel."
+
+[[finding.turn]]
+act = "amend"
+role = "responder"
+note = "GPT check of the redraft: DEC-062 prescribes ack in the help loop, and the ack keeps used runs out of selector-less recovery; prescription narrowed to stay within DEC-062"
+disposition = "fix-now"
+route = "review"
+response = """
+Observation verified (ack does not change what a named wait returns; DEC-054 makes ack non-read-only), prescription narrowed. DEC-062 binds the help loop to wait, then ack the settled runs received, and the ack has a real use beside a named wait: it keeps used runs out of a later selector-less recovery wait. So sec-5 keeps the ack in the taught loop, and the repair is: the loop exits on what the caller used (with F-5), sec-5 states what the ack is for (recovery) and its cost (one non-read-only call that some clients prompt for), sec-5 states that implicit selection and acknowledgement are per server, not per caller, and help/setup.md and the README client guidance name the tools a prompting client will ask to approve.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present within DEC-062: sec-5 keeps ack in the loop and states its purpose (recovery) and cost (non-read-only, may prompt); per-server selection stated in sec-5 and sec-9; sec-8 setup and README name prompting tools."
+
+[[finding]]
+id = "F-7"
+status = "verified"
+severity = "major"
+title = "Evidence gap: whether the tasks extension needs a per-tool declaration (and other wire details) is not recorded in EVD-004"
+detail = """
+sec-2. EVD-004 does not record: whether a tool must declare that it can answer a task (the 2025-11-25 design had per-tool execution.taskSupport in tools/list; the design adds none); whether the nested tasks/get result carries its own resultType; the member names result/error; cacheScope values and ttlMs:0 semantics; -32602 for malformed _meta ("the spec's rule"); multi round-trip requests. Verified: EVD-004 has no mention of taskSupport or a per-tool execution field.
+Failure: if Claude Code's tasks support keys on a per-tool hint, it never declares the extension for pi_agent and tasks silently never happen; every call blocks.
+Repair sketch: read the 2026-07-28 tasks extension schema and discover/versioning pages for exactly these points, extend EVD-004, and add any per-tool declaration to the tool table. Separately record as a risk (not a defect) that a client speaking only a newer modern revision plus 2025-06-18 gets -32022 and may not fall back (DEC-063).
+Source: reviewer B (F11); evidence gap, not a shown error.
+"""
+disposition = "fix-now"
+route = "refresh"
+response = "Contested in substance, accepted as a record lag. SEP-2663 (the tasks extension, Final), wire-differences table: the task parameter on CallToolRequest is removed, and the tasks.requests capability declarations are not part of the extension; its motivation names the per-tool execution.taskSupport handshake as the fragility it removes, and says the extension capability is the single handshake, with the server deciding per request whether to return a task. The 2026-07-28 ext-tasks schema.ts defines no Tool, execution or taskSupport member. So the design is right to add no per-tool declaration. The schema also settles the nested result: CompletedTask.result matches the result type of the original request, so the modern CallToolResult inside tasks/get carrying resultType is correct. Edit EVD-004 to record these two points with the SEP citation; sweep sec-2's governing-sources table. The remaining unrecorded details (cacheScope values, -32602 for malformed _meta) are minor and are stated in sec-2 as the server's choice where the evidence is silent."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+route = "refresh"
+response = "Contested in substance, accepted as a record lag. SEP-2663 (the tasks extension, Final), wire-differences table: the task parameter on CallToolRequest is removed, and the tasks.requests capability declarations are not part of the extension; its motivation names the per-tool execution.taskSupport handshake as the fragility it removes, and says the extension capability is the single handshake, with the server deciding per request whether to return a task. The 2026-07-28 ext-tasks schema.ts defines no Tool, execution or taskSupport member. So the design is right to add no per-tool declaration. The schema also settles the nested result: CompletedTask.result matches the result type of the original request, so the modern CallToolResult inside tasks/get carrying resultType is correct. Edit EVD-004 to record these two points with the SEP citation; sweep sec-2's governing-sources table. The remaining unrecorded details (cacheScope values, -32602 for malformed _meta) are minor and are stated in sec-2 as the server's choice where the evidence is silent."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: EVD-004 records SEP-2663 (no per-tool taskSupport; extension capability is the single handshake) and CompletedTask.result typing; sec-1 table and sec-2 Runs as tasks cite it."
+
+[[finding]]
+id = "F-8"
+status = "verified"
+severity = "minor"
+title = """writeResult's "ts or null" invites reporting lost while a valid result.json exists"""
+detail = """
+sec-3 commit, sec-7 evidence.ts. writeResult returns "mtime ts or null" after the rename. If anything after a successful renameSync fails (e.g. the stat for mtime) and it returns null, the record goes lost (Task failed) while result.json exists; after a restart viewFromDisk reads settled. A terminal status changes, breaking the sec-3 invariant.
+Repair sketch: the rename is the commit; take the timestamp before it (fstat the temp file; rename keeps mtime); specify null = no result.json exists. evidence.test injects a fault after the rename.
+Source: reviewer C (F4).
+"""
+disposition = "fix-now"
+response = "Accepted. sec-7 evidence.ts: writeResult answers the timestamp taken from the temp file before the rename (rename keeps it); after a successful rename it never answers null; null means no result.json exists. evidence.test: a fault after the rename still answers the timestamp."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted. sec-7 evidence.ts: writeResult answers the timestamp taken from the temp file before the rename (rename keeps it); after a successful rename it never answers null; null means no result.json exists. evidence.test: a fault after the rename still answers the timestamp."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 evidence.ts writeResult takes the temp file's mtime before the rename and never answers null after it; sec-9 evidence.test fault after rename."
+
+[[finding]]
+id = "F-9"
+status = "verified"
+severity = "minor"
+title = "server.ts routing: two reply sites, and today's code with no stated destination"
+detail = """
+sec-6, sec-7 server.ts. Verified against server.ts:
+- Two reply sites per call, not one: the success arm (556) and the catch arm (564, server-error). A handler that throws after notifications/cancelled would reply to a silenced request (forbidden, DEC-064). Route both through one answer(call, result).
+- The start-up-refused check runs before the request is read today (265); sec-3 step 1 reads the request first, so a malformed request on a start-up-refused server would change from profile-invalid to request-invalid.
+- readToolCall's name check (205-212) has no counterpart in HANDLERS: no answer is defined for an unknown tool name.
+- selfDescription's start-up-failure text ("every pi_agent call answers profile-invalid") would become the description of wait/ack/cancel, which still work.
+- The catch arm's refusal says "nothing ran", which is false once a run is published; it needs scoping to failures before the publication line.
+Sources: reviewers A (F4), C (F12), B (F7 part).
+"""
+disposition = "fix-now"
+response = "All five verified against server.ts. Repair in sec-7 server.ts: one answer(call, result) carries both arms and applies closed and silenced; the start-up-refused check stays first, before any request is read; an unknown tool name answers the request-invalid refusal readToolCall gives today; the start-up-failure description is scoped to the tools that refuse (pi_agent and start), and wait, ack and cancel keep their own sections; the catch arm's detail says the call failed, and claims nothing ran only before the publication line."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "All five verified against server.ts. Repair in sec-7 server.ts: one answer(call, result) carries both arms and applies closed and silenced; the start-up-refused check stays first, before any request is read; an unknown tool name answers the request-invalid refusal readToolCall gives today; the start-up-failure description is scoped to the tools that refuse (pi_agent and start), and wait, ack and cancel keep their own sections; the catch arm's detail says the call failed, and claims nothing ran only before the publication line."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 server.ts one answer(call, result) gate for both arms; start-up-refused check first; unknown tool answers readToolCall's refusal; selfDescription scoped; catch arm wording scoped to before publication."
+
+[[finding]]
+id = "F-10"
+status = "verified"
+severity = "minor"
+title = "The blocking answer has a hole when readResult returns null after a successful write"
+detail = """
+sec-3, sec-7 agentRun. A blocking call "awaits settled and answers readResult's document, or the record's fallback". If the record is settled (write succeeded, fallback null) but readResult returns null (EIO, pruned dir, validation), no answer is defined; a throw would reach the catch's "nothing ran" refusal. The same hole exists in waitEnvelope for a live settled record.
+Repair sketch (less code): settle hands the document to the blocking waiter through a one-shot listener (one waiter per run, bounded), removing RunRecord.fallback and the re-read; or specify the null case as failedResult('audit', ...).
+Sources: reviewers A (F10), C (F9).
+"""
+disposition = "fix-now"
+response = "Accepted the less-code repair; compatible with DEC-066 (only a blocking call answers the in-memory audit_failed document). settle hands its document to the run's one blocking waiter directly: the document written, or the audit_failed document when the write failed. RunRecord.fallback and the blocking re-read go. waitEnvelope's live settled target with an unreadable result.json is reported status-only, never a throw."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted the less-code repair; compatible with DEC-066 (only a blocking call answers the in-memory audit_failed document). settle hands its document to the run's one blocking waiter directly: the document written, or the audit_failed document when the write failed. RunRecord.fallback and the blocking re-read go. waitEnvelope's live settled target with an unreadable result.json is reported status-only, never a throw."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 settle hands the document to the blocking caller via handTo (no fallback field, no re-read); waitEnvelope reports an unreadable live result status-only."
+
+[[finding]]
+id = "F-11"
+status = "verified"
+severity = "minor"
+title = "EOF: closed is set only after the input loop unwinds, so a lane can advance and spawn during shutdown"
+detail = """
+sec-6 EOF step 1. Verified: server.ts:748-768 sets context.closed after the for-await exits; for SIGTERM the iterator throws on a later tick. In that window a head run's exit can settle, advance can re-admit and spawn the next run, which shutdown then aborts with eof.
+Repair sketch: set the registry's closing flag from the signal's abort listener and the input's end/error events, not after the loop.
+Source: reviewer A (F8); small window.
+"""
+disposition = "fix-now"
+response = "Verified: server.ts sets closed only after the for-await loop exits. DEC-053 says EOF marks the server closing first. Repair in sec-6 and sec-7: the registry's closing flag is set from the signal's abort listener and the input's end and error events, before the loop unwinds; the post-loop sweep is unchanged."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Verified: server.ts sets closed only after the for-await loop exits. DEC-053 says EOF marks the server closing first. Repair in sec-6 and sec-7: the registry's closing flag is set from the signal's abort listener and the input's end and error events, before the loop unwinds; the post-loop sweep is unchanged."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-6 EOF step 1 and sec-7 server.ts set closed and registry.closing() from the abort listener and input end/error events; sec-9 server.test cases for each trigger."
+
+[[finding]]
+id = "F-12"
+status = "verified"
+severity = "minor"
+title = "`stale` liveness is not positive evidence of death across pid namespaces or hosts sharing the run dir"
+detail = """
+sec-3 resolving a handle (DEC-067). Verified: observeLiveness returns stale whenever the pid is absent from this server's /proc (session.ts:212-217). The run dir defaults under $XDG_STATE_HOME, which may be shared with a VM or a container with its own pid namespace. Server B then reads A's live run as lost (Task failed, terminal); A later writes result.json and B reports completed — a terminal status changes.
+Repair sketch: record boot_id, pid-namespace inode and hostname in the admitted owner; trust pid+starttime only on the same host and namespace; a different boot_id on the same host is stale; any other mismatch is unknown (foreign). Needs a DEC-067 amendment.
+Source: reviewer A (F5).
+"""
+disposition = "fix-now"
+response = """
+Settled by the DEC-067 amendment (2026-10-26, user reply 2a). The admitted record's owner now carries pid, start time, boot id, pid-namespace id and hostname. ownerLiveness (sec-3, sec-7 session.ts) applies observeLiveness only when hostname, boot id and pid namespace all match this server; same hostname with a different boot id is stale; any other mismatch, or a missing identity component, is unknown and so foreign. A run owned across a namespace or host boundary therefore never reads lost from liveness alone: only a published lost record or result.json makes it terminal. sec-9 lists the trade (cross-boundary dead owners stay working) and views.test.ts covers each row. Session locks keep today's rule: RSK-003.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Settled by the DEC-067 amendment (2026-10-26, user reply 2a). The admitted record's owner now carries pid, start time, boot id, pid-namespace id and hostname. ownerLiveness (sec-3, sec-7 session.ts) applies observeLiveness only when hostname, boot id and pid namespace all match this server; same hostname with a different boot id is stale; any other mismatch, or a missing identity component, is unknown and so foreign. A run owned across a namespace or host boundary therefore never reads lost from liveness alone: only a published lost record or result.json makes it terminal. sec-9 lists the trade (cross-boundary dead owners stay working) and views.test.ts covers each row. Session locks keep today's rule: RSK-003.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-3 owner identity (pid, starttime, boot, pidns, host) and ownerLiveness rule; sec-7 session.ts records pidns only when the pid table's NSpid line has one field (closing the procfs-namespace gap the Codex check found); sec-9 views and session tests per row; RSK-003 for session locks."
+
+[[finding]]
+id = "F-13"
+status = "verified"
+severity = "minor"
+title = "Lane-scoped selection is ambiguous against advance dropping settled runs from the lane list"
+detail = """
+sec-5 selection, sec-7 implicit(lanes). If implicit(lanes) reads the FIFO list, a settled unacknowledged run disappears from wait(lanes:[L]) once advance drops it, though it would have been included a moment earlier.
+Repair sketch: lane selection scans records by record.lane in start order, not the FIFO list; test a settled unacknowledged run.
+Source: reviewer A (F7).
+"""
+disposition = "fix-now"
+response = "Accepted; DEC-062 says each named lane contributes its unacknowledged runs at arrival, which is membership by record, not the FIFO list. sec-7: implicit(lanes) scans records by lane in start order. waiting.test: a settled unacknowledged run is selected by its lane after advance dropped it."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted; DEC-062 says each named lane contributes its unacknowledged runs at arrival, which is membership by record, not the FIFO list. sec-7: implicit(lanes) scans records by lane in start order. waiting.test: a settled unacknowledged run is selected by its lane after advance dropped it."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 implicit(lanes) reads records by lane in start order; sec-5 selection text; sec-9 runs.test settled run selectable after its queue drops it."
+
+[[finding]]
+id = "F-14"
+status = "verified"
+severity = "minor"
+title = "Re-admission table: missing rows, rows that cannot change, untested refusals"
+detail = """
+sec-4 table, sec-7 readmit, sec-9.
+- Missing: the transcript budget (Admitted.transcriptBudget) — DEC-050 says limits are min(admitted, current); readmit could recompute and widen it.
+- Ceilings min over absent units unspecified: an admitted unit absent while the current policy has a maximum must pass no request for that unit so clampCeilings applies the maximum (policy.ts:369-399).
+- Rows that cannot change: the profile is re-resolved against the fixed start-up snapshot (only the pin check can change); the tools re-check can never change.
+- Session row: the lock is held far longer than today and never re-verified; readmit could re-read the lock and require this owner's (pid, starttime, call_id) record, refusing session-busy otherwise (reviewer A F9, low confidence).
+- Untested: slot/form change (wrapper-unavailable), child view now overlapping a protected store, a failed ledger probe at launch, the moved root (separate finding).
+Sources: reviewers C (F10), A (F9).
+"""
+disposition = "fix-now"
+response = """
+Accepted except the lock re-verification. The table gains: transcript budget = the admitted budget clamped by the current policy's transcript maximum, through today's transcriptBudget (policy.ts:402), so a lowered maximum narrows it and nothing widens it — DEC-050's minimum of admitted and current; ceilings min taken over the units present, an absent admitted unit passing no request so clampCeilings applies the current maximum. The profile row says only the pin check can change, and the tools row is dropped as unable to change. admission.test gains the four untested refusals and the lowered transcript maximum. Declined: re-reading the session lock at launch. Removing a lock file out of band breaks today's guarantees equally (a running run's lock can be removed the same way); the threat is outside the model the session store defends, and the check adds a launch-time refusal path for no in-model gain.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted except the lock re-verification. The table gains: transcript budget = the admitted budget (never recomputed); ceilings min taken over the units present, an absent admitted unit passing no request so clampCeilings applies the current maximum. The profile row says only the pin check can change, and the tools row is dropped as unable to change. admission.test gains the four untested refusals. Declined: re-reading the session lock at launch. Removing a lock file out of band breaks today's guarantees equally (a running run's lock can be removed the same way); the threat is outside the model the session store defends, and the check adds a launch-time refusal path for no in-model gain."
+
+[[finding.turn]]
+act = "amend"
+role = "responder"
+note = "GPT check of the redraft: freezing the transcript budget ignored a lowered policy maximum, contrary to DEC-050; now clamped by transcriptBudget"
+disposition = "fix-now"
+response = """
+Accepted except the lock re-verification. The table gains: transcript budget = the admitted budget clamped by the current policy's transcript maximum, through today's transcriptBudget (policy.ts:402), so a lowered maximum narrows it and nothing widens it — DEC-050's minimum of admitted and current; ceilings min taken over the units present, an absent admitted unit passing no request so clampCeilings applies the current maximum. The profile row says only the pin check can change, and the tools row is dropped as unable to change. admission.test gains the four untested refusals and the lowered transcript maximum. Declined: re-reading the session lock at launch. Removing a lock file out of band breaks today's guarantees equally (a running run's lock can be removed the same way); the threat is outside the model the session store defends, and the check adds a launch-time refusal path for no in-model gain.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-4 table rows for transcript budget (clamped via transcriptBudget), ceilings over present units, profile pin only, tools not re-checked; sec-9 admission.test refusals and narrowing cases. Lock re-verification declined with reason; accepted."
+
+[[finding]]
+id = "F-15"
+status = "verified"
+severity = "minor"
+title = "sec-7 signatures that cannot be written as given, and ownership leaks"
+detail = """
+sec-7.
+- No callId reaches launch: readmit(admitted, context, callId) and runChild need one; neither Admitted, RunRecord nor Launch carries it. Put callId on Admitted.
+- ExecuteDeps.onAudit is per run inside shared deps, so server.ts would write registry state (record.updatedAt). The registry should pass the callback into launch — or drop the plumbing and have lastUpdatedAt follow state transitions only, removing RunControl.onAudit.
+- The owner has two sources (createRegistry({owner}) and Admitted.session.owner) though sec-7 says "read once". Use the admitted one.
+- Launch returns a bare AgentResult, so the registry cannot tell a re-admission refusal (needs a refused audit record and an attempts line) from a spawn-audit audit-failed. Return { refused } | { result }.
+- Unspecified: what happens when the refused, cancelled or dropped audit append itself fails before settle.
+- ServeOptions.procDir serves two jobs: acquireSession reads this process's own start time from it (session.ts:536-542) and viewFromDisk checks other servers' liveness. fakeProc(dir,'unreadable') would make every admission refuse session-busy. Split the option, or fakeProc always copies the current pid's stat.
+Source: reviewer C (F8, F11), verified for procDir.
+"""
+disposition = "fix-now"
+response = "Accepted. callId goes on Admitted; the registry passes each run's onAudit callback into launch, so server.ts writes no registry state; the owner is read once from Admitted.session.owner and createRegistry loses its owner dependency; Launch answers { refused } or { result }, so the registry writes the refused audit record (the attempts line stays where the refusal is decided: readmit for a re-admission refusal, the registry for lane-predecessor-failed); a failed refused, cancelled or dropped audit append does not stop the settlement (the run settles regardless, and the failure is reported on stderr as every evidence writer does). procDir: fakeProc always stages the current process's own stat line, so admissions work under any staged owner table; one option stays."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted. callId goes on Admitted; the registry passes each run's onAudit callback into launch, so server.ts writes no registry state; the owner is read once from Admitted.session.owner and createRegistry loses its owner dependency; Launch answers { refused } or { result }, so the registry writes the refused audit record and the attempts line itself; a failed refused, cancelled or dropped audit append does not stop the settlement (the run settles regardless, and the failure is reported on stderr as every evidence writer does). procDir: fakeProc always stages the current process's own stat line, so admissions work under any staged owner table; one option stays."
+
+[[finding.turn]]
+act = "amend"
+role = "responder"
+note = "attempts-line ownership matched to the redraft: recorded where the refusal is decided, as today"
+disposition = "fix-now"
+response = "Accepted. callId goes on Admitted; the registry passes each run's onAudit callback into launch, so server.ts writes no registry state; the owner is read once from Admitted.session.owner and createRegistry loses its owner dependency; Launch answers { refused } or { result }, so the registry writes the refused audit record (the attempts line stays where the refusal is decided: readmit for a re-admission refusal, the registry for lane-predecessor-failed); a failed refused, cancelled or dropped audit append does not stop the settlement (the run settles regardless, and the failure is reported on stderr as every evidence writer does). procDir: fakeProc always stages the current process's own stat line, so admissions work under any staged owner table; one option stays."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 callId on Admitted, onAudit passed per run into launch, owner from Admitted.session.owner, Launch returns refused or result, failed record appends do not stop settlement, fakeProc stages this process's stat line."
+
+[[finding]]
+id = "F-16"
+status = "verified"
+severity = "minor"
+title = "sec-9 verification: the regression-net claim is false and several named tests would pass with the bug present"
+detail = """
+sec-9.
+- "Every current case ... must pass unchanged in substance" does not hold: the new first audit record (admitted) breaks cases pinning audit order or the first record — server.test.ts:198-201, 351-352; spawn.test.ts:227, 280, 392, 710-713, 814-817, 930-933, 986-989; gate.test.ts:551; childview.test.ts:362 (pins five evidence files); server.test.ts:117 (one tool). spawn.test.ts:638-672 now exercises the publish failure; state that a publish refusal appends to attempts.jsonl as server.ts:428 does, decide whether a spawn-record refusal appends one, and fix its "directory was discarded" detail.
+- "A waiter woken by settled always finds the file" cannot fail: settle is synchronous. The real hazard is release before the file; spy on session.release and assert result.json exists and state is not yet settled at release time.
+- "A cascade over a thousand queued runs without growing the stack" passes with a recursive advance; assert re-entrancy depth directly.
+- Foreign polling needs POLL_INTERVAL_MS injectable (as gateIdleMs is), else each case waits 2 s+.
+Source: reviewer C (F6, F7).
+"""
+disposition = "fix-now"
+response = "Accepted. sec-9 lists the rewritten cases by file and line, states that a publish refusal appends audit-failed to attempts.jsonl as today and that a spawn-record refusal after publication appends one too (attempts.jsonl is the ledger of attempts that spawned nothing, which it is), while its run also settles with result.json, and fixes the detail text. The settle-order test spies on session.release; the cascade test asserts advance's re-entrancy depth stays one; POLL_INTERVAL_MS becomes an injectable option beside gateIdleMs."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted. sec-9 lists the rewritten cases by file and line, states that a publish refusal appends audit-failed to attempts.jsonl as today and that a spawn-record refusal after publication appends one too (attempts.jsonl is the ledger of attempts that spawned nothing, which it is), while its run also settles with result.json, and fixes the detail text. The settle-order test spies on session.release; the cascade test asserts advance's re-entrancy depth stays one; POLL_INTERVAL_MS becomes an injectable option beside gateIdleMs."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-9 regression net lists the rewritten cases by file and line, release spy, advance depth counter, injectable pollMs; sec-7 settlement table records the attempts.jsonl line for a spawn-record refusal."
+
+[[finding]]
+id = "F-17"
+status = "verified"
+severity = "minor"
+title = 'sec-2 wire claims: legacy "byte-for-byte", era-rule precedence, modern ping/initialize, serverInfo placement'
+detail = """
+sec-2.
+- "Legacy results are byte-for-byte today's" contradicts the design's own intended legacy changes: five tools, annotations, new pi_agent arguments and description sentences, no reply after cancellation, a failed spawn record keeping the dir. Restate as "legacy results carry no modern members" and list the intended changes.
+- The era table does not say which error wins when both an unknown version and missing capabilities hold (version first).
+- initialize and ping are "served as legacy since they carry no _meta", but classification runs first; a modern-classified ping/initialize has no row. Answer -32601 when modern (EVD-004: 2026-07-28 removes both).
+- "Every modern result carries _meta serverInfo" but the CreateTaskResult, tasks/cancel, tasks/update examples and the nested tasks/get result have none, and EVD-004 records serverInfo only on server/discover. Pick one rule (top-level results only, never nested) and make examples match.
+Source: reviewer B (F3, F4, F10).
+"""
+disposition = "fix-now"
+response = "Accepted; DEC-055 places serverInfo only on server/discover, so the design's every-result rule overreached it. Repair in sec-2: legacy results carry no modern members, and the intended legacy changes are listed; version is checked before capabilities; initialize and ping classified modern answer -32601; _meta serverInfo appears on server/discover only."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted; DEC-055 places serverInfo only on server/discover, so the design's every-result rule overreached it. Repair in sec-2: legacy results carry no modern members, and the intended legacy changes are listed; version is checked before capabilities; initialize and ping classified modern answer -32601; _meta serverInfo appears on server/discover only."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-2 legacy results carry no modern members and the intended changes are listed; version checked before capabilities; modern initialize/ping -32601; serverInfo only on server/discover."
+
+[[finding]]
+id = "F-18"
+status = "verified"
+severity = "minor"
+title = "Run documents: unstated states and nullability"
+detail = """
+sec-2, sec-5.
+- pi-run-handle/1 "state is queued or running at the moment of answering", but a key replay answers the original run's current state, terminal included.
+- session: the admitted record does not record the session, so a disk-resolved run without result.json has no session; a run refused at launch has result.session null while its run document carries the minted session. Record session in admitted; state nullability of session, lane and key per state; say which session to trust after a refusal.
+- No document is named for a refused wait, ack or cancel (isError true): state that every tool's refusal is a pi-agent-result/2 refusal, told apart by schema, in both new contracts.
+- timed_out after re-resolution can be true with every target done; define it as "the condition did not hold at answer time" or recompute from the re-resolved views (reviewer A F12).
+- The cancelled task statusMessage ("the result's causes") has no join format, and a cancelled task carries no result; note in help that wait({runs:[taskId]}) still reads the document.
+Sources: reviewers B (F5, F6, F7, F14), A (F12).
+"""
+disposition = "fix-now"
+response = """Accepted. sec-2: a handle may be in any state on a key replay; the admitted record records session, so every run document from this release has one, and session is null only for directories from before it; a refused run's run document session is the one minted at start, and the result's session is null because no turn ran — continue from neither. Every tool's refusal is a pi-agent-result/2 refusal, told apart by schema. timed_out is recomputed from the re-resolved views. The cancelled statusMessage is the causes joined with ", "; help notes wait by taskId reads the document."""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """Accepted. sec-2: a handle may be in any state on a key replay; the admitted record records session, so every run document from this release has one, and session is null only for directories from before it; a refused run's run document session is the one minted at start, and the result's session is null because no turn ran — continue from neither. Every tool's refusal is a pi-agent-result/2 refusal, told apart by schema. timed_out is recomputed from the re-resolved views. The cancelled statusMessage is the causes joined with ", "; help notes wait by taskId reads the document."""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-2 handle in any state on key replay, session recorded in admitted, refusal session semantics, refusals told apart by schema, timed_out from re-resolved views, causes joined with comma; sec-8 help/tool.md now notes wait by task id reads a cancelled task's document."
+
+[[finding]]
+id = "F-19"
+status = "verified"
+severity = "minor"
+title = "Idempotency key: digest canonicalisation and lifetime unspecified; a cancelled start is findable only by key"
+detail = """
+sec-2, sec-3 step 2, sec-6.
+- argsDigest is "sha256 of canonical JSON, key excluded" without saying raw arguments or normalised request: cwd omitted vs the launch dir spelled out, needs_success absent vs false, tools order or duplicates. Define it over the normalised request with defaults applied.
+- Keys last for one server process; after a Claude Code reconnect the same key starts a second writer while the first's edits stand. State the scope in the contract and help.
+- Without a key, a cancelled start (no reply) cannot be told apart from siblings in a selector-less wait (run documents carry no profile or prompt digest). Help should tell callers to always pass key to pi_agent_start.
+Source: reviewer B (F8, F12).
+"""
+disposition = "fix-now"
+response = "Accepted. argsDigest is over the normalised request with defaults applied (cwd resolved, absent booleans as false, tools sorted and deduplicated). The contract and help state that a key lives for one server process. Help tells callers to always pass key to pi_agent_start."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted. argsDigest is over the normalised request with defaults applied (cwd resolved, absent booleans as false, tools sorted and deduplicated). The contract and help state that a key lives for one server process. Help tells callers to always pass key to pi_agent_start."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-7 argsDigest over the normalised request; sec-2 and sec-8 contract state key lifetime of one server process; sec-8 help/agent.md teaches start with a key."
+
+[[finding]]
+id = "F-20"
+status = "verified"
+severity = "minor"
+title = "sec-8 documentation plan misses client-observable changes"
+detail = """
+sec-8.
+- pi-agent-result-2.md:8 "A tools/call of pi_agent always answers with an MCP tool result" becomes false for task answers too, not only for cancelled calls.
+- The cancelled rows (contract :156, :179) say "a cancellation notification"; pi_agent_cancel, tasks/cancel and queued runs settled without a process now produce cancelled.
+- The refusal arm says "nothing ran" and "artifacts: null for a refusal" (contract :80); a run refused at launch or audit-failed after publication now has a directory and audit records.
+- help/agent.md "Retrying a refusal unchanged gets the same refusal" is false for lane-predecessor-failed and launch refusals.
+- No quotient help section for pi-run-handle-1.md or pi-agent-wait-1.md, though help.ts:36-45 exposes result/policy/form contracts that way.
+- Codex approval prompting for start/ack/cancel (see the taught-loop finding).
+Source: reviewer B (F9).
+"""
+disposition = "fix-now"
+response = "All six verified against the cited contract and help lines. sec-8 gains each item, and HELP_SECTIONS gains contract sections for the handle and wait documents."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "All six verified against the cited contract and help lines. sec-8 gains each item, and HELP_SECTIONS gains contract sections for the handle and wait documents."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: sec-8 contracts and help items for each of the six points, including HELP_SECTIONS handle, wait and ack."
+
+[[finding]]
+id = "F-21"
+status = "verified"
+severity = "nit"
+title = "Small inaccuracies and dead weight"
+detail = """
+- needs_success:false without lane is refused; refuse only true (an LLM filling defaults trips it). (B F13)
+- pi-agent-ack/1 lives in pi-agent-wait-1.md, breaking one-file-per-schema; pi-run-handle/1 breaks the pi-agent-* naming. (B F15)
+- sec-6 table calls pi_agent_cancel "effectively synchronous"; step 5 awaits settlement (grace + drain). Behaviour right, rationale wrong. (A F11)
+- execute.ts "server.ts:347-480" overlaps step 8 and the probe (to admission) and the layout allocation (to publish). (C F13)
+- childEnv's scrub uses an explicit list (spawn.ts:197-206), not RUN_EVIDENCE_FILES; result.json is covered only via layout.dir. (C F13)
+- runLayout could be layoutFor(runDir, runName(callId)), removing the "agree" test; EMPTY_STATUS undefined (today inlines reduce([], {}).status); publish, appendAudit and runChild each mkdir; readStartRequest should be one reader with extra fields, not a second unknown-field loop; viewFromDisk then read(view) parses result.json twice. (C F13)
+"""
+disposition = "fix-now"
+response = "Accepted all: needs_success refused only when true without lane; ack gets its own pi-agent-ack-1.md (schema name pi-run-handle/1 kept — it is not a pi_agent answer, and renaming buys nothing); sec-6 rationale for cancel corrected; the execute.ts line range corrected; childEnv scrub described as it is; runLayout defined via layoutFor; EMPTY_STATUS named as today's reduce([], {}).status; one mkdir at publish; one request reader with extra fields; viewFromDisk returns the read result so it is parsed once."
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = "Accepted all: needs_success refused only when true without lane; ack gets its own pi-agent-ack-1.md (schema name pi-run-handle/1 kept — it is not a pi_agent answer, and renaming buys nothing); sec-6 rationale for cancel corrected; the execute.ts line range corrected; childEnv scrub described as it is; runLayout defined via layoutFor; EMPTY_STATUS named as today's reduce([], {}).status; one mkdir at publish; one request reader with extra fields; viewFromDisk returns the read result so it is parsed once."
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+note = "Present: each nit repaired in sec-2, sec-6, sec-7 (needs_success only when true, pi-agent-ack-1.md, cancel rationale, execute.ts range, childEnv scrub, layoutFor, EMPTY_STATUS, one mkdir, one reader, single parse)."
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

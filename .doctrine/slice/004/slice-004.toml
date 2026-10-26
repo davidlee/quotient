@@ -1,7 +1,7 @@
 id = 4
 slug = "concurrent-runs-start-and-wait-tools"
 title = "Concurrent runs: start and wait tools"
-status = "design"
+status = "plan"
 created = "2026-10-26"
 updated = "2026-10-26"
 tags = []
@@ -114,6 +114,62 @@ intent = "design-target"
 selector = "src/server/admission.test.ts"
 intent = "design-target"
 
+[[selector]]
+selector = "src/server/protocol.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/views.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/spawn.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/session.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/test-rig.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/protocol.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/tools.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/views.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/evidence.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/spawn.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/session.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "docs/contract/pi-agent-ack-1.md"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/gate.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/childview.test.ts"
+intent = "design-target"
+
 [[relation]]
 label = "references"
 role = "originates_from"
@@ -168,6 +224,18 @@ target = "EVD-004"
 label = "references"
 role = "originates_from"
 target = "IDE-003"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "long blocking pi_agent runs and the stdio idle timeout"
+target = "RSK-002"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "session-lock liveness across pid namespaces, out of scope"
+target = "RSK-003"
 
 # STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
 # `[relationships]` axis. Slices carry no typed STRUCTURAL
