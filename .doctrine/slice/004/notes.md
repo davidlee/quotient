@@ -84,7 +84,7 @@ unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → p
   design sec-7 `admission.ts` type.
 
 - **D-3 runs.ts additions beyond sec-7's `Registry` (2026-10-27, PHASE-04).**
-  Agent's choice, reported to the user, not yet assented. (a) `matchKey(found,
+  Agent's choice; user assented 2026-10-27 ("agreed"), carry to /reconcile. (a) `matchKey(found,
   argsDigest)` exported from runs.ts: sec-7 puts the key lookup in server's
   `startRun` (before admission, which must not run for a reuse), yet sec-9
   lists "different arguments refuse" under runs.test.ts; the rule now has one
