@@ -102,10 +102,15 @@ mask_guarded='^\[ -e (.+) \] && \{ \[ -d (.+) \] \|\| \{ printf '\''quotient: pr
 # written. A backtick stands in the second parse as a quoted space then an
 # unquoted one, so it ends a word unless single quotes hold it: inside double
 # quotes it opens a command substitution, whose own quotes a parse with the
-# backtick inert would read as closing the double quotes.
+# backtick inert would read as closing the double quotes. A third parse
+# restores every `~` and lets bash expand it to a home that is a mark of its
+# own, so a word opening with `~` is read as the home only where bash would
+# expand it, and a `~` later in a word only as the text it is.
 tilde='~'
 operators='$;&|<>()#`*?[{'
 inert=$'\002\003\004\005\006\007\016\017\020\023\024\025\026\027\030'
+inert_tilde=${inert:0:1}
+home_mark=$'\031'
 split_mark=$'\021 \022'
 backtick_mark="\"$split_mark\"$split_mark"
 # The parameter expansions a line may carry: a name, an array's every element, or
@@ -196,9 +201,9 @@ extract_line() { awk "$bwrap_shape { print; exit }" "$1" >"$2"; }
 # on stdout, when bash would read the line as more than plain words: an operator
 # or an expansion outside quotes, a backtick outside single quotes, a command
 # substitution, an arithmetic or unreadable parameter expansion, an escaped `$`
-# or backtick, an ANSI-C or locale quote, a control byte, or quoting that does
-# not close. A line it reads otherwise than its words say is refused, never read
-# the way a rule would like.
+# or backtick, an ANSI-C or locale quote, a word opening with a `~` it does not
+# expand to the home, a control byte, or quoting that does not close. A line it reads otherwise than
+# its words say is refused, never read the way a rule would like.
 shell_words() { # line
   local line=$1 one split i c specials=$tilde$operators words count rest body
   # Inside double quotes `\$` is a `$` and `\`` a backtick, which the inert
@@ -233,20 +238,37 @@ shell_words() { # line
       split=${split//"$c"/"$split_mark"}
     fi
   done
-  # The trailing `.` keeps a last empty word, which command substitution would
-  # otherwise strip with its newline.
-  if ! words=$( (set -f && set +B && eval "set -- $one" && printf '%s\n' "$@" && printf .) 2>/dev/null); then
+  if ! words=$(parsed_words "$one"); then
     echo 'quoting that does not close'
     return 1
   fi
-  words=${words%.}
   count=$( (set -f && set +B && eval "set -- $split" && printf '%s\n' "$#") 2>/dev/null) || count=-1
-  if [ "$count" != "$(printf '%s' "$words" | grep -c '')" ]; then
+  if [ "$count" != "$(printf '%s' "${words%.}" | grep -c '')" ]; then
     echo 'a shell operator or an expansion outside quotes, or a backtick outside single quotes'
     return 1
   fi
+  # bash expands a `~` opening a word to the home only unquoted and followed by
+  # `/` or the word's end. Parsed with every `~` restored and the home a mark,
+  # the line reads the same words, with the mark wherever a word opens with the
+  # inert `~` and a `~` wherever one stands later in a word — unless a word
+  # opens with one quoted or escaped, where bash keeps it, or naming a user,
+  # where bash expands it to a home the text cannot know. Either way that `~`
+  # is no symbol a rule can name. A `~` later in a word is text, unless bash
+  # expands it after an assignment's `=`, which reads differently too.
+  if [ "$(HOME=$home_mark parsed_words "${one//"$inert_tilde"/"$tilde"}")" != \
+    "$(printf '%s' "$words" | sed "s/^$inert_tilde/$home_mark/; s/$inert_tilde/$tilde/g")" ]; then
+    echo 'a word opening with a `~` bash does not expand to the home (quoted, escaped or naming a user), or a `~` inside a word bash expands'
+    return 1
+  fi
+  words=${words%.}
   printf '%s' "$words" | LC_ALL=C tr "$inert" "$specials"
 }
+
+# The words bash reads from $1, in which nothing but a `~` can expand or run,
+# one per line and then a `.`, which keeps a last empty word that command
+# substitution would otherwise strip with its newline. Status 1 when the
+# quoting does not close.
+parsed_words() { (set -f && set +B && eval "set -- $1" && printf '%s\n' "$@" && printf .) 2>/dev/null; }
 
 # The one word bash reads from $1, or status 1.
 one_word() {
@@ -650,17 +672,42 @@ protected_aliases() { # argument-file
   done < <(mount_records "$1")
 }
 
-# Every mount path on the line that climbs above its anchor, one per line as
-# `flag path`: such a mount lands in, or reads, a directory no text names.
-climbing_mounts() { # argument-file
-  local -a record=()
-  local path
+# Every mount path on the line that names no directory the rules can read, one
+# per line as the reason. A path is absolute or opens with a symbol the check
+# names — the home's `~`, which shell_words admits only where bash expands it,
+# or a variable — since bwrap resolves any other relative path against a
+# directory the text does not name. A path that climbs above its anchor lands
+# in, or reads, a directory no text names. And a path at or under an earlier
+# `--symlink`'s destination goes wherever the link points, which the rules do
+# not follow. A descriptor bind's source is a descriptor, no path at all.
+unreadable_mounts() { # argument-file
+  local -a record=() links=()
+  local at path compared link
   while IFS=$sep read -ra record; do
-    for path in "${record[@]:1}"; do
-      if [ -n "$path" ] && climbs "$(spelled_path "$path")"; then
-        printf '%s %s\n' "${record[0]}" "$path"
+    for ((at = 1; at < ${#record[@]}; at++)); do
+      path=${record[at]}
+      case ${record[0]}:$at in
+        --bind-fd:2 | --ro-bind-fd:2) continue ;;
+      esac
+      case $path in
+        '') continue ;;
+        /* | "$tilde" | "$tilde"/* | '$'*) ;;
+        *)
+          printf "'%s %s' is a relative path, which bwrap resolves against a directory no text names\n" "${record[0]}" "$path"
+          continue
+          ;;
+      esac
+      compared=$(spelled_path "$path")
+      if climbs "$compared"; then
+        printf "'%s %s' climbs above the path it is anchored at, into a directory no text names\n" "${record[0]}" "$path"
       fi
+      for link in "${links[@]}"; do
+        if [ "$compared" = "$link" ] || [[ $compared == "$link"/* ]]; then
+          printf "'%s %s' lies at or under the symlink '%s', which goes where the link points\n" "${record[0]}" "$path" "$link"
+        fi
+      done
     done
+    if [ "${record[0]}" = --symlink ]; then links+=("$(spelled_path "${record[1]}")"); fi
   done < <(mount_records "$1")
 }
 
@@ -785,10 +832,10 @@ check_capability() {
     fail "$c" "a quotient_mask append is not in one of the builder's mask shapes: $append"
   done < <(grep -F -- 'quotient_mask+=' "$raw" | grep -vE -- "$mask_plain|$mask_guarded")
   check_tail "$c" "$root" "$line"
-  local climbing
-  while IFS= read -r climbing; do
-    fail "$c" "'$climbing' climbs above the path it is anchored at, into a directory no text names"
-  done < <(climbing_mounts "$line")
+  local unreadable_mount
+  while IFS= read -r unreadable_mount; do
+    fail "$c" "$unreadable_mount"
+  done < <(unreadable_mounts "$line")
 
   # (d) The jail's own isolation: it dies with its parent, has no environment of
   # the server's, and mounts nothing of the host's /tmp — a mount's target read

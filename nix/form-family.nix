@@ -86,17 +86,26 @@ let
   reservedName = name: name == "HOME" || lib.hasPrefix "QUOTIENT_" name;
   reservedNames = lib.filter reservedName (lib.unique (lib.attrNames env ++ lib.attrNames secretEnv));
 
-  # The launcher writes an env value and a host path as single-quoted
-  # literals, and writeShellApplication's shellcheck fails the build on a `$`
-  # in one (env and protect); and the check reads the launcher a line at a time,
-  # so a newline in one would split it (env and every host path). Refuse both
-  # here instead, by name.
+  # The launcher writes an env value, a host path and a piFiles key as
+  # single-quoted literals, and writeShellApplication's shellcheck fails the
+  # build on a `$` in one (env and protect); and the check reads the launcher a
+  # line at a time and refuses a control character in it but tab, so a newline
+  # would split a line and any other would fail the check (env, every host path
+  # and piFiles keys). Refuse both here instead, by name.
   envValuesWith =
-    infix: map (name: "env ${name}") (lib.filter (name: lib.hasInfix infix (toString env.${name})) (lib.attrNames env));
+    pred: map (name: "env ${name}") (lib.filter (name: pred (toString env.${name})) (lib.attrNames env));
   dollarValues =
-    envValuesWith "$" ++ map (path: "protect \"${path}\"") (lib.filter (lib.hasInfix "$") protectPaths);
-  newlineValues =
-    envValuesWith "\n" ++ map describePath (lib.filter (entry: lib.hasInfix "\n" entry.path) hostPaths);
+    envValuesWith (lib.hasInfix "$") ++ map (path: "protect \"${path}\"") (lib.filter (lib.hasInfix "$") protectPaths);
+  # Every control character but tab. Nix escapes only `\n`, `\r` and `\t` in a
+  # string, so each is decoded from a JSON `\u` escape.
+  controlChars = map (
+    code: builtins.fromJSON "\"\\u${lib.fixedWidthString 4 "0" (lib.toHexString code)}\""
+  ) (lib.range 1 8 ++ lib.range 10 31 ++ [ 127 ]);
+  hasControl = text: lib.any (char: lib.hasInfix char text) controlChars;
+  controlValues =
+    envValuesWith hasControl
+    ++ map describePath (lib.filter (entry: hasControl entry.path) hostPaths)
+    ++ map (key: "piFiles \"${key}\"") (lib.filter hasControl (lib.attrNames piFiles));
 
   # The combinator set a caller's `options` receive. A cleanup hook makes
   # jail.nix run bwrap under a trap rather than exec it, so the form would no
@@ -285,8 +294,8 @@ assert lib.assertMsg (reservedNames == [ ])
   "mkFormFamily: env and secretEnv must not name HOME or a QUOTIENT_ variable: ${lib.concatStringsSep ", " reservedNames}";
 assert lib.assertMsg (dollarValues == [ ])
   "mkFormFamily: env values and protect paths cannot contain $: ${lib.concatStringsSep ", " dollarValues}";
-assert lib.assertMsg (newlineValues == [ ])
-  "mkFormFamily: env values and host paths cannot contain a newline: ${lib.concatStringsSep ", " newlineValues}";
+assert lib.assertMsg (controlValues == [ ])
+  "mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: ${lib.concatStringsSep ", " controlValues}";
 assert lib.assertMsg (badHostPaths == [ ])
   "mkFormFamily: persistHome, exposure and protect paths must be absolute: ${lib.concatStringsSep ", " (map describePath badHostPaths)}";
 {

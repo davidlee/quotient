@@ -7,6 +7,8 @@
 #
 #   fixture <name> <family> <outcome> [names= | expose= | protect= | absent=]
 #   edit <layer> <from> <to>     a literal substitution, in table order
+#   edit_launchers <from> <to>   the same edit to launcher-read, launcher-write
+#                                and baseline
 #   drop <layer>                 the file is not there at all
 #
 # A layer is one file of the case's copy of the family: form-read, form-write,
@@ -222,9 +224,7 @@ edit launcher-read '--tmpfs ~' '--tmpfs ~ --ro-bind /tmp /./tmp/'
 # Quoting changes no argument's value: a single-quoted target is the same /tmp.
 # The bind is the baseline's too, so the second /tmp mount is the only fault.
 fixture quoted-tmp-target full 'refuse:(d)'
-edit launcher-read '--tmpfs ~' "--tmpfs ~ --bind /tmp/quotient-checks/exposure '/tmp'"
-edit launcher-write '--tmpfs ~' "--tmpfs ~ --bind /tmp/quotient-checks/exposure '/tmp'"
-edit baseline '--tmpfs ~' "--tmpfs ~ --bind /tmp/quotient-checks/exposure '/tmp'"
+edit_launchers '--tmpfs ~' "--tmpfs ~ --bind /tmp/quotient-checks/exposure '/tmp'"
 
 # A trailing `/.` names the directory before it, and a run of dot components
 # collapses to nothing: both are the host's /tmp again.
@@ -280,9 +280,7 @@ edit launcher-read '--clearenv' '--clearenv --hostname --unshare-pid'
 # agree and the missing option is the only fault.
 fixture bind-source-flag-operand full 'refuse:(d)'
 edit launcher-read ' --unshare-pid' ''
-edit launcher-read '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
-edit launcher-write '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
-edit baseline '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
+edit_launchers '--ro-bind /tmp/quotient-checks/world /tmp/quotient-checks/world' '--ro-bind --unshare-pid /tmp/quotient-checks/world'
 
 # Nor is an application argument one bwrap reads: pi's own `--setenv` is after
 # the `--`, so neither (e)'s namespace scan nor (h)'s name scan is its business.
@@ -326,29 +324,21 @@ edit baseline '--tmpfs ~' '--tmpfs ~ --bind /tmp/quotient-checks/extra /tmp/quot
 # A device bind is a read-write bind the policy must list as exposed, in the
 # baseline as much as in a form.
 fixture dev-bind-unexposed full 'refuse:(g)'
-edit launcher-read '--tmpfs ~' '--tmpfs ~ --dev-bind /private /private'
-edit launcher-write '--tmpfs ~' '--tmpfs ~ --dev-bind /private /private'
-edit baseline '--tmpfs ~' '--tmpfs ~ --dev-bind /private /private'
+edit_launchers '--tmpfs ~' '--tmpfs ~ --dev-bind /private /private'
 
 # Whitespace separates bwrap's arguments however it is written: a tab, or a run
 # of spaces, is no part of a path and does not hide the bind it separates.
 fixture tab-bind-unexposed default 'refuse:(g)'
-edit launcher-read '--tmpfs ~' $'--tmpfs ~ --bind\t/private\t/private'
-edit launcher-write '--tmpfs ~' $'--tmpfs ~ --bind\t/private\t/private'
-edit baseline '--tmpfs ~' $'--tmpfs ~ --bind\t/private\t/private'
+edit_launchers '--tmpfs ~' $'--tmpfs ~ --bind\t/private\t/private'
 
 fixture space-run-bind-unexposed default 'refuse:(g)'
-edit launcher-read '--tmpfs ~' '--tmpfs ~ --bind   /private   /private'
-edit launcher-write '--tmpfs ~' '--tmpfs ~ --bind   /private   /private'
-edit baseline '--tmpfs ~' '--tmpfs ~ --bind   /private   /private'
+edit_launchers '--tmpfs ~' '--tmpfs ~ --bind   /private   /private'
 
 # An exposed store path is compared folded, like the bind it is compared to.
 exposed_store=/nix/store/11111111111111111111111111111111-my-data
 exposed_mount="--tmpfs ~ --bind $exposed_store /tmp/quotient-checks/data"
 fixture store-exposure full pass "expose=$exposed_store"
-edit launcher-read '--tmpfs ~' "$exposed_mount"
-edit launcher-write '--tmpfs ~' "$exposed_mount"
-edit baseline '--tmpfs ~' "$exposed_mount"
+edit_launchers '--tmpfs ~' "$exposed_mount"
 
 # A report quotes bind paths the caller controls, so a path spelling a label must
 # not read as a refusal by it: this binds `(i)` and is refused by (g) alone. The
@@ -483,6 +473,26 @@ fixture multiword-env-value multiword pass
 fixture quoted-specials quotedspecials pass
 fixture apostrophe-exposure apostrophe pass
 
+# A word opening with `~` is the home only where bash expands it: unquoted, and
+# followed by `/` or the word's end. Otherwise that `~` is a literal — quoted,
+# the target here is a relative path bwrap mounts under `/~`, not the masked
+# state directory it spells — so a line holding one is refused rather than read.
+fixture tilde-quoted-target default 'refuse:(c)'
+edit_launchers '--clearenv' "--clearenv --ro-bind ~/.local/state/quotient '~/.local/state/quotient'"
+
+fixture tilde-escaped default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind /etc/hostname \~/hostname'
+
+# Unquoted, `~name` is another user's home, which the text cannot know.
+fixture tilde-user default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind /etc/hostname ~root/hostname'
+
+# An unquoted `~` opening a path is the home bash expands, read as written; a
+# `~` later in a word is text, which the builder quotes, as in this exposure path.
+fixture tilde-unquoted default pass
+edit_launchers '--clearenv' '--clearenv --ro-bind /etc/hostname ~/hostname'
+fixture tilde-in-exposure tildeexposure pass
+
 ## (g) overlays
 
 # An overlay's upper and work directories are written on the host.
@@ -503,11 +513,32 @@ fixture alias-dotdot aliasdotdot 'refuse:(j)'
 fixture mount-climb aliasclimb 'refuse:(c)'
 fixture alias-climb aliasclimb 'refuse:(j)'
 
+# A mount path is absolute or opens with a symbol the check names: the home's
+# `~` or a variable. bwrap resolves any other relative path against a directory
+# the text does not name — `tmp` is the jail's /tmp — so it is refused.
+fixture mount-relative-target default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind /etc tmp'
+
+fixture mount-dot-relative-target default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind /etc ./tmp'
+
+fixture mount-relative-source default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --ro-bind etc /visible'
+
+# A path at or under an earlier `--symlink`'s destination goes where the link
+# points, which the text does not follow: through `alias/.` this bind lands on
+# /tmp itself. A path that merely begins with the same characters is another.
+fixture mount-through-symlink default 'refuse:(c)'
+edit_launchers '--clearenv' '--clearenv --dir /tmp/work --symlink /tmp /tmp/work/alias --ro-bind /etc /tmp/work/alias/.'
+
+fixture mount-beside-symlink default pass
+edit_launchers '--clearenv' '--clearenv --symlink /etc /tmp/link --ro-bind /etc /tmp/linked'
+
 # A descriptor bind's source is whatever the descriptor opens, which the text
 # cannot name: written, it is no exposure path, and read, it may be protected
 # state.
 fixture fd-bind-unexposed fdbind 'refuse:(g)'
-fixture alias-fd-bind rofdbind 'refuse:(j)'
+fixture alias-fd-bind rofdbind 'refuse:(j)' 'absent=(c)'
 
 ## (g) a source holding a tab
 

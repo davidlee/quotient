@@ -228,12 +228,13 @@ mkFormFamily: env values and protect paths cannot contain $: env <NAME>
 
 A value that needs expanding at launch belongs in `secretEnv`.
 
-Nor may a value, or a `persistHome`, `exposure` or `protect` path, contain a
-newline. The form-family check reads the launcher a line at a time, so the
-builder refuses it by name:
+Nor may a value, a `persistHome`, `exposure` or `protect` path, or a `piFiles`
+key contain a control character other than tab. The form-family check reads
+the launcher a line at a time and refuses any other control character in it,
+so the builder refuses one by name:
 
 ```
-mkFormFamily: env values and host paths cannot contain a newline: env <NAME>
+mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: env <NAME>
 ```
 
 ### `secretEnv` (default `{ }`)
@@ -379,9 +380,12 @@ What you add is yours to get right.
   (an expansion bash would split, an ANSI-C or locale quote), an unquoted glob
   (`*`, `?`, `[`) or brace (`{`), a backtick outside single quotes, a `$(` or
   `$[` anywhere, a `${…}` that is more than a name, `name[@]` or a plain
-  `name:-default`, and a `\$` or `` \` ``. Nor may a mount's path climb with
-  `..` above `~` or a variable it starts from. jail.nix quotes everything it
-  writes, so this meets only raw arguments of your own; single-quote them, and
+  `name:-default`, a `\$` or `` \` ``, and a word opening with a `~` that bash
+  does not expand to the home: one quoted, escaped or naming a user (`~name`).
+  A `~` later in a word is text. A mount's path must be absolute or start from
+  an unquoted `~` or a variable; it may not climb with `..` above the `~` or
+  variable it starts from, nor lie at or under the destination of an earlier
+  `--symlink`. jail.nix quotes everything it writes, so this meets only raw arguments of your own; single-quote them, and
   do not escape an operator with a backslash, which the check also refuses.
 - **`/tmp` belongs to the jail.** The check refuses a mount at exactly `/tmp`,
   because a shared host `/tmp` would leak between runs. Binds below `/tmp` (an

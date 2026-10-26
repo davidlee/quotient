@@ -278,17 +278,26 @@
           args.env.NOTE = "a$b";
           message = "mkFormFamily: env values and protect paths cannot contain $: env NOTE";
         };
-        # The check reads the launcher a line at a time, so a value or a host path
-        # holding a newline is refused at the call, by name. A host path's
-        # message is matched up to the argument it names: the path itself would
-        # carry the newline into the message table.
+        # The check reads the launcher a line at a time and refuses a control
+        # character in it but tab, so a value, a host path or a piFiles key
+        # holding one is refused at the call, by name. A message naming the
+        # offending text stops before its control character: the message table
+        # is read one line per refusal.
         env-newline = {
           args.env.NOTE = "first\nsecond";
-          message = "mkFormFamily: env values and host paths cannot contain a newline: env NOTE";
+          message = "mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: env NOTE";
+        };
+        env-carriage-return = {
+          args.env.NOTE = "first\rsecond";
+          message = "mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: env NOTE";
         };
         exposure-newline = {
           args.exposure = [ "/srv/first\nsecond" ];
-          message = "mkFormFamily: env values and host paths cannot contain a newline: exposure";
+          message = "mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: exposure \"/srv/first";
+        };
+        pifiles-key-newline = {
+          args.piFiles."first\nsecond" = ./flake.nix;
+          message = "mkFormFamily: env values, host paths and piFiles keys cannot contain a control character other than tab: piFiles \"first";
         };
         protect-dollar = {
           args.protect = [ "/srv/$x" ];
@@ -367,6 +376,8 @@
             }
           );
           apostrophe = family (sampleBase pkgs // { exposure = [ "${samplePaths.extra}/it's" ]; });
+          # A `~` inside a path, which the builder single-quotes: text, not the home.
+          tildeexposure = family (sampleBase pkgs // { exposure = [ "${samplePaths.extra}/backup~" ]; });
           # A value holding a backtick, a glob and a brace, which the builder
           # single-quotes.
           quotedspecials = family (sampleBase pkgs // { env.NOTE = "a`b{c,d}*?[e]"; });

@@ -58,6 +58,13 @@ push_edit() { # op layer from to — onto the case last declared
 }
 
 edit() { push_edit replace "$1" "$2" "$3"; }
+
+# The same edit to both launchers and the baseline, so the bind sets still agree
+# and only the rule the case is about can fire.
+edit_launchers() { # from to
+  local layer
+  for layer in launcher-read launcher-write baseline; do edit "$layer" "$1" "$2"; done
+}
 drop() { push_edit drop "$1" "" ""; }
 
 # The table's own last statement: an executed marker, not a comment. Sourcing a
