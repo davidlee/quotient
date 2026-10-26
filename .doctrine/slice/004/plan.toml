@@ -1,0 +1,251 @@
+# Implementation plan for SL-004 — the authored, durable phase plan.
+#
+# Single source of each phase's objective, criteria, verification and links.
+# Runtime status lives under .doctrine/state/ — never record progress here.
+# Ids (PHASE-NN, EN-/EX-/VT-/VA-/VH-n) are immutable: edits append, never renumber.
+# "sec-N" is a section of .doctrine/slice/004/design.md (locked, rev 72).
+schema  = "doctrine.plan.overview"
+version = 1
+slice   = "SL-004"
+
+[specs]
+primary       = []
+collaborators = []
+
+[requirements]
+targets      = []
+dependencies = []
+
+[[phase]]
+id        = "PHASE-01"
+name      = "Evidence foundations"
+objective = "evidence.ts gains everything a run on disk needs — result.json in the layout, RUN_NAME_GRAMMAR, layoutFor, appendAudit returning its ts and starting each record on a fresh line, writeResult (temp + rename), readResult (found / absent / unreadable), readAudit (records + torn flag), the five new audit kinds — and result.ts gains the lane-predecessor-failed reason. spawn.ts's observe contains a throwing record and RunControl gains onAudit. No server behaviour changes."
+entrance_criteria = [
+  { id = "EN-1", text = "Plan approved. Read sec-3 (The handle; Resolving a handle — the three readResult outcomes, torn lines) and sec-7 (`evidence.ts`, `spawn.ts` and `result.ts`); DEC-049, DEC-066." },
+  { id = "EN-2", text = "Baseline: `just gate` green on the commit this phase starts from; per-file lint error counts for the files this phase touches match the baseline in notes.md § Plan baselines." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: the new src/server/evidence.test.ts fails on the absent writeResult/readResult/readAudit/layoutFor/RUN_NAME_GRAMMAR before they exist. Record the red in the phase sheet." },
+  { id = "EX-2", text = "evidence.ts per sec-7: RUN_EVIDENCE_FILES and RunLayout gain `result`; RUN_NAME_GRAMMAR exported beside runName; layoutFor(runDir, run), with runLayout(runDir, callId) defined as layoutFor(runDir, runName(callId)); AuditKind gains admitted, refused, cancelled, dropped, lost." },
+  { id = "EX-3", text = "appendAudit returns the ts it wrote, or null on failure; when the file is non-empty and does not end in a newline it writes a newline before the record in the same write. Every existing caller that tested `true`/`false` tests `null` instead, with unchanged behaviour." },
+  { id = "EX-4", text = "writeResult writes pretty-printed JSON to `<dir>/.result.json.tmp`, reads its mtime, renames onto result.json and returns that time; on failure before the rename it removes the temp file, reports on stderr and returns null. readResult answers found only for a file that parses and passes validateAgentResult, absent only for ENOENT, unreadable otherwise. readAudit answers null when the file cannot be read, else { records, torn } skipping and reporting unparseable lines." },
+  { id = "EX-5", text = "result.ts: RESULT_REFUSAL_REASONS gains `lane-predecessor-failed`; REACHABILITY's text names the new producers (eof and cancelled settle queued runs without a process; refused is also a run settled at launch). result.test.ts's reason and reachability tables pass." },
+  { id = "EX-6", text = "spawn.ts: observe treats a record whose handling throws as malformed (counted, reported on stderr); RunControl gains optional onAudit(ts), called by runChild's audit wrapper for every record appended. runChild still calls removeRun in this phase (moved in PHASE-07)." },
+  { id = "EX-7", text = "`just gate` green. src/server/evidence.test.ts and src/server/evidence.ts lint clean (`npx eslint <file> --max-warnings 0`); spawn.ts, result.ts and their tests gain no lint errors over the baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "evidence.test.ts: appendAudit ts/null and fresh-line after a torn line; readAudit flags the torn line and returns the record after it; readResult's three outcomes, an invalid document unreadable; writeResult leaves no result.json or a whole one, cleans its temp file and returns null on failure; RUN_NAME_GRAMMAR accepts minted names and refuses `..`, `/`; layoutFor and runLayout agree.", test_file = "src/server/evidence.test.ts", keywords = ["appendAudit", "readAudit", "torn", "readResult", "'absent'", "'unreadable'", "writeResult", ".result.json.tmp", "RUN_NAME_GRAMMAR", "layoutFor"], waived = false },
+  { id = "VT-2", expects = "spawn.test.ts: a child printing the JSON line `null` and other non-object lines finishes and settles normally with the line counted malformed; onAudit receives the ts of each record appended.", test_file = "src/server/spawn.test.ts", keywords = ["onAudit", "malformed", "'null'"], waived = false },
+  { id = "VT-3", expects = "result.test.ts covers the new refusal reason.", test_file = "src/server/result.ts", keywords = ["lane-predecessor-failed"], waived = false },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-02"
+name      = "Run owner identity and liveness"
+objective = "session.ts's acquisition carries owner { pid, starttime, boot, pidns, host }, with boot id, pid-namespace id (kept only when this process's NSpid line has one field) and hostname read once at start-up and passed in; ownerLiveness(procDir, here, owner) applies sec-3's rule. fakeProc moves from session.test.ts into test-rig.ts so later suites share it. Session-lock liveness is unchanged (RSK-003)."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-01 exits hold. Read sec-3 (Start step 4; Resolving a handle — the ownerLiveness bullet and `lost` evidence) and sec-7 `admission.ts`'s session.ts paragraph; DEC-067, RSK-003." },
+  { id = "EN-2", text = "Host confirmation (plan constraint, slice notes § Further review passes): on this host, from Node, /proc/self/status has an NSpid line, /proc/sys/kernel/random/boot_id and the /proc/self/ns/pid link are readable, and NSpid has one field with the process's own /proc and more than one when /proc belongs to an ancestor namespace (`unshare --user --pid --fork` without --mount-proc). Re-run the probe recorded in notes.md § Plan baselines and record its output in the phase sheet; any difference stops the phase for /consult." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: session.test.ts cases for owner and ownerLiveness fail before the code exists. Record the red in the phase sheet." },
+  { id = "EX-2", text = "A pure start-up reader of the host identity (boot, pidns, host; each null when unreadable; pidns null unless NSpid has exactly one field, null when the line is missing) over procDir, and acquireSession's ok arm gains `owner` built from it plus the pid and starttime the lock already reads. No existing acquireSession caller changes behaviour." },
+  { id = "EX-3", text = "ownerLiveness(procDir, here, owner): same host, boot and non-null matching pidns → observeLiveness(pid, starttime); same host, different boot → stale; any other combination, or any identity component null on either side → unknown." },
+  { id = "EX-4", text = "test-rig.ts exports fakeProc(dir, { pid, starttime, boot?, pidns?, nspid? } | 'unreadable'): a readable table always carries this process's own stat line and a self/status whose NSpid has one field unless `nspid` stages several. session.test.ts uses it in place of its inline fixture, with its existing cases unchanged in outcome." },
+  { id = "EX-5", text = "`just gate` green; session.ts, session.test.ts and test-rig.ts gain no lint errors over the baseline, and every function added lints clean." },
+]
+verification = [
+  { id = "VT-1", expects = "session.test.ts: owner is this pid, its lock's starttime and the start-up identity (each null when unreadable; pidns null for a multi-field or missing NSpid); ownerLiveness over every row of sec-3's rule.", test_file = "src/server/session.test.ts", keywords = ["ownerLiveness", "owner", "fakeProc", "nspid", "boot"], waived = false },
+  { id = "VT-2", expects = "fakeProc is a shared helper.", test_file = "src/server/test-rig.ts", keywords = ["export function fakeProc", "nspid"], waived = false },
+  { id = "VA-1", expects = "EN-2's host probe output is recorded in the phase sheet and matches notes.md § Plan baselines." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-03"
+name      = "Extract callTool"
+objective = "Behaviour-preserving move: callTool's request reading moves to tools.ts, admission steps 1–8 and the ledger probe to admission.ts (admit over private authorise and checkLaunchable), the run tail to execute.ts (executeRun), and toolResult to documents.ts. server.ts's tools/call arm becomes readToolCall → admit → executeRun → release, with every current test passing unchanged. Satisfies IMP-004."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-02 exits hold. Read sec-7 (the move-don't-copy rule; `tools.ts`, `admission.ts`, `execute.ts`; the `server.ts` start-up-refused paragraph) and IMP-004. Read server.ts callTool (lines 257–490) and its reply arm in full before moving it." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Refactor under the existing net: server.test.ts, spawn.test.ts, gate.test.ts and childview.test.ts pass unmodified before and after; no test file is edited to make this phase pass except new admission.test.ts and execute imports." },
+  { id = "EX-2", text = "tools.ts holds PI_AGENT_TOOL, AgentRequest and readAgentRequest, moved from server.ts with no new arguments yet (lane, needs_success, key land in PHASE-08). server.ts re-exports nothing it moved; importers are updated." },
+  { id = "EX-3", text = "admission.ts exports Admitted, Refused, AdmissionContext and admit(request, context, callId) per sec-7; every refusal is appended to attempts.jsonl where it is decided, as today; admit releases the session on any refusal after it acquires it. authorise takes an explicit profile name, root, requested ceilings and requested tools, so PHASE-08's readmit reuses it." },
+  { id = "EX-4", text = "execute.ts exports ExecuteDeps and executeRun(admitted, layout, controller, onAudit, deps) holding callTool's tail from the gate onwards; it never throws (an exception becomes failedResult('error', …)) and does not release the session — server.ts releases it in a finally, as today. The layout is still allocated by the server in this phase. EMPTY_STATUS names today's `reduce([], {}).status`." },
+  { id = "EX-5", text = "documents.ts holds toolResult, moved from server.ts." },
+  { id = "EX-6", text = "admission.test.ts: admit refuses at each step with the reason callTool gave and releases the session on a refusal after step 7, driven through admit directly." },
+  { id = "EX-7", text = "`just gate` green. tools.ts, admission.ts, execute.ts, documents.ts and admission.test.ts lint clean (moved code is brought to zero errors as it moves); server.ts gains no lint errors over the baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "admission.test.ts: admit refuses at each of steps 1–8 as callTool did, and releases the session after a refusal following step 7.", test_file = "src/server/admission.test.ts", keywords = ["admit(", "release", "request-invalid", "session-busy"], waived = false },
+  { id = "VT-2", expects = "admit and its two private steps exist in admission.ts.", test_file = "src/server/admission.ts", keywords = ["export function admit", "function authorise", "function checkLaunchable"], waived = false },
+  { id = "VT-3", expects = "executeRun holds the tail.", test_file = "src/server/execute.ts", keywords = ["export function executeRun", "createGate", "runChild", "resultFor", "EMPTY_STATUS"], waived = false },
+  { id = "VA-1", expects = "The diff shows moves, not copies: no second implementation of any admission step, of readAgentRequest or of toolResult remains in server.ts (`git diff --stat` plus a grep of the moved function names, recorded in the phase sheet)." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-04"
+name      = "Run registry"
+objective = "runs.ts: createRegistry with publish (the admitted record and the publication line), placement, the launch guard, settle (the one commit: result.json, or a published lost record; release; state flip; hand-off; advance), advance (one loop, closed check, mark skipping, needs_success), keys, acks, implicit selection, cancel, closing and close — all proven with fakeLaunch and no processes. Nothing in server.ts uses it yet."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-03 exits hold. Read sec-3 whole, sec-4 whole, sec-6 (pi_agent_cancel steps 1–4; Client EOF), sec-7 `runs.ts`; DEC-049, DEC-050, DEC-053, DEC-060, DEC-064, DEC-065, DEC-066, DEC-070." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: runs.test.ts's Records and Publish cases fail before runs.ts exists. Record the red in the phase sheet." },
+  { id = "EX-2", text = "test-rig.ts gains fakeLaunch(): a Launch whose runs the test settles by hand with { result } or { refused }, rejects, or throws synchronously; its Admitted fixture's session.release is a spy recording, when called, whether result.json exists, whether a lost record is readable through readAudit, and the record's state." },
+  { id = "EX-3", text = "Publish, placement, launch guard, settle and advance as sec-7 specifies, including every row of the settlement table; every registry audit record passes through one private audit() adding policy_digest and session; the admitted record carries origin, lane, predecessor, needs_success, key and admitted.session.owner." },
+  { id = "EX-4", text = "advance is one loop with a pending flag for re-entrant calls; a cascade of 1000 queued needs_success runs completes with advance's depth counter never above 1." },
+  { id = "EX-5", text = "Every sec-9 runs.test.ts case passes: Records, Publish, Settle (including result.json unwritable → lost with the release spy seeing the lost record; both writes unwritable → this server lost, waiters wake, ackable), Lanes, Keys and acks, Cancel, Close." },
+  { id = "EX-6", text = "Settle's lost-path assertion that `viewFromDisk` answers lost/foreign is deferred to PHASE-05's views.test.ts (views.ts does not exist yet); this phase asserts the published lost record and the in-memory state." },
+  { id = "EX-7", text = "`just gate` green; runs.ts and runs.test.ts lint clean; test-rig.ts gains no lint errors over the baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "runs.test.ts covers sec-9's Records, Publish, Settle, Lanes, Keys and acks, Cancel and Close groups with fakeLaunch.", test_file = "src/server/runs.test.ts", keywords = ["fakeLaunch", "lane-predecessor-failed", "needs_success", "'lost'", "closing()", "close()", "implicit(", "ack(", "cancel(", "depth"], waived = false },
+  { id = "VT-2", expects = "The registry's one commit and one loop.", test_file = "src/server/runs.ts", keywords = ["export function createRegistry", "function settle", "function advance", "writeResult", "'admitted'", "'lost'", "'dropped'", "'cancelled'", "'refused'"], waived = false },
+  { id = "VT-3", expects = "fakeLaunch is a shared helper.", test_file = "src/server/test-rig.ts", keywords = ["export function fakeLaunch"], waived = false },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-05"
+name      = "Views and run documents"
+objective = "views.ts answers \"what is run X\" from a live record or from disk (sec-3's flowchart exactly), and documents.ts builds the run document, task status, pi-run-handle/1 and pi-agent-ack/1, with validators for handle, wait and ack and envelopeResult. Pure over fixture run dirs, fakeProc and fake records."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-04 exits hold. Read sec-2 (Runs as tasks — status table; isError; Run documents; pi-run-handle/1; pi-agent-wait/1; pi-agent-ack/1), sec-3 (Resolving a handle), sec-7 `views.ts` and `documents.ts`; DEC-058, DEC-066, DEC-067, DEC-068." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: views.test.ts and documents.test.ts fail before the modules exist. Record the reds in the phase sheet." },
+  { id = "EX-2", text = "views.ts: RunView, viewOf, viewFromDisk and resolveRun per sec-7, including the second readResult after stale, the lost-record precedence over an unreadable file, foreign for an unreadable audit or a torn line with no admitted record, createdAt from the first audit record (spawn for a pre-release dir) or the dir mtime, and updatedAt as the latest of last audit ts, result.json mtime and createdAt." },
+  { id = "EX-3", text = "documents.ts: POLL_INTERVAL_MS, taskStatus (sec-2's status table — the only copy), runDocument, handleDocument, ackDocument, envelopeResult (isError only when refused), validateHandle, validateWait, validateAck in validateAgentResult's style. The wait document's builder lands in PHASE-06 (waitEnvelope); validateWait is written here against sec-2's example." },
+  { id = "EX-4", text = "Every sec-9 views.test.ts case passes, plus the case deferred by PHASE-04/EX-6: after a settle whose result.json was unwritable, viewFromDisk with the owner staged alive answers lost; with the lost record also unwritable, foreign." },
+  { id = "EX-5", text = "documents.test.ts: each validator accepts every document the suites emit so far and rejects each malformed variant, including a wait document without `unknown` or `unreadable`; taskStatus maps every view state." },
+  { id = "EX-6", text = "`just gate` green; views.ts, documents.ts and their tests lint clean." },
+]
+verification = [
+  { id = "VT-1", expects = "views.test.ts covers every disk resolution in sec-9, including namespace, boot and host cases and the unreadable transitions.", test_file = "src/server/views.test.ts", keywords = ["viewFromDisk", "resolveRun", "'foreign'", "'lost'", "'unreadable'", "torn", "nspid", "boot"], waived = false },
+  { id = "VT-2", expects = "documents.test.ts covers validators and taskStatus.", test_file = "src/server/documents.test.ts", keywords = ["validateHandle", "validateWait", "validateAck", "taskStatus", "unreadable", "unknown"], waived = false },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-06"
+name      = "Waiting"
+objective = "waiting.ts: resolveTargets (sec-5's selection table, lane snapshots, owned runs only by name), awaitTargets (settled promises, timer, signal, polling only foreign and unreadable targets) and waitEnvelope (re-resolve at answer time, timed_out from those states, unknown and unreadable lists, the byte budget with the first settled result whole)."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-05 exits hold. Read sec-5 whole and sec-7 `waiting.ts`; DEC-062, DEC-069, DEC-068, DEC-060." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: waiting.test.ts fails before waiting.ts exists. Record the red in the phase sheet." },
+  { id = "EX-2", text = "WAIT_TIMEOUT_DEFAULT_S = 45, WAIT_TIMEOUT_MAX_S = 900, WAIT_BUDGET_DEFAULT = 65536 and WAIT_BUDGET_MAX = 1048576 are named constants; the timeout cap from the policy's maxima.wall_clock_s is a pure function of the read policy." },
+  { id = "EX-3", text = "Every sec-9 waiting.test.ts case passes, driven by a real registry over fakeLaunch and fixture dirs, with pollMs of a few milliseconds; every envelope passes validateWait." },
+  { id = "EX-4", text = "`just gate` green; waiting.ts and waiting.test.ts lint clean." },
+]
+verification = [
+  { id = "VT-1", expects = "waiting.test.ts covers selection, until, timeouts and timed_out, foreign and unreadable polling, the by-name loop terminating, and the budget.", test_file = "src/server/waiting.test.ts", keywords = ["resolveTargets", "awaitTargets", "waitEnvelope", "timed_out", "truncated", "budget", "'any'", "unreadable", "unknown"], waived = false },
+  { id = "VT-2", expects = "The wait constants are named.", test_file = "src/server/waiting.ts", keywords = ["WAIT_TIMEOUT_DEFAULT_S", "WAIT_TIMEOUT_MAX_S", "WAIT_BUDGET_DEFAULT", "WAIT_BUDGET_MAX"], waived = false },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-07"
+name      = "Blocking pi_agent through the registry"
+objective = "Legacy blocking pi_agent becomes start plus wait in-process: tools/call admits, registry.start publishes (admitted record first, result.json at commit) and the call answers the commit's document. runChild no longer discards a published directory. notifications/cancelled silences its request's reply; EOF sets closed and registry.closing() at the trigger and awaits registry.close(). The regression net holds, with sec-9's four deliberate changes rewritten — except tools/list, which changes in PHASE-08."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-06 exits hold. Read sec-3 (Start; the publication line; Launch and the run task), sec-6 (notifications/cancelled; Client EOF), sec-7 `server.ts` and `execute.ts`, sec-9 The regression net; DEC-053, DEC-064, DEC-066." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Context gains registry, procDir and admission (AdmissionContext); ServeOptions gains procDir (default /proc) and pollMs. launch is executeRun for a run that was never queued (readmit lands in PHASE-08)." },
+  { id = "EX-2", text = "pi_agent's handler is admitAndStart(request, 'blocking', call) answering the document promise; a call abort with reason `cancelled` becomes registry.cancel([run]); `eof` is left to registry.close(). The layout is minted at publish only; runChild no longer calls removeRun, and a failed spawn record settles an audit-failed refusal into result.json and appends audit-failed to attempts.jsonl." },
+  { id = "EX-3", text = "Reply gate: InFlightCall gains silenced, set by abortNamed before it aborts; the answer and catch sites become one answer(call, result) checking !closed && !silenced. The catch arm's refusal no longer claims nothing ran after the publication line." },
+  { id = "EX-4", text = "EOF: closed = true and registry.closing() from the signal's abort listener and the input's end and error events; after the loop unwinds, abort in-flight calls, await registry.close(), await every call's done." },
+  { id = "EX-5", text = "Regression net per sec-9: every server.test.ts and serve-driven spawn.test.ts case keeps its outcome. Rewritten, not deleted: the cancellation cases assert no reply and result.json `cancelled`; spawn.test.ts:638-672 exercises the publish failure (audit-failed in attempts.jsonl, no directory) and a new case the spawn-record failure (directory kept, result.json refusal, detail no longer says discarded); the first-record and record-order cases (server.test.ts:198-201, 351-352; spawn.test.ts:280, 710-713, 814-817, 930-933, 986-989; gate.test.ts:551) expect `admitted` first; childview.test.ts:362 expects six evidence files. Each rewritten case is listed in the phase sheet with its before/after assertion." },
+  { id = "EX-6", text = "test-rig.ts gains resultJson(runDir, run) and auditKinds(runDir, run). New server.test.ts cases: a reply already written before a notification stands; a handler that throws after its call was silenced writes no reply; EOF writes no replies, every run has a result.json, no child outlives serve." },
+  { id = "EX-7", text = "`just gate` green; server.ts, spawn.ts and the touched tests gain no lint errors over the baseline; new functions lint clean." },
+]
+verification = [
+  { id = "VT-1", expects = "server.test.ts asserts the silenced reply gate and EOF settling every run into result.json.", test_file = "src/server/server.test.ts", keywords = ["resultJson", "auditKinds", "'admitted'", "notifications/cancelled", "silenced"], waived = false },
+  { id = "VT-2", expects = "spawn.test.ts asserts the kept directory on a failed spawn record and the publish failure.", test_file = "src/server/spawn.test.ts", keywords = ["auditFailedBeforeSpawn", "audit-failed", "result.json"], waived = false },
+  { id = "VT-3", expects = "server.ts has one reply gate and the registry on its context.", test_file = "src/server/server.ts", keywords = ["silenced", "registry.closing()", "registry.close()", "admitAndStart"], waived = false },
+  { id = "VA-1", expects = "removeRun's only caller is the publish failure in runs.ts (grep recorded in the phase sheet)." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-08"
+name      = "Start, wait, ack, cancel and lanes over the server"
+objective = "tools/list lists five tools with sec-2's annotations and their help sections as descriptions; readers gain lane, needs_success, key and the wait/ids grammars plus argsDigest; the start, wait, ack and cancel handlers land; readmit (admission.ts) gates every queued launch. Proven end to end with a sleeper form: overlap, lane order, cancel races, re-admission under an edited policy."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-07 exits hold. Read sec-2 (The tool table; New argument grammar; isError), sec-4 (Re-admission at launch), sec-5, sec-6 (pi_agent_cancel; the notifications/cancelled table), sec-7 `tools.ts`, `admission.ts` (readmit) and `server.ts` HANDLERS; sec-8 Help (tool sections only); DEC-048, DEC-050, DEC-054." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: tools.test.ts's five-tool case and a server.test.ts start-then-wait case fail before the tools exist. Record the reds in the phase sheet." },
+  { id = "EX-2", text = "tools.ts: TOOLS with input schemas and annotations exactly per sec-2; readAgentRequest(args, { key }) gains lane, needs_success (true only with lane) and key; readWaitRequest; readRunIds; argsDigest over the normalised request (cwd resolved against the launch dir, absent needs_success as false, tools sorted and deduplicated, keys sorted, key excluded)." },
+  { id = "EX-3", text = "help/tool-start.md, tool-wait.md, tool-ack.md, tool-cancel.md exist, are file sections in HELP_SECTIONS and SOURCES, and are each tool's description; a start-up-refused server's description names only the refusing tools. Text is accurate to the behaviour shipped here and cites no doctrine id; PHASE-10 completes the prose." },
+  { id = "EX-4", text = "admission.ts gains readmit over authorise per sec-4's table and sec-7 (root must still canonicalise to itself, per-unit min ceilings, transcript budget narrowed only, session not re-acquired, checkLaunchable re-run); launch = readmit when queued, then executeRun." },
+  { id = "EX-5", text = "Handlers per sec-7's HANDLERS table: startRun (key lookup → admitAndStart('start') → handle), waitRuns, ackRuns, cancelRuns; refusals answer pi-agent-result/2 with isError; envelopes isError only when refused. Values are written before the next input line is read." },
+  { id = "EX-6", text = "test-rig.ts gains startLine, waitLine, ackLine, cancelLine and a sleeper form (marker file, sleeps until a release file appears, settles). The tools/list regression case (server.test.ts:117) becomes the five-tool case." },
+  { id = "EX-7", text = "Tests pass: tools.test.ts (sec-9 list); admission.test.ts readmit cases (sec-9 list); server.test.ts tools and concurrency (sec-9 list) plus: two write-profile runs under different roots overlap; three laned starts run one at a time in start order while an unlaned run overlaps them; cancelling a queued run removes it without launching and the next starts; start's refusals match pi_agent's; a cancelled wait writes no reply and leaves its runs running. Every emitted handle, wait and ack document passes its validator." },
+  { id = "EX-8", text = "`just gate` green; tools.ts, admission.ts and new tests lint clean; server.ts, help.ts and test-rig.ts gain no lint errors over the baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "tools.test.ts: five tools, annotations, only wait readOnlyHint, every reader refusal, argsDigest normalisation.", test_file = "src/server/tools.test.ts", keywords = ["readOnlyHint", "pi_agent_wait", "readWaitRequest", "readRunIds", "argsDigest", "needs_success", "key"], waived = false },
+  { id = "VT-2", expects = "admission.test.ts covers readmit's refusals and narrowing.", test_file = "src/server/admission.test.ts", keywords = ["readmit(", "root-missing", "profile-capability-mismatch", "wrapper-unavailable"], waived = false },
+  { id = "VT-3", expects = "server.test.ts drives overlap, lanes, cancel and re-admission through the real server with a sleeper form.", test_file = "src/server/server.test.ts", keywords = ["startLine", "waitLine", "cancelLine", "ackLine", "sleeper", "lane"], waived = false },
+  { id = "VT-4", expects = "The four tool help sections are registered.", test_file = "src/help/help.ts", keywords = ["tool-start", "tool-wait", "tool-ack", "tool-cancel"], waived = false },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-09"
+name      = "Protocol eras and tasks"
+objective = "protocol.ts classifies each request's era from its own _meta, serves server/discover, decorates modern results, and serves tasks/get, tasks/cancel and tasks/update over TaskDeps; server.ts routes by era and method; pi_agent answers a CreateTaskResult when the request is modern and declares the tasks extension. Legacy is served as before."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-08 exits hold. Read sec-2 (Eras; Methods by era; server/discover; Runs as tasks; Methods), sec-6 `tasks/cancel` and the task row of the notifications/cancelled table, sec-7 `protocol.ts` and the routing bullet; DEC-055..059, DEC-061, DEC-063; EVD-004." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "First red: protocol.test.ts's classifyEra table fails before protocol.ts exists. Record the red in the phase sheet." },
+  { id = "EX-2", text = "protocol.ts per sec-7: MODERN_VERSION, LEGACY_VERSION (today's PROTOCOL_VERSION, renamed and moved), TASKS_EXTENSION, classifyEra (checks in sec-2's order), declaresTasks, modernResult, discoverResult, LIST_CACHE, tasksGet, tasksCancel, tasksUpdate; it imports neither runs.ts nor server.ts." },
+  { id = "EX-3", text = "server.ts routes every request with an id through classifyEra first, then by sec-2's Methods-by-era table; modern initialize/ping are -32601; modern results pass through modernResult; tools/list carries LIST_CACHE when modern; TaskDeps wires resolveRun and a non-awaited registry.cancel with a catch that reports on diagnostics." },
+  { id = "EX-4", text = "pi_agent with origin 'task' publishes, then writes the CreateTaskResult (createdAt = the admitted record's ts) before the next input line is read; an admission refusal answers the complete pi-agent-result/2 refusal." },
+  { id = "EX-5", text = "test-rig.ts gains modernLine(id, method, params, { tasks }). protocol.test.ts and the server.test.ts protocol and tasks groups pass (sec-9 lists), including a CreateTaskResult sent in one write with a notifications/cancelled for it still answering and leaving the run running." },
+  { id = "EX-6", text = "`just gate` green; protocol.ts and protocol.test.ts lint clean; server.ts gains no lint errors over the baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "protocol.test.ts: classifyEra's whole table, declaresTasks, discoverResult, tasksGet per status row and -32603 cases, tasksCancel and tasksUpdate empty answers, -32602 for bad ids.", test_file = "src/server/protocol.test.ts", keywords = ["classifyEra", "-32022", "-32602", "-32603", "declaresTasks", "discoverResult", "tasksGet", "tasksCancel", "tasksUpdate"], waived = false },
+  { id = "VT-2", expects = "server.test.ts drives both eras and the task lifecycle.", test_file = "src/server/server.test.ts", keywords = ["modernLine", "server/discover", "tasks/get", "tasks/cancel", "resultType", "cacheScope", "-32601"], waived = false },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-10"
+name      = "Documentation, contracts and the client probe"
+objective = "Shipped text matches the behaviour: docs/design.md rationale, the three new contracts and pi-agent-result-2.md's changes, help sections (handle, wait, ack as contract sections; agent, tool, orchestrate, setup, clients), and a full README pass, per sec-8. The IMP-011 probe under Claude Code shows waits overlapping with write profiles."
+entrance_criteria = [
+  { id = "EN-1", text = "PHASE-09 exits hold. Read sec-8 whole and sec-9 help/drift cases; DEC-045; EVD-002, EVD-003; IMP-011's probe." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "docs/contract/pi-run-handle-1.md, pi-agent-wait-1.md and pi-agent-ack-1.md exist per sec-8, and pi-agent-result-2.md carries every sec-8 change; HELP_SECTIONS gains handle, wait and ack as contract sections sourced from them." },
+  { id = "EX-2", text = "docs/design.md, help/agent.md, help/tool.md, help/orchestrate.md, help/setup.md (including the Overriding help list), the rendered clients section, the four tool sections and README.md each say what sec-8 lists for them; no client limit is stated beyond EVD-002/EVD-003." },
+  { id = "EX-3", text = "help.test.ts: each tool's description is its help section; the new sections resolve; the file sections can be overridden and the contract sections cannot. drift.test.ts passes over all new shipped text." },
+  { id = "EX-4", text = "`just gate` green; help.ts and help.test.ts gain no lint errors over the baseline." },
+]
+verification = [
+  { id = "VT-1", expects = "help.test.ts covers the new sections and descriptions.", test_file = "src/help/help.test.ts", keywords = ["tool-start", "tool-wait", "tool-ack", "tool-cancel", "'handle'", "'wait'", "'ack'"], waived = false },
+  { id = "VT-2", expects = "The contracts are help sections.", test_file = "src/help/help.ts", keywords = ["pi-run-handle-1.md", "pi-agent-wait-1.md", "pi-agent-ack-1.md"], waived = false },
+  { id = "VA-1", expects = "Agent read of each sec-8 bullet against the shipped file it names; mismatches fixed before exit, and the checklist recorded in the phase sheet." },
+  { id = "VH-1", expects = "The user runs the IMP-011 probe under Claude Code against the built server: two pi_agent_start calls with write profiles under different roots, then one pi_agent_wait over both; the evidence (start timestamps, overlap) is recorded in the phase sheet and on IMP-011." },
+]
+specs        = []
+requirements = []

@@ -41,6 +41,27 @@ fresh-as-of: 2026-10-26 · lifecycle plan · design locked (rev 72) · uncommitt
 - DEC-045, DEC-048..050, DEC-053..070 — the governing decisions (sec-1 table)
 - ASM-002 — invalidated; kept for the record
 
+## Plan baselines (2026-10-26, at eb622b6)
+
+Lint (`npx eslint src`), errors per file touched by this slice; every other
+touched file is at zero. A phase may not end above these.
+
+```
+server.ts 13 · spawn.ts 21 · session.ts 17 · result.ts 10 · help/help.ts 11
+test-rig.ts 27 · server.test.ts 32 · spawn.test.ts 38 · session.test.ts 36
+result.test.ts 16 · gate.test.ts 56 · childview.test.ts 16 · evidence.ts 0
+```
+
+Host probe (PHASE-02 EN-2), this host, Node 22:
+
+```
+/proc/self/status        NSpid: <pid>           one field (host /proc)
+/proc/sys/kernel/random/boot_id   readable
+/proc/self/ns/pid        pid:[4026531836]       readable via readlink
+unshare --user --pid --fork --mount-proc    NSpid: 2            one field (own /proc)
+unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → pidns null
+```
+
 ## Reopened scope: tasks binding (2026-10-26)
 
 Superseded 2026-10-26: answers 1–8 below were minted as inq-10..17 →
