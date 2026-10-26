@@ -409,6 +409,14 @@ export function validateAgentResult(doc: unknown): Validation {
   return { ok: true };
 }
 
+/**
+ * VALUE is a `pi-agent-result/2` document: `validateAgentResult` is the one
+ * conformance check, so a reader and a writer cannot disagree about the shape.
+ */
+export function isAgentResult(value: unknown): value is AgentResult {
+  return validateAgentResult(value).ok;
+}
+
 // ── Reachability (EX-9) ────────────────────────────────────────────────────
 
 /** Whether this build produces the member, and by which path — or why it does not. */

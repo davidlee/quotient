@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isRecord } from '../json.ts';
+import { EMPTY_STATUS } from '../reduce/reduce.ts';
 import {
   POLL_INTERVAL_MS,
   ackDocument,
@@ -24,9 +25,9 @@ import {
   type TaskStatus,
 } from './documents.ts';
 import { layoutFor, runName } from './evidence.ts';
-import { refusedResult, type AgentResult, type Validation } from './result.ts';
+import { failedResult, refusedResult, type AgentResult, type Validation } from './result.ts';
 import type { AckEntry } from './runs.ts';
-import { completedResult } from './test-rig.ts';
+import { ARTIFACTS, completedResult } from './test-rig.ts';
 import type { RunView } from './views.ts';
 
 /** One temp root for every view's layout: a layout is named here, never read. */
@@ -346,6 +347,31 @@ test('validateWait rejects a malformed wait document', () => {
     'a result that is not pi-agent-result/2',
   );
   assertRejects(validateWait, runsOf([withField(settledEntry, 'taskId', 'nope')]), 'an entry failing the run-document rules');
+});
+
+test('validateWait holds a settled entry to its own result\'s status', () => {
+  const completedView = view({ state: 'settled', outcome: COMPLETED });
+  const answer = completedResult(completedView.layout, 'sess-1');
+  const cancelledView = view({ state: 'settled', outcome: { state: 'cancelled', causes: ['cancelled', 'eof'] } });
+  const cancellation = failedResult('cancelled', ['cancelled', 'eof'], 'sess-1', EMPTY_STATUS, ARTIFACTS);
+  const agreeing = waitEntry(cancelledView, { statusOnly: false, result: cancellation });
+
+  assertAccepts(validateWait, waitDocument([agreeing]), 'a cancelled entry carrying its cancellation');
+  assertRejects(
+    validateWait,
+    waitDocument([withField(waitEntry(completedView, { statusOnly: false, result: answer }), 'status', 'cancelled')]),
+    'a completed result reported cancelled',
+  );
+  assertRejects(
+    validateWait,
+    waitDocument([waitEntry(completedView, { statusOnly: false, result: cancellation })]),
+    'a cancellation reported completed',
+  );
+  assertRejects(
+    validateWait,
+    waitDocument([withField(agreeing, 'statusMessage', 'cancelled')]),
+    'a cancellation whose message is not its causes',
+  );
 });
 
 // ── Ack documents: sec-2's pi-agent-ack/1 ──────────────────────────────────

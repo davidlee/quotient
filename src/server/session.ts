@@ -235,6 +235,34 @@ export type HostIdentity = { boot: string | null; pidns: string | null; timens: 
 /** A run's owning server: the session lock's pid and start time, plus where they mean something. */
 export type RunOwner = { pid: number; starttime: string } & HostIdentity;
 
+/** VALUE is a pid a process table can hold: a positive integer. */
+const isPid = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+/** VALUE is a kernel start time as `/proc/<pid>/stat` field 22 spells it: decimal digits. */
+const isStartTime = (value: unknown): value is string => typeof value === 'string' && /^\d+$/.test(value);
+
+/** An identity component as recorded: a non-empty string, or null for anything else,
+ *  which `ownerLiveness` can only read as `unknown`. */
+const componentOf = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
+
+/**
+ * The owner an `admitted` record names, or null when it names none a liveness check
+ * can judge (design sec-3). Written by another server, it is untrusted JSON: a pid
+ * or start time that is not one must never reach `observeLiveness`, where it would
+ * read as a dead process.
+ */
+export function parseRunOwner(value: unknown): RunOwner | null {
+  if (!isRecord(value) || !isPid(value.pid) || !isStartTime(value.starttime)) {return null;}
+  return {
+    pid: value.pid,
+    starttime: value.starttime,
+    boot: componentOf(value.boot),
+    pidns: componentOf(value.pidns),
+    timens: componentOf(value.timens),
+    host: componentOf(value.host),
+  };
+}
+
 /** What one read says: its value, or null when the read throws. */
 function readOrNull<T>(read: () => T): T | null {
   try {
@@ -347,10 +375,10 @@ function readOwnership(path: string): OwnershipRead {
   if (!read.ok) {return read;}
   const pid = read.value.pid;
   const starttime = read.value.starttime;
-  if (typeof pid !== 'number' || !Number.isInteger(pid)) {
+  if (!isPid(pid)) {
     return { ok: false, detail: `${path} carries no integer pid`, missing: false };
   }
-  if (typeof starttime !== 'string' || !/^\d+$/.test(starttime)) {
+  if (!isStartTime(starttime)) {
     return { ok: false, detail: `${path} carries no kernel start time`, missing: false };
   }
   return { ok: true, record: read.value as OwnershipRecord, value: read.value };

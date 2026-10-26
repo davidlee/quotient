@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { isRecord } from '../json.ts';
 import { absent } from './paths.ts';
-import { validateAgentResult, type AgentResult } from './result.ts';
+import { isAgentResult, type AgentResult } from './result.ts';
 
 /** The JSON-RPC id a call carried, or null when the call had none. */
 export type CallId = string | number | null;
@@ -349,14 +349,6 @@ export function writeResult(layout: RunLayout, document: AgentResult): string | 
     process.stderr.write(`quotient: could not write ${layout.result}: ${message}\n`);
     return null;
   }
-}
-
-/**
- * VALUE is a `pi-agent-result/2` document: `validateAgentResult` is the one
- * conformance check, so a reader and a writer cannot disagree about the shape.
- */
-function isAgentResult(value: unknown): value is AgentResult {
-  return validateAgentResult(value).ok;
 }
 
 /**

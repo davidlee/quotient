@@ -662,14 +662,24 @@ describe('On disk', () => {
     assert.equal(view.session, null);
   });
 
-  it('an owner record that is not a RunOwner reads foreign, never lost', (t) => {
+  it('an owner record that cannot be judged reads foreign, never lost', (t) => {
     const dir = workspace(t);
-    const run = runIn(dir, { owner: null, records: [] });
-    // Rewritten by hand: an owner with a pid but no start time cannot be judged.
-    writeFileSync(run.layout.audit, `${JSON.stringify({ ...admittedRecord(null, {}, SESSION), ts: run.stamps[0], owner: { pid: OWNER.pid } })}\n`);
-    const procDir = fakeProc(dir, GONE);
-
-    assert.equal(viewIn(viewFromDisk(dir, run.run, procDir, HERE), 'foreign').foreignPid, OWNER.pid);
+    const procDir = fakeProc(dir, ALIVE);
+    // Each owner names the live pid's table entry, or none at all: read as a process,
+    // any of them would be judged stale — so each must stay unknowable.
+    const owners: Record<string, unknown>[] = [
+      { pid: OWNER.pid },
+      { ...OWNER, pid: -1 },
+      { ...OWNER, pid: 4242.5 },
+      { ...OWNER, starttime: 'garbage' },
+      { ...OWNER, boot: '' },
+    ];
+    for (const owner of owners) {
+      const run = runIn(dir, { owner: null });
+      writeFileSync(run.layout.audit, `${JSON.stringify({ ...admittedRecord(null, {}, SESSION), ts: run.stamps[0], owner })}\n`);
+      const view = viewIn(viewFromDisk(dir, run.run, procDir, HERE), 'foreign');
+      assert.ok(view.foreignPid === null || view.foreignPid === OWNER.pid, JSON.stringify(owner));
+    }
   });
 
   it('createdAt is the first audit record and updatedAt the last, with no result', (t) => {

@@ -8,7 +8,6 @@
 // positive evidence that no one can still write it a result. Nothing here throws:
 // every absent directory, unreadable file and torn audit is a described answer.
 import { statSync } from 'node:fs';
-import { isRecord } from '../json.ts';
 import {
   layoutFor,
   readAudit,
@@ -19,7 +18,7 @@ import {
 } from './evidence.ts';
 import type { AgentResult, ResultState, Termination } from './result.ts';
 import type { Registry, RunRecord } from './runs.ts';
-import { ownerLiveness, type HostIdentity, type RunOwner } from './session.ts';
+import { ownerLiveness, parseRunOwner, type HostIdentity, type RunOwner } from './session.ts';
 
 /** A run as a reader sees it: `settled` and `lost` are terminal, `foreign` is not. */
 export type ViewState = 'queued' | 'running' | 'foreign' | 'settled' | 'lost';
@@ -246,14 +245,12 @@ function ownerResolution(read: DiskRead): Resolution {
   if (admitted === null) {
     return withoutResult(read, torn ? 'foreign' : 'lost', null);
   }
-  const named = ownerOf(admitted);
-  if (named.kind === 'absent') {
+  if (admitted.owner === undefined || admitted.owner === null) {
     return withoutResult(read, 'lost', null);
   }
-  if (named.kind === 'invalid') {
-    return withoutResult(read, 'foreign', named.pid);
-  }
-  return livenessResolution(read, named.owner);
+  // An owner that does not parse is one this reader cannot judge — never a dead one.
+  const owner = parseRunOwner(admitted.owner);
+  return owner === null ? withoutResult(read, 'foreign', null) : livenessResolution(read, owner);
 }
 
 /** The owner's liveness decides (design sec-3): a live or unknowable owner reads
@@ -268,44 +265,6 @@ function livenessResolution(read: DiskRead, owner: RunOwner): Resolution {
     return settledAt(read, again);
   }
   return again === 'unreadable' ? 'unreadable' : withoutResult(read, 'lost', null);
-}
-
-/** What an `admitted` record says about its owner: none named, one named that is not
- *  a `RunOwner`, or the owner it recorded. */
-type OwnerField = { kind: 'absent' } | { kind: 'invalid'; pid: number | null } | { kind: 'owner'; owner: RunOwner };
-
-/** The owner an `admitted` record names, validated structurally: written by another
- *  server, it is untrusted JSON, and an owner that does not parse is an owner this
- *  reader cannot judge — never a dead one (design sec-3). */
-function ownerOf(record: AuditRecord): OwnerField {
-  const value = record.owner;
-  if (value === undefined || value === null) {
-    return { kind: 'absent' };
-  }
-  const owner = asOwner(value);
-  return owner === null ? { kind: 'invalid', pid: pidOf(value) } : { kind: 'owner', owner };
-}
-
-/** VALUE is a `RunOwner`. A missing identity component counts as null, which
- *  `ownerLiveness` reads as `unknown`. */
-function asOwner(value: unknown): RunOwner | null {
-  if (!isRecord(value) || typeof value.pid !== 'number' || typeof value.starttime !== 'string') {
-    return null;
-  }
-  return {
-    pid: value.pid,
-    starttime: value.starttime,
-    boot: textOf(value.boot),
-    pidns: textOf(value.pidns),
-    timens: textOf(value.timens),
-    host: textOf(value.host),
-  };
-}
-
-/** The pid an unparsable owner still names, or null: a foreign run names the pid it
- *  was told, when that much of the record is a number. */
-function pidOf(value: unknown): number | null {
-  return isRecord(value) && typeof value.pid === 'number' ? value.pid : null;
 }
 
 /**

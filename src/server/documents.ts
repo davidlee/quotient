@@ -9,7 +9,7 @@
 // `validateAgentResult`'s style: an early return naming the defect it found.
 import { isRecord } from '../json.ts';
 import { RUN_NAME_GRAMMAR } from './evidence.ts';
-import { validateAgentResult, type AgentResult, type Validation } from './result.ts';
+import { isAgentResult, validateAgentResult, type AgentResult, type Validation } from './result.ts';
 import type { AckEntry } from './runs.ts';
 import type { RunView, ViewState } from './views.ts';
 
@@ -100,14 +100,8 @@ export function envelopeResult(document: object, refused: boolean): ToolResult {
 /** Every ViewState, in sec-2's table order. */
 const VIEW_STATES: readonly ViewState[] = ['queued', 'running', 'foreign', 'settled', 'lost'];
 
-/** The Task status each quotient state may report (design sec-2's table). */
-const STATUSES_OF: Record<ViewState, readonly TaskStatus[]> = {
-  queued: ['working'],
-  running: ['working'],
-  foreign: ['working'],
-  settled: ['completed', 'cancelled'],
-  lost: ['failed'],
-};
+/** The two outcomes a settled run's status can come from: a cancellation, or not. */
+const SETTLED_OUTCOMES: RunView['outcome'][] = [null, { state: 'cancelled', causes: ['cancelled'] }];
 
 /**
  * Sec-2's status table, the only copy: a quotient state collapsed to the Task status
@@ -116,17 +110,36 @@ const STATUSES_OF: Record<ViewState, readonly TaskStatus[]> = {
  * terminal status stays what the committed outcome says it is.
  */
 export function taskStatus(view: RunView): TaskStatusRow {
+  return { status: statusOf(view.state, view.outcome), statusMessage: messageOf(view) };
+}
+
+/** The status column: what STATE reports, a settled run's decided by its outcome. */
+function statusOf(state: ViewState, outcome: RunView['outcome']): TaskStatus {
+  switch (state) {
+    case 'settled':
+      return outcome?.state === 'cancelled' ? 'cancelled' : 'completed';
+    case 'lost':
+      return 'failed';
+    case 'queued':
+    case 'running':
+    case 'foreign':
+      return 'working';
+  }
+}
+
+/** The message column. */
+function messageOf(view: RunView): string {
   switch (view.state) {
     case 'queued':
-      return { status: 'working', statusMessage: queuedMessage(view) };
+      return queuedMessage(view);
     case 'running':
-      return { status: 'working', statusMessage: view.cancelled ? 'cancelling' : 'running' };
+      return view.cancelled ? 'cancelling' : 'running';
     case 'foreign':
-      return { status: 'working', statusMessage: foreignMessage(view.foreignPid) };
+      return foreignMessage(view.foreignPid);
     case 'settled':
-      return settledStatus(view.outcome);
+      return settledMessage(view.outcome);
     case 'lost':
-      return { status: 'failed', statusMessage: `lost: inspect ${view.layout.dir}` };
+      return `lost: inspect ${view.layout.dir}`;
   }
 }
 
@@ -149,16 +162,12 @@ function foreignMessage(pid: number | null): string {
     : `owned by another quotient server (pid ${String(pid)})`;
 }
 
-/** A settled run's status: a cancellation reports the result's causes, everything
- *  else is a completed task whose message is the result's state. */
-function settledStatus(outcome: RunView['outcome']): TaskStatusRow {
+/** A settled run's message: a cancellation's causes, else the result's state. */
+function settledMessage(outcome: RunView['outcome']): string {
   if (outcome === null) {
-    return { status: 'completed', statusMessage: 'settled' };
+    return 'settled';
   }
-  if (outcome.state === 'cancelled') {
-    return { status: 'cancelled', statusMessage: outcome.causes.join(', ') };
-  }
-  return { status: 'completed', statusMessage: outcome.state };
+  return outcome.state === 'cancelled' ? outcome.causes.join(', ') : outcome.state;
 }
 
 /** One run's document (design sec-2): the Task fields and quotient's extras, exactly. */
@@ -294,10 +303,16 @@ function identityFault(doc: Record<string, unknown>): string | null {
   if (!isMember(VIEW_STATES, doc.state)) {
     return `state is not a quotient state: ${String(doc.state)}`;
   }
-  if (!isMember(STATUSES_OF[doc.state], doc.status)) {
+  if (!isMember(statusesOf(doc.state), doc.status)) {
     return `a ${doc.state} run does not report status ${String(doc.status)}`;
   }
   return null;
+}
+
+/** The statuses STATE may report, by the one table: a settled run's depends on an
+ *  outcome a run document does not carry, so it may report either. */
+function statusesOf(state: ViewState): TaskStatus[] {
+  return state === 'settled' ? SETTLED_OUTCOMES.map((outcome) => statusOf(state, outcome)) : [statusOf(state, null)];
 }
 
 /** A run document's times: stamped text, no ttl, and a poll interval above zero. */
@@ -367,11 +382,20 @@ function armFault(entry: Record<string, unknown>): string | null {
   if (result === null) {
     return 'an entry that is not status-only carries its result';
   }
-  const verdict = validateAgentResult(result);
-  if (!verdict.ok) {
-    return `result: ${verdict.detail}`;
+  if (!isAgentResult(result)) {
+    const verdict = validateAgentResult(result);
+    return `result: ${verdict.ok ? 'not a pi-agent-result/2' : verdict.detail}`;
   }
-  return entry.state === 'settled' ? null : 'only a settled entry carries a result';
+  return entry.state === 'settled' ? agreementFault(entry, result) : 'only a settled entry carries a result';
+}
+
+/** A settled entry's status and message are its result's, by the one table. */
+function agreementFault(entry: Record<string, unknown>, result: AgentResult): string | null {
+  const status = statusOf('settled', result);
+  const message = settledMessage(result);
+  return entry.status === status && entry.statusMessage === message
+    ? null
+    : `a settled entry must report its result: ${status} (${message})`;
 }
 
 /** One of a wait document's id lists: required, and every id names a run. */
