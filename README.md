@@ -253,7 +253,7 @@ run evidence, other sessions: unreachable
   names.
 - **Fail closed, first failure wins.** A call passes a fixed sequence of checks
   (policy, switch, profile, root, form, ceilings and tools, session, the
-  child's writable view) and the first failure is the refusal. A policy, store
+  child's view) and the first failure is the refusal. A policy, store
   or location quotient cannot read or resolve refuses; it is never read as
   permission. Unknown fields refuse rather than being ignored.
 - **One process, one root, one shutdown path.** Each call starts and ends its
@@ -262,10 +262,13 @@ run evidence, other sessions: unreachable
 
 What quotient does not guarantee is stated too:
 
-- **The form does the confining.** quotient checks that the child's writable
-  view misses the protected stores, but that check is only as sound as the
-  form's promise to add nothing writable. The write-denial probe,
-  `scripts/hostile-audit`, samples one case of that promise.
+- **The form does the confining.** quotient checks that the child's view
+  reaches no protected store further than that store allows, but that check is
+  only as sound as the form's promise to add nothing writable. The write-denial
+  probe, `scripts/hostile-audit`, samples one case of that promise. A family
+  built with `lib.mkFormFamily` can also be checked with `lib.checkFormFamily`,
+  which reads its launchers' text and refuses what breaks the contract; binds
+  added at launch and the jail's runtime behaviour are beyond it.
 - **The digest covers the executable's bytes only.** What a form reads or runs
   must be embedded in it or kept where no delegate can write, and an approved
   form must be immutable to every delegate on the host.
@@ -299,6 +302,9 @@ protected stores, project forms),
 - [`docs/contract/quotient-approvals-1.md`](docs/contract/quotient-approvals-1.md):
   the approvals store, how an approval governs a root, and the `allow` and
   `revoke` verbs.
+- [`docs/nix-forms.md`](docs/nix-forms.md): building a read and write form
+  family on Linux with the flake's `lib.mkFormFamily`, and checking it with
+  `lib.checkFormFamily`.
 - [`docs/design.md`](docs/design.md): why it is built this way.
 
 `quotient reduce` is the reducer on its own: it turns a `pi --mode json` event
