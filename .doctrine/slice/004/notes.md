@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-08 completed; PHASE-09 next · b1c9981
+fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · 6faf117
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -19,6 +19,7 @@ fresh-as-of: 2026-10-27 · PHASE-08 completed; PHASE-09 next · b1c9981
 - PHASE-06 done — waiting.ts + suite, shared run fixtures in test-rig (4e3fe68, b8f6950, e5c1b3b; delta e3fb817..e5c1b3b); Codex 3 medium (2 fixed, F1 accepted) + 1 low fixed (§ PHASE-06 execution)
 - PHASE-07 done — blocking pi_agent through the registry; call driver + reply gate; EOF at the trigger (3095a6f, 70e02a4; delta 5d8e37c..70e02a4); Codex 1 medium fixed (§ PHASE-07 execution)
 - PHASE-08 done — five tools, readers + argsDigest, start/wait/ack/cancel handlers, readmit, tool help sections, sleeper form (b1c9981; delta recorded); Codex 3 fixed + 1 contested (§ PHASE-08 execution)
+- PHASE-09 done — protocol.ts (eras, server/discover, tasks/*), era routing, task-answering pi_agent, taskOf, modernLine (6bfb2f8, 6faf117; delta recorded); Codex 1 medium fixed (§ PHASE-09 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -28,7 +29,8 @@ fresh-as-of: 2026-10-27 · PHASE-08 completed; PHASE-09 next · b1c9981
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-09 (/phase-plan first)
+- next: PHASE-10 (/phase-plan first)
+- D-12..D-14 — discoverResult(instructions, serverInfo); runCall `present`; legacy id-bearing notifications stay notifications; /reconcile amends sec-7 (§ PHASE-09 execution)
 - D-9..D-11 — HANDLERS shape, sec-5 refused-wait ledger line (Codex F1 contested), handle/wait/ack help sections to PHASE-10; /reconcile amends (§ PHASE-08 execution)
 - M4 (at-trigger closing) accepted at runs.test level; closingRefusal unreachable through serve (C13) (§ PHASE-08 execution)
 - open user decision (PHASE-07 close): a client that writes and closes stdin at once may get some or none of its replies — unanswered
@@ -534,3 +536,52 @@ subdirectory of the entry.
 
 Lint (PHASE-07 → after): server.ts 7 → 7, server.test 31 → 28, test-rig 27 → 27,
 help.ts 12 → 11, reduce.ts 125 → 124, tools.ts/admission.ts and new tests 0.
+
+## PHASE-09 execution (2026-10-27)
+
+Red by two parallel Opus subagents (pure: protocol.test.ts + documents taskOf
+case; server: modernLine/modernAnswer/rpcError in test-rig, "protocol:" and
+"tasks:" groups incl. the one-write CreateTaskResult + notifications/cancelled
+case). Green in-session; protocol.ts adapted from T1a's scratch self-check
+implementation. Tests: 738 (672 at PHASE-08). Commits 6bfb2f8, 6faf117.
+
+Choices C1–C14 (phase sheet), the ones that fill gaps in the design text:
+- C4: one Task serialiser — documents.ts `Task` type + `taskOf(view)`;
+  `RunDocument = Task & extras`. CreateTaskResult is flat (Task fields beside
+  `resultType`), per sec-2's example.
+- C6: tasks/get answers -32603 for any settled run whose document cannot be
+  read (whatever its status), and for `unreadable`.
+- C7: tasks/cancel calls cancel only for queued/running views.
+- C9: runCall gains `present` (legacy as-is, modern decorated) applied inside the
+  one reply gate, so the server-error refusal is decorated too; a task answer is
+  a `{ task }` value, so it is written before the next line is read.
+- C10: a record settled at placement (lane-predecessor-failed) still answers a
+  task, with its terminal status: the run exists.
+- Error messages and the absence of `data` on -32602/-32603 are pinned by tests
+  (T1a's reading of C1/C5/C6); modern tools/list keys are exactly
+  {tools, resultType, ttlMs, cacheScope}.
+
+Divergences for /reconcile:
+- D-12: sec-7 `discoverResult(instructions)`; implemented
+  `discoverResult(instructions, serverInfo)` — protocol.ts may not import
+  server.ts (SERVER_NAME) and stays pure.
+- D-13: sec-7 says modern results "go through modernResult"; the mechanism is a
+  `present` step on runCall (default as-is) — sec-7 server.ts should name it.
+- D-14: sec-7 routes "every request with an id" through classifyEra (Codex
+  F1, fixed). The design is silent on a legacy message named notifications/*
+  that carries an id: it stays a notification (no reply; cancelled still
+  cancels), as before; a modern one is -32601.
+
+Mutation controls (11): era order, declaresTasks, modern undecorated, cancel on
+terminal runs, CreateTaskResult deferred one tick (killed by the one-write
+case), LIST_CACHE, legacy decorated, tasks/cancel no-op, createdAt, legacy
+id-bearing notification arm — killed. Equivalent survivor: wiring the blocking
+abort→cancel listener on the task arm — the call deregisters when its value is
+answered, before the next line, so no notification can reach it (the property
+sec-6 relies on). Accepted.
+
+Codex pass (gpt-6.1-sol, high): 1 medium. F1 fixed (6faf117): id-bearing
+notifications/* were dispatched before classifyEra, so one with an unknown
+version could cancel a call; now only messages without an id are
+notifications. Weak spot kept: the tasks/cancel-before-end case rests on a
+TERM-ignoring sleeper and a 1.5 s grace margin.
