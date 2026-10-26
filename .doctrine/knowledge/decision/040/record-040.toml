@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 40
+slug = "lanes-order-runs-fifo-one-executing-per-lane-needs-success-skips-a-run-whose-predecessor-did-not"
+title = "Lanes order runs FIFO, one executing per lane; needs_success skips a run whose predecessor did not complete"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Users want explicitly sequential runs with order preserved, and stop-on-failure without a race."
+choice = "start/pi_agent take lane?: a name (session-id grammar); naming a lane is the only opt-in. Per lane FIFO, at most one executing; the next launches when the previous settles. needs_success: true on a run makes it refuse without launching (reason lane-predecessor-failed) when its lane predecessor settled other than completed; this cascades. Admission at start (policy, profile, cwd, ceilings, session lock); the policy is re-read at launch and a refusal then settles the run as refused. Wall clock from launch. Lanes are per server process."
+alternatives = ["A sequential boolean with one default lane", "Lane-level halt mode", "Dependencies between named runs (after: [run])", "Orchestrator wait-then-cancel (races: the next run launches first)"]
+rationale = "The decision must be taken server-side at settlement or the next run starts before a cancel can land; a per-run flag composes in mixed lanes with no resume verb."
+consequences = ["result/2 gains one refusal reason row", "completed with a failing answer is not failure to a lane; judgement between steps means not queueing ahead"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-050"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

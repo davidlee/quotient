@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 39
+slug = "runs-are-server-held-records-keyed-by-their-evidence-run-name-settled-in-their-own-task"
+title = "Runs are server-held records keyed by their evidence run name, settled in their own task"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "A run must outlive the call that started it."
+choice = "States queued -> running -> settled (a result/2 document); a refusal at start mints no run. Handle = the evidence run name, opaque to clients. In-memory registry for the server's life, no eviction. Reduce, transcript, status and result are committed when the run settles, in the run's own task. A run is delivered once a wait returns its full result."
+alternatives = ["Commit at wait time", "Separate handle namespace", "Evict settled runs"]
+rationale = "A run nobody waits on still leaves its status; one identity names both the handle and the evidence dir."
+consequences = ["memory grows with runs per server life (assumption to revisit)", "runChild splits at await exited"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-046"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

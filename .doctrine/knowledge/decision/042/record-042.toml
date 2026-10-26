@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 42
+slug = "result2-stays-unchanged-new-pi-run-handle1-and-pi-agent-wait1-documents-wrap-it"
+title = "result/2 stays unchanged; new pi-run-handle/1 and pi-agent-wait/1 documents wrap it"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "A wait must report non-settled runs, and result/2 has no non-final state."
+choice = "pi-run-handle/1 = {schema, run, lane, session, state, artifacts: {dir}} answers start. pi-agent-wait/1 = {schema, until, timed_out, runs: [{run, lane, state, result: result/2 or null}]}. start answers either a handle or a result/2 refusal; clients dispatch on schema. A queued run cancelled settles through the failed arm with cause cancelled."
+alternatives = ["Mint pi-agent-result/3 with queued/running states", "Add run/lane fields to result/2"]
+rationale = "pi_agent callers need no migration; identity lives in the wrapper."
+consequences = ["two new contract docs", "one added refusal reason in result/2"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-052"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

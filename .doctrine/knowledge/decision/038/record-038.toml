@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 38
+slug = "concurrent-runs-use-three-new-tools-beside-a-kept-blocking-pi-agent"
+title = "Concurrent runs use three new tools beside a kept blocking pi_agent"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Clients overlap MCP calls only for readOnlyHint tools; writers must still run concurrently."
+choice = "Tools: pi_agent (kept; args plus lane and needs_success; internally start then wait on its own run; answers result/2), pi_agent_start (same args; answers pi-run-handle/1 or a result/2 refusal), pi_agent_wait (runs?, lanes?, until?, timeout_s?, status_only?), pi_agent_cancel (runs). No list tool: a wait with timeout_s 0, status_only and no targets lists undelivered runs."
+alternatives = ["Replace pi_agent outright", "Cancel as an argument of wait", "A separate list tool", "include_delivered flag on wait (deferred until needed)"]
+rationale = "Launch returns at once so starts serialising costs milliseconds; wait only observes and can honestly be read-only; cancel is a write so it is its own tool; pi_agent callers need no migration."
+consequences = ["server.test.ts one-tool assertions change", "each tool needs its own help section"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-048"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

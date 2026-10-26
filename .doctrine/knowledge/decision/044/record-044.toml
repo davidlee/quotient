@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 44
+slug = "only-pi-agent-wait-declares-readonlyhint"
+title = "Only pi_agent_wait declares readOnlyHint"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Clients schedule and may approve by annotations; they must be honest."
+choice = "wait: readOnlyHint true (the delivered mark is server bookkeeping, documented as such). start, pi_agent, cancel: readOnlyHint false, destructiveHint left default (true). cancel: idempotentHint true. start and pi_agent: openWorldHint true."
+alternatives = ["readOnlyHint on start or pi_agent", "Per-profile tools"]
+rationale = "Write profiles exist, so only the observing tool can claim read-only."
+consequences = []
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-054"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

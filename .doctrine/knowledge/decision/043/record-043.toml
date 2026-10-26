@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 43
+slug = "cancel-by-run-goes-through-the-one-ladder-eof-stops-running-runs-and-drops-queued-ones"
+title = "Cancel by run goes through the one ladder; EOF stops running runs and drops queued ones"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Once start answers, its request id is spent; queued runs have no process."
+choice = "pi_agent_cancel stops running runs via the ladder with cause cancelled and answers once they settle. A queued run cancelled never launches, settles cancelled via the failed arm, writes an audit record, releases its session lock, and its lane advances. notifications/cancelled: on a start still admitting, aborts admission; on pi_agent, cancels its run (as today); on wait, ends the wait only. EOF: every running run aborted and every queued run dropped, cause eof, audit records, no replies."
+alternatives = ["Cancel answers before settlement", "Queued runs survive EOF"]
+rationale = "One termination path; nothing outlives the server."
+consequences = []
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-053"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

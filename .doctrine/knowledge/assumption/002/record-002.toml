@@ -1,0 +1,30 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 2
+slug = "holding-settled-runs-in-memory-for-the-servers-life-is-affordable"
+title = "Holding settled runs in memory for the server's life is affordable"
+record_kind = "assumption"
+status = "invalidated"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+claim = "A server's run registry (DEC-039) can hold every settled run's result document, transcript included, for the server's life without eviction: runs per server session are tens, and each transcript is capped by transcript_budget_bytes."
+confidence = "medium"
+basis = "design-inference"
+validation_plan = "Measure resident memory with ~100 settled runs at the default transcript budget; if it is material, evict delivered results and re-read them from the run's evidence dir."
+validated_by    = ""
+validated_on    = ""
+invalidated_by = "Codex critique 2026-10-26, verified by orchestrator: reduce.ts keeps the whole final answer and policy.ts lets budget <= 0 mean unbounded; replaced by DEC-049 (disk-backed results)"
+invalidated_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)

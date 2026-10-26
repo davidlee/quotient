@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 52
+slug = "result2-stays-unchanged-pi-run-handle1-pi-agent-wait1-and-pi-agent-ack1-wrap-it-iserror-only-for"
+title = "result/2 stays unchanged; pi-run-handle/1, pi-agent-wait/1 and pi-agent-ack/1 wrap it; isError only for refused calls"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "New tools need answer shapes; result/2 has no non-final state; clients read isError."
+choice = "pi-run-handle/1 = {schema, run, lane, key, session, state, artifacts: {dir}} answers start. pi-agent-wait/1 = {schema, until, timed_out, truncated, runs: [{run, lane, state, result: result/2 or null, status_only}]}; entry states queued, running, settled, lost (launch recorded, no exit or result: outcome uncertain, inspect the evidence dir), unknown (no evidence). pi_agent_cancel answers a pi-agent-wait/1 over its targets; pi_agent_ack answers pi-agent-ack/1 = {schema, runs: [{run, acknowledged, reason?}]} (not-settled and unknown are refused per run; the request is validated whole before any ack applies). A queued run cancelled settles through the failed arm, cause cancelled. isError is true only when the call itself is refused (start's result/2 refusal, an invalid request); handles, envelopes and ack answers are never errors."
+alternatives = ["Mint pi-agent-result/3", "Add run/lane fields to result/2", "isError derived from entry states"]
+rationale = "pi_agent callers need no migration; identity lives in wrappers; isError keeps meaning 'this call failed'."
+consequences = ["three new contract docs", "result/2 gains one refusal reason"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-042"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

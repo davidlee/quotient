@@ -1,0 +1,25 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 1
+slug = "claude-code-serialises-pi-agent-calls-unless-readonlyhint-is-declared"
+title = "Claude Code serialises pi_agent calls unless readOnlyHint is declared"
+record_kind = "evidence"
+status = "captured"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+datum = "2026-10-26, Claude Code, quotient 0.5.0: two read-profile pi_agent calls in one message, each sleep 20. No annotations: run 2's dir created 04:29:01.235, after run 1's sleep ended at 04:28:59.77 (serial). With readOnlyHint: true patched into tools/list and an MCP reconnect: dirs created 04:36:11.124 and .128, sleeps overlapped (373.36-393.36 vs 373.64-393.64)."
+provenance = "experiment"
+confidence = "high"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)

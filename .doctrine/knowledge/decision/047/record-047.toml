@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 47
+slug = "wait-acknowledges-then-targets-runs-and-lane-snapshots-until-all-or-any-with-a-server-side-timeout"
+title = "wait acknowledges, then targets runs and lane snapshots, until all or any, with a server-side timeout"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Callers need promise-like waits over sets of runs, and no result may be lost when a reply is not received."
+choice = "Arguments: ack?, runs?, lanes?, until?, timeout_s?, status_only?. ack is applied first and is the only way a run becomes acknowledged. Targets: named runs plus each named lane's unacknowledged runs at arrival; none named = every unacknowledged run (including results already sent); a named handle always returns the run; unknown handle = entry state unknown; empty set answers at once. until all (default) or any; every target always reported. timeout_s defaults to and is capped by the policy wall_clock_s; on timeout every target is reported in its current state (timed_out true). Order: named runs, then lanes, then start order; deduplicated. status_only omits results. notifications/cancelled on a wait ends the wait only. A wait with timeout_s 0, status_only and no targets lists unacknowledged runs. Help teaches: timeout_s below the client's tool timeout; loop wait({ack: <runs just received>})."
+alternatives = ["Delivered on send (loses results)", "Opaque cursor token per answer (breaks with overlapping waits)", "Separate pi_agent_ack tool (an extra call per loop)", "Rely on client timeouts"]
+rationale = "Acknowledging on the next wait costs nothing in the normal loop and makes a lost reply harmless: it is sent again."
+consequences = ["at-least-once delivery; entries carry run handles for dedupe", "Claude Code's MCP tool timeout to be confirmed for help text"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-041"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-051"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

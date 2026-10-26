@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 49
+slug = "runs-are-compact-server-records-keyed-by-their-evidence-run-name-results-persist-to-the-run"
+title = "Runs are compact server records keyed by their evidence run name; results persist to the run directory"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "A run outlives the call that started it; results must not be lost, memory must stay bounded, and a restarted server must not mistake an unknown run for one that never ran."
+choice = "States queued -> running -> settled; a refusal at start mints no run. Handle = the evidence run name (= basename of artifacts.dir), opaque to clients. The registry holds compact records (handle, lane, predecessor, key and argument digest, state, acknowledged, session) for the server's life; on settlement the run's own task commits reduce, transcript, status and a result.json holding the result/2 envelope, and wait reads payloads from disk. A run is acknowledged only by pi_agent_ack, and only once settled. Runs started by blocking pi_agent are owned by that call and never enter the default unacknowledged set; they remain addressable by handle."
+alternatives = ["Whole result documents held in memory (ASM-002, invalidated: final answers are unbounded)", "Delivered on send", "Commit at wait time"]
+rationale = "Disk-backed payloads bound memory to records; persisting result.json makes outcomes recoverable across restarts."
+consequences = ["delivery is at-least-once; callers dedupe by handle"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-046"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

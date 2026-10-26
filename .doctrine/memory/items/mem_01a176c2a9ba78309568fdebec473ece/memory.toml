@@ -1,0 +1,46 @@
+memory_uid = "mem_01a176c2a9ba78309568fdebec473ece"
+memory_key = "mem.fact.quotient.client-concurrency-readonlyhint"
+schema_version = 1
+memory_type = "fact"
+status = "active"
+title = "MCP clients overlap tool calls only when the tool declares readOnlyHint"
+summary = "Claude Code (probed) and Codex (reported) serialise MCP tool calls unless annotations.readOnlyHint is true; quotient's server overlaps calls itself"
+created = "2026-10-26"
+updated = "2026-10-26"
+
+[scope]
+paths = ["src/server/server.ts", "help"]
+globs = []
+commands = []
+tags = ["concurrency", "mcp"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "ba6ecc474aacc859f7940c566cc9596a143e2d04"
+ref_name = "refs/heads/main"
+checkout_state_id = "f5f5151a790b705210678bd15321e942a2e478175e98d3f5a542664795c462d5"
+base_commit = "a777bb1abce0953f4b5271af2b688dc48882277f"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
+[[source]]
+kind = "backlog"
+ref = "IMP-011"
+

@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 50
+slug = "lanes-order-runs-fifo-with-full-re-admission-at-launch-and-mark-before-await-cancellation"
+title = "Lanes order runs FIFO with full re-admission at launch and mark-before-await cancellation"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Sequential runs must keep order, stop-on-failure must not race, and a queued run must not launch under authority revoked while it waited."
+choice = "start/pi_agent take lane?: a name (session-id grammar); naming a lane is the only opt-in. Per lane FIFO, at most one executing; the next launches when the previous settles, unless marked cancelled. Each run records its predecessor at enqueue; needs_success: true makes it refuse without launching (reason lane-predecessor-failed) when that predecessor settled other than completed, cascading. Admission at start (policy, profile, cwd, approvals and form selection, ceilings, session lock). At launch the full admission is re-run against the current policy and approvals, keeping the admitted root, session and capability; limits are the minimum of admitted and current; any refusal settles the run as a result/2 refusal. Wall clock from launch. Lanes are per server process."
+alternatives = ["Policy-only re-read at launch (misses approval revocation)", "A sequential boolean", "Lane-level halt mode", "Dependencies between named runs"]
+rationale = "Authority is judged when power is exercised, and can only narrow while queued."
+consequences = ["result/2 gains refusal reason lane-predecessor-failed", "judgement between steps means not queueing ahead"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-040"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

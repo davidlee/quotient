@@ -6,7 +6,7 @@ status = "active"
 title = "Run doctrine research threads through quotient pi_agent"
 summary = "Research threads via quotient pi_agent (profile research): cheap, cited; spot-check load-bearing claims; copy run transcript.md to research/raw/"
 created = "2026-10-24"
-updated = "2026-10-24"
+updated = "2026-10-26"
 
 [scope]
 paths = [".doctrine/slice"]

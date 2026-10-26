@@ -1,0 +1,75 @@
+id = 4
+slug = "concurrent-runs-start-and-wait-tools"
+title = "Concurrent runs: start and wait tools"
+status = "design"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[relationships]
+needs = []                      # slice→work hard prerequisite
+after = []                      # slice→work soft sequence: { to, rank }
+
+[[selector]]
+selector = "src/server/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/help/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "help/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "docs/contract/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "README.md"
+intent = "scope-relevant"
+
+[[relation]]
+label = "references"
+role = "originates_from"
+target = "IMP-011"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "run registry retention"
+target = "ASM-002"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "follow-up"
+target = "IDE-003"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "follow-up"
+target = "IDE-004"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "follow-up"
+target = "IDE-005"
+
+[[relation]]
+label = "references"
+role = "concerns"
+descriptor = "client scheduling probe"
+target = "EVD-001"
+
+# STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
+# `[relationships]` axis. Slices carry no typed STRUCTURAL
+# relation axes — the `[relationships]` table above holds only the dep/seq payload
+# (`needs`/`after`). Author a structural edge with the `doctrine link` verb
+# — it validates the (source, label) pair and resolves the target:
+#   doctrine link SL-NNN specs SPEC-NNN
+#   doctrine link SL-NNN governed_by ADR-NNN
+# `doctrine inspect SL-NNN` renders the inbound + outbound edges.

@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 51
+slug = "wait-is-pure-selectors-until-all-or-any-server-side-timeout-and-a-response-byte-budget"
+title = "wait is pure: selectors, until all or any, server-side timeout, and a response byte budget"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Callers need promise-like waits over sets of runs; replies may be lost or large; wait must not mutate observable state."
+choice = "Arguments: runs?, lanes?, until?, timeout_s?, status_only?, budget_bytes?. Both selectors omitted = every unacknowledged run; an empty array selects nothing; named runs are always returned; each named lane contributes its unacknowledged runs at arrival. Unknown handles are resolved on disk (DEC for inq-5: settled via result.json, or lost); unknown only with no evidence. until all (default) or any; settled, lost and unknown count as done; every target is always reported. timeout_s defaults to and is capped by the policy wall_clock_s; on timeout every target is reported in its current state (timed_out true). Order: named runs, lanes, then start order; deduplicated. The response is bounded by budget_bytes (default and cap set by the server); entries that do not fit are status-only and flagged. status_only omits results. notifications/cancelled on a wait ends the wait only. Help teaches: timeout_s below the client's tool timeout; loop wait, then ack the settled runs whose results were received."
+alternatives = ["ack on wait (superseded: mutates discovery)", "Rely on client timeouts", "Unbounded responses"]
+rationale = "A pure wait keeps readOnlyHint honest; bounded responses protect the caller's context and survive retransmission."
+consequences = ["Claude Code's MCP tool timeout to be confirmed for help text"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-047"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

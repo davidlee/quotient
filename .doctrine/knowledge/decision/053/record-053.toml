@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 53
+slug = "cancellation-marks-all-targets-before-awaiting-eof-marks-the-server-closing-start-cancels-only"
+title = "Cancellation marks all targets before awaiting; EOF marks the server closing; start cancels only before its run exists"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Cancelling or shutting down must not let a lane launch a successor mid-sweep."
+choice = "pi_agent_cancel marks every target cancelled first, then hands running runs to the one ladder (cause cancelled) and settles queued ones without launching (failed arm, audit record, session lock released), and answers once all settle. Lane advancement skips marked runs. EOF marks the server closing first: no lane advances; every running run is aborted (cause eof) and every queued run dropped with an audit record; no replies. notifications/cancelled on a start cancels admission only before the run record exists; after that the run stands and is found by key or listing. On pi_agent it cancels its run (as today); on wait it ends the wait only."
+alternatives = ["Sequential cancel (races lane advance)", "Queued runs survive EOF"]
+rationale = "Marks taken before any await close the advance window; one termination path remains."
+consequences = []
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-043"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

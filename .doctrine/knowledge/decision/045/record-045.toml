@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 45
+slug = "docs-revise-the-one-process-per-call-rationale-and-add-a-full-readme-pass"
+title = "Docs revise the one-process-per-call rationale and add a full README pass"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "docs/design.md says every call ends its process before answering; the README and help describe one tool."
+choice = "docs/design.md: one-process-per-call becomes 'nothing outlives the server; every run reaches the ladder'; one-tool lines revised. README full pass: tool table, concurrent runs, lanes and needs_success, the wait loop, client timeout guidance for waits. Help: a section per tool; orchestrate guide gains lanes/concurrency. Contracts: pi-run-handle/1, pi-agent-wait/1; result/2 EOF paragraph covers queued runs and the new refusal reason."
+alternatives = []
+rationale = "Shipped text must match behaviour and cite no doctrine ids."
+consequences = []
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

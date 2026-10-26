@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 41
+slug = "wait-targets-runs-and-lane-snapshots-until-all-or-any-with-a-server-side-timeout-below-the-clients"
+title = "wait targets runs and lane snapshots, until all or any, with a server-side timeout below the client's"
+record_kind = "decision"
+status = "superseded"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Callers need promise-like waits over sets of runs and must not be killed by client tool timeouts."
+choice = "Targets: named runs plus each named lane's undelivered runs at arrival; none named = all undelivered runs; an explicit handle always re-delivers; unknown handle = entry state unknown; empty set answers at once. until all (default) or any; every target always reported. timeout_s defaults to and is capped by the policy wall_clock_s; on timeout every target is reported in its current state (timed_out true). Order: named runs, then lanes, then start order; deduplicated. status_only omits results and delivers nothing. notifications/cancelled on a wait ends the wait only. Help teaches: timeout_s below the client's tool timeout, loop on named handles."
+alternatives = ["Rely on client timeouts", "Lanes resolved live (wait could never end)", "Consuming delivery for explicit handles"]
+rationale = "A server-side timeout answers cleanly and delivers only what was sent; a client-side timeout can drop a delivered result, which explicit handles recover."
+consequences = ["Claude Code's MCP tool timeout to be confirmed for help text"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = ["DEC-047"]   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"

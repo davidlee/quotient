@@ -1,0 +1,107 @@
+# Concurrent runs: start and wait tools
+
+## Context
+
+From IMP-011. The server already overlaps `tools/call` requests
+(`src/server/server.ts`, the `tools/call` arm; `spawn.test.ts` covers two
+concurrent calls). The client is the bottleneck: on 2026-10-26 two
+`read`-profile calls sent in one Claude Code message ran strictly one after
+the other. With `annotations.readOnlyHint: true` patched into the installed
+server's `tools/list` reply, the same two calls started 4ms apart and
+overlapped fully (evidence table in IMP-011).
+
+`readOnlyHint` cannot honestly be set on a tool that can run write-capable
+profiles, and clients may also use it to skip approval. A read/write tool
+split would make read runs concurrent but leave writers serial, and several
+writers at once is a use we want: different roots, or disjoint files in one
+tree.
+
+```
+today                                   this slice
+─────                                   ──────────
+pi_agent ── blocks for the whole run    pi_agent_start ── returns a run handle at once (writes)
+  (no annotations → client serialises)  pi_agent_wait  ── blocks on run(s); observes only
+                                                          (readOnlyHint: true → overlaps)
+```
+
+## Scope & Objectives
+
+1. **Start.** A tool that admits and launches a run exactly as `pi_agent`
+   does today (policy, profile, cwd, ceilings, session), and answers at once
+   with a run handle, or the same refusal `pi_agent` would give.
+2. **Wait.** A tool that blocks on one or more started runs and answers with
+   their `pi-agent-result` documents. It changes nothing and declares
+   `readOnlyHint: true`, so a client that serialises other tools still
+   overlaps waits. A wait over several handles makes concurrency independent
+   of client scheduling.
+3. **Run lifetime.** A run handle outlives the call that started it. Decide
+   and specify: when a run's result can be collected (once, or repeatedly);
+   cancellation addressed by run; what client disconnect / EOF does to
+   started runs (today `serve` aborts in-flight calls at EOF).
+4. **Bounding.** Concurrency multiplies spend: per-run maxima stay per run.
+   No policy bound on runs in flight for now (user, 2026-10-26); a follow-up
+   if needed.
+5. **Lanes: explicitly sequential runs** (user, 2026-10-26). A start may
+   name a lane: at most one run per lane executes at a time, and a lane's
+   runs execute in the order they were started. Unlaned runs are
+   unaffected. A run marked `needs_success` does not launch if its lane
+   predecessor did not complete. A queued run is visible to wait as not yet running, and can be
+   cancelled before it launches.
+6. **Contract and docs.** The tool list, the result contract (new document
+   version if the shape changes), `quotient help` (tool, agent, orchestrate
+   sections) and the README say how to drive concurrent runs.
+
+## Non-Goals
+
+- Enforcing file-disjointness or serialising shared build locks between
+  writers. That stays the orchestrator's job (`help/orchestrate.md`).
+- Setting `readOnlyHint` on any tool that can start a write run.
+- Client-specific workarounds (fan-out through client subagents).
+- Changing confinement, forms, or the per-run gate.
+
+## Affected surface
+
+Coarse; design fixes the exact set.
+
+- `src/server/server.ts`: tool definitions, `tools/list`, call dispatch,
+  in-flight index, EOF sweep.
+- `src/server/spawn.ts`, `session.ts`: run lifetime and session locking
+  across calls.
+- `src/server/result.ts`, `policy.ts`: result shape for start/wait; any
+  in-flight bound.
+- `src/help/**`, `help/*.md`, `README.md`.
+- `docs/contract/**`: result and policy contracts.
+
+## Open questions
+
+All settled in design (2026-10-26), revised after an informal Codex
+critique: tools DEC-048 (start, wait, ack, cancel, blocking pi_agent; start
+idempotency key); run records and disk-backed results DEC-049; lanes,
+re-admission at launch, `needs_success` DEC-050; pure wait with byte budget
+DEC-051; contracts and `isError` DEC-052; cancellation and EOF DEC-053;
+annotations DEC-054; docs including a full README pass DEC-045. OQ-4 → not
+now (IDE-005). Deferred: MCP tasks binding (IDE-003), listing acknowledged
+runs (IDE-004). ASM-002 invalidated.
+
+## Risks
+
+- A run that nobody waits on keeps spending until its ceilings stop it.
+- Orphaned runs if the server dies between start and wait: the evidence dir
+  survives, the handle does not.
+
+## Verification intent
+
+- Tests: two starts then one wait over both overlap (timestamps), including
+  two write-profile runs under different roots; cancel-by-run leaves the
+  other run alive; EOF behaviour as specified; refusals from start match
+  `pi_agent`'s.
+- Tests: three sequential starts run one at a time in start order while an
+  unmarked run overlaps them; cancelling a queued run removes it without
+  launching and lets the next one start.
+- Probe: the IMP-011 two-call probe under Claude Code overlaps with waits,
+  using write profiles.
+- Gate green (`just gate`), lint zero warnings.
+
+## Summary
+
+## Follow-Ups

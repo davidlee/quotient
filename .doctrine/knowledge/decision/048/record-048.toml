@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 48
+slug = "concurrent-runs-use-start-wait-ack-and-cancel-tools-beside-a-kept-blocking-pi-agent"
+title = "Concurrent runs use start, wait, ack and cancel tools beside a kept blocking pi_agent"
+record_kind = "decision"
+status = "accepted"
+created = "2026-10-26"
+updated = "2026-10-26"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "Clients overlap MCP calls only for readOnlyHint tools; writers must still run concurrently; a lost start reply must not launch a second writer."
+choice = "Tools: pi_agent (kept; args plus lane, needs_success; internally start then wait on its own run; answers result/2); pi_agent_start (same args plus key?; answers pi-run-handle/1 or a result/2 refusal); pi_agent_wait (runs?, lanes?, until?, timeout_s?, status_only?, budget); pi_agent_ack (runs); pi_agent_cancel (runs). start key: a repeated start with the same key and identical arguments returns the original handle; the same key with different arguments is refused. No list tool: a wait with timeout_s 0, status_only and no selectors lists unacknowledged runs."
+alternatives = ["ack piggybacked on wait (makes wait mutate observable state)", "Replace pi_agent outright", "A separate list tool", "No idempotency key (retries duplicate writers)"]
+rationale = "Each mutation is its own non-read-only tool so wait alone can claim readOnlyHint honestly; ack and cancel are millisecond calls, so client serialisation of them is harmless."
+consequences = ["server.test.ts one-tool assertions change", "a help section per tool"]
+decided_by = "user"
+decided_on = "2026-10-26"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = ["DEC-038"]   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "SL-004"
