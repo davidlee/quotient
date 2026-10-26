@@ -22,13 +22,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { isRecord } from '../json.ts';
 import { packageVersion } from '../root.ts';
 import { toolResult, type ToolResult } from './documents.ts';
 import { layoutFor } from './evidence.ts';
 import { refusedResult } from './result.ts';
-import { abortNamed, PROTOCOL_VERSION, runCall, type CallHost, type InFlightCall } from './server.ts';
+import { abortNamed, PROTOCOL_VERSION, runCall, serve, type CallHost, type InFlightCall } from './server.ts';
 import { PI_AGENT_TOOL } from './tools.ts';
 import {
   attempts,
@@ -276,6 +276,30 @@ test('a signal aborted before serve starts admits nothing', async (t) => {
 
   assert.deepEqual(server.replies(), []);
   assert.deepEqual(readdirSync(rig.markerDir), [], 'no launcher ran');
+});
+
+/** The ids of the replies written, in order. */
+function replyIds(written: string[]): unknown[] {
+  return written.map((raw): unknown => JSON.parse(raw)).map((reply) => (isRecord(reply) ? reply.id : null));
+}
+
+test('the shutdown signal stops dispatch at once: the rest of a chunk already read gets no reply', async (t) => {
+  const rig = newRig(t);
+  const controller = new AbortController();
+  const written: string[] = [];
+  // The signal fires while the first line of the chunk is being answered.
+  const output = new Writable({
+    write(chunk, _encoding, done): void {
+      written.push(String(chunk));
+      controller.abort();
+      done();
+    },
+  });
+  const input = new PassThrough();
+  input.write([67, 68, 69].map((id) => `${line({ id, method: 'ping' })}\n`).join(''));
+  await serve(input, output, rig.env, sink([]), { launchDir: rig.launchDir, signal: controller.signal });
+
+  assert.deepEqual(replyIds(written), [67], 'nothing after the trigger');
 });
 
 test('SIGTERM to the server process shuts down through the same path and exits 0', async (t) => {

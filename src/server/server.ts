@@ -483,6 +483,23 @@ function onClientGone(input: Readable, signal: AbortSignal | undefined, closing:
   input.once('error', closing);
 }
 
+/** Dispatch every complete record in BUFFERED, in order, and answer what is left:
+ *  a fragment still waiting for its LF. Once the client is gone no record is
+ *  dispatched, even one already read: it would admit a run or write a reply
+ *  nobody reads (design sec-6). */
+async function dispatchLines(buffered: string, context: Context): Promise<string> {
+  let pending = buffered;
+  let newline = pending.indexOf('\n');
+  while (newline >= 0 && !context.closed) {
+    let record = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    if (record.endsWith('\r')) {record = record.slice(0, -1);}
+    await handleLine(record, context);
+    newline = pending.indexOf('\n');
+  }
+  return pending;
+}
+
 /**
  * Serve one client over `input`/`output` until stdin EOF, a failed input or
  * `options.signal`. Takes its streams, its
@@ -512,15 +529,7 @@ export async function serve(
   let pending = '';
 
   for await (const chunk of inputChunks(input, diagnostics, options.signal)) {
-    pending += typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer);
-    let newline = pending.indexOf('\n');
-    while (newline >= 0) {
-      let record = pending.slice(0, newline);
-      pending = pending.slice(newline + 1);
-      if (record.endsWith('\r')) {record = record.slice(0, -1);}
-      await handleLine(record, context);
-      newline = pending.indexOf('\n');
-    }
+    pending = await dispatchLines(pending + (typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer)), context);
   }
   // EOF, a failed input or the signal ends the loop. A trailing fragment without
   // LF is not a record: JSONL framing terminates every record with one.
