@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · lifecycle plan · design locked (rev 72) · uncommitted on b6a1217 (design.md, slice-004.md, slice-004.toml, notes.md, RV-013, DEC-049/066/067, EVD-004, RSK-003)
+fresh-as-of: 2026-10-26 · lifecycle ready · design re-locked (rev 79) · plan 10 phases, sheets materialised
 
 ### Produced
 - design run dr-01a17694: reopened scope minted as inq-10..17 → DEC-055..062; DEC-058 supersedes DEC-052, DEC-062 supersedes DEC-051
@@ -26,6 +26,9 @@ fresh-as-of: 2026-10-26 · lifecycle plan · design locked (rev 72) · uncommitt
 - DEC-068 amended (user reply 'a'): pi-agent-wait/1 gains an `unreadable` list; Codex rounds 2–3 on the same thread closed the NSpid and unreadable folds (rev 66–68)
 - governance-confirmed re-recorded (rev 65, user: "governance: confirmed")
 - review.passes discharged; RV-013 disposed conducted; all 9 sections attested; design accepted and locked (rev 72, user: "agreed, lock it and handover for plan"); slice status → plan
+- plan authored (38b2b07), Codex plan pass (thread 01a177ca-565b-7ca3-a166-0f14edf47ede, gpt-6.1-sol high): 6 findings verified; 5 folded into the plan (66c493b), 1 raised to the user
+- user chose option 1: design sec-7/sec-9 amended (reducer counts non-object JSON lines malformed; contract malformed/records wording); run regressed to reviewing (rev 73), adopted (rev 74–75), sec-7/sec-9 re-attested, RV-014 waived, accepted, re-locked (rev 79) on the user's "do the accept dance, i accept, let's lock the plan"
+- phases PHASE-01..10 materialised; slice → ready
 - runbook review.scope (slice-004.md reconciled; SL-004 references RSK-002, RSK-003) and review.selectors (+ ack contract, gate.test.ts, childview.test.ts) discharged
 
 ### Learned
@@ -34,8 +37,9 @@ fresh-as-of: 2026-10-26 · lifecycle plan · design locked (rev 72) · uncommitt
 - spec facts used by sec-2 (cited there): clientCapabilities required (-32602 if missing); caching ttlMs/cacheScope; stdio cancellation MUST NOT reply; tasks terminal states immutable, tasks/cancel cooperative
 
 ### Open
-- next: /plan — author plan.toml/plan.md and phases from the locked design.md (sec-7 modules, sec-9 code impact and verification)
-- plan constraint: the first phase touching session.ts confirms NSpid / boot_id / ns-link behaviour on the target host (notes § Further review passes)
+- next: /phase-plan PHASE-01, then /execute
+- plan constraint carried as PHASE-02 EN-2 (host probe; pre-confirmed, see § Plan baselines)
+- IMP-004 — expected to be satisfied by PHASE-03; resolve at close
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
 - DEC-045, DEC-048..050, DEC-053..070 — the governing decisions (sec-1 table)

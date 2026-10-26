@@ -1,7 +1,7 @@
 id = 4
 slug = "concurrent-runs-start-and-wait-tools"
 title = "Concurrent runs: start and wait tools"
-status = "plan"
+status = "ready"
 created = "2026-10-26"
 updated = "2026-10-26"
 tags = []
