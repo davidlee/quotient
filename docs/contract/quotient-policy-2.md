@@ -180,14 +180,14 @@ is a tool result naming its reason (`pi-agent-result-2.md`, Refusals).
 7. **Session:** grammar, and a session stays bound to the root and capability
    it was first used with (`session-invalid`, `session-root-mismatch`,
    `session-capability-mismatch`, `session-busy`).
-8. **Child view:** what the child could write must not reach a protected store
-   (`view-overlaps-protected`, below).
+8. **Child view:** the child's view must not reach a protected store further
+   than that store allows (`view-overlaps-protected`, below).
 
 ## Protected stores
 
-Step 8 compares the child's writable view, which is the root under a write
-profile, the session directory and every `exposure` path, against these
-stores:
+Step 8 compares the child's view, which is the root (read-only under a read
+profile, writable under a write profile), the session directory and every
+`exposure` path, against these stores:
 
 | store | the child may |
 |---|---|
@@ -201,7 +201,9 @@ stores:
 
 A store is protected whether or not it exists, so a delegate cannot create a
 profile, a help section or a store and plant a form for the next start-up. A
-writable path that is, contains or lies inside a store it may not write refuses.
+writable path that is, contains or lies inside a store it may not write refuses;
+so does any path in the view, read-only or writable, that is, contains or lies
+inside a store the child may neither read nor write.
 Nothing else in the launch directory is a store: a project's own
 `.quotient/forms` is ordinary project content, and a write call may be rooted at
 the launch directory.

@@ -171,3 +171,20 @@ the parser and what it refuses), `doctrine show DEC-031` (the alias rule (j)),
 - None. SL-003 descends from no spec requirement whose text these findings
   contradict; every governing change is a per-slice DEC already amended in
   place (DEC-029, DEC-033, DEC-036).
+
+## Reconciliation Outcome
+
+### Direct edits applied
+- design.md sec-2: `protect` in the returned family; piFiles moved into the deferred tail after the mask (DEC-032); guarded protect mask line (DEC-023); piFiles value types (DEC-033 + Amendment); `HOME` reserved (DEC-034); secretEnv `$` rule (DEC-024); new "Refusals at evaluation" table (DEC-024, 033, 034, 035, 036 + Amendments 1–2) (F-1, F-4, F-11, F-12, F-25, F-33, F-34)
+- design.md sec-3: `PROTECT` input (DEC-027); "Reading a launcher" rewritten to bash-as-parser (DEC-029 + Amendments 1–3), mount operations incl. `--dev-bind`, overlays, descriptor binds (DEC-026, DEC-030), lexical path resolution and the relative / climbing / under-symlink refusals, piFiles admission; Assertions (c), (e), (g), (i) updated and (j) added (DEC-031); tail order includes piFiles; Residues match `residues()` in check.sh; negative controls note `check-fixtures` (DEC-028) and the doctor-made QUOTIENT_DEBUG control (F-1, F-3, F-7..F-10, F-18..F-24, F-26, F-27, F-30, F-31)
+- design.md sec-5: test flake lists check-fixtures, eval-refusals, example-* (DEC-037) and the sample families; probe table gains `pi-files-defer`; Risks gain x86_64-linux-only and the new residue list (F-1, F-6, F-26)
+- notes.md: Learned line on the mis-targeted PHASE-02/03 VT-1 mandates (F-16)
+- docs/contract/quotient-policy-2.md: step 8 compares the child's whole view, read root included; an unreachable store refuses at any exposure (lines 183, 188–190, 202; F-17). Lines 183 and 202 are adjacent instances of the same error, applied with operator agreement. `npm test` 428/428 pass.
+
+### REVs completed
+- None: the brief lists no governance/spec items.
+
+### Withdrawn / tolerated
+- As dispositioned in the ledger; no further writes.
+
+Operator agreed in session 2026-10-26 ("agreed"). Reconcile pass complete — handoff to /close.

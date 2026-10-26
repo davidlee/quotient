@@ -47,3 +47,13 @@ isolation, and child lifetime.
   config). Worth deciding whether that is the intended model or whether the
   policy should key forms by root. See ISS-001 for the related launch-dir
   constraint.
+
+## Selection gap — answer (SL-003 close, 2026-10-26)
+
+A second toolchain does not need a second policy and server. Project forms
+already key forms by root under one policy: link `<root>/.quotient/forms/<cap>`
+to a family's form and approve it with `quotient allow`; a root without
+one inherits the policy's form (SL-003 slice OQ-5, design inquiry; lookup base
+in `src/server/approvals.ts`). SL-003 documented this in `docs/nix-forms.md`
+and clarified the nested-root/worktree wording in the policy contract. No
+change to the policy's `forms` keying is needed.

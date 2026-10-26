@@ -6,9 +6,10 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · reconcile (RV-011 concluded, 3 rounds) · 1347f3b
+fresh-as-of: 2026-10-26 · close (RV-011 reconciled) · 4266236+
 
 ### Produced
+- reconcile: design.md sec-2/3/5 folded to as-built (DEC-023..037); policy contract step 8 (F-17)
 - PHASE-01..05: 4c3152e, cf3cf74, a2e9fcd, ef83954+cce3d80, 9adcf9a, dc46a9e; VH-1 PASS read+write
 - audit RV-011 opened; operator chose option A (fix in slice): DEC-029..037 agreed; plan appended PHASE-06..08 (0f8d132)
 - PHASE-06 check parses with bash, overlay exposure, (j) aliases: 7cea541, 421a132
@@ -27,11 +28,12 @@ fresh-as-of: 2026-10-26 · reconcile (RV-011 concluded, 3 rounds) · 1347f3b
 - builder/checker input contract: anything jail.nix quotes that the checker refuses is a false refusal; refuse it at evaluation (DEC-036) or read it
 - nixfmt over whole files reformats unrelated code here (repo not nixfmt-clean); format only touched lines
 - mem.fact.doctrine.design-apply-payload — design apply --input shape
+- PHASE-02/03 VT-1 mandates are mis-targeted: their `test_file` should have been `nix/checks/flake.nix` (where the probe pi reads `/proc/1`), not `scripts/form-probe`. `doctrine slice verify-vt 3` FAILs on those two rows are known and not regressions; evidence is form-probe's `canary-proc1` / `secret-cmdline` rows, PASS in every gate run (RV-011 F-16)
 
 ### Open
-- RV-011 Reconciliation Brief — design.md sec-2/3/5 fold-in of DEC-023..037 (+amendments); residues; x86_64-only Risks line; F-16 notes line; policy contract step-8 sentence (F-17)
 - DEC-017 — --args / add-runtime binds unchecked (declared residue); host symlinks in bound trees (runtime residue)
-- IMP-003 — selection-gap note at close
+- standing risks: no 4th adversarial round over round-3 fixes (1347f3b); x86_64-linux the only verified platform (F-6)
+- IMP-003 — selection-gap answer recorded on IMP-003 at close; IMP-003, IMP-007 resolved
 - ISS-002 — outside slice
 
 ## Further review
