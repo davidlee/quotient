@@ -179,6 +179,8 @@ test('readResult: absent when none was written, found for a written document, un
   assert.equal(readResult(seeded(root, 5, '{}')), 'unreadable', 'JSON that fails conformance is unreadable, not found');
   const hostile = '{"schema":"pi-agent-result/2","state":{"toString":null}}';
   assert.equal(readResult(seeded(root, 9, hostile)), 'unreadable', 'a document the validator chokes on is unreadable, not a throw');
+  const deep = JSON.stringify({ ...doc, extra: 0 }).replace('"extra":0', `"extra":${'['.repeat(12000)}${']'.repeat(12000)}`);
+  assert.equal(readResult(seeded(root, 10, deep)), 'unreadable', 'a conforming document no reader can serialise again is unreadable, not a later throw');
 
   const asDir = runLayout(root, 6);
   mkdirSync(asDir.result, { recursive: true });

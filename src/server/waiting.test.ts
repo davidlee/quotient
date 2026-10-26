@@ -84,17 +84,24 @@ function rig(t: TestContext, options: { owner?: FakeProcOwner } = {}): Rig {
 type EnvelopeOptions = { until: Until; statusOnly?: boolean; budgetBytes?: number };
 
 /** The answer a wait gives over TARGETS, validated before any case asserts on it
- *  (EX-3: every envelope this suite builds passes `validateWait`). */
+ *  (EX-3: every envelope this suite builds passes `validateWait`), and built from
+ *  exactly one resolution per target (C11), so no two reads can disagree. */
 function envelope(
   targets: Target[],
   resolve: (run: string) => Resolution,
   options: EnvelopeOptions,
 ): WaitDocument {
-  const doc = waitEnvelope(targets, resolve, {
+  let resolutions = 0;
+  const counted = (run: string): Resolution => {
+    resolutions += 1;
+    return resolve(run);
+  };
+  const doc = waitEnvelope(targets, counted, {
     until: options.until,
     statusOnly: options.statusOnly ?? false,
     budgetBytes: options.budgetBytes ?? WAIT_BUDGET_DEFAULT,
   });
+  assert.equal(resolutions, targets.length, 'every target is re-resolved exactly once');
   const verdict = validateWait(doc);
   if (!verdict.ok) {
     assert.fail(`the wait envelope must validate: ${verdict.detail}`);
@@ -145,6 +152,9 @@ async function within(wait: Promise<void>, ms = 1000): Promise<void> {
 function viewStateOf(target: Target): ViewState | null {
   return target.view === null || target.view === 'unreadable' ? null : target.view.state;
 }
+
+/** How many timers are live in this process: a wait must leave none of its own. */
+const activeTimers = (): number => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
 
 /** A signal nothing will abort, for the cases that do not test the signal. */
 const unAborted = (): AbortSignal => new AbortController().signal;
@@ -391,21 +401,19 @@ describe('Condition', () => {
     const { fake, registry, resolve } = rig(t);
     const run = startRun(registry, fake);
     const targets = resolveTargets(registry, { runs: [run.record.run] }, resolve);
-    const timers = (): number => process.getActiveResourcesInfo().filter((name) => name === 'Timeout').length;
-
-    const before = timers();
+    const before = activeTimers();
     const controller = new AbortController();
     const aborted = awaitTargets(targets, 'all', 60000, controller.signal, resolve, POLL_MS);
     controller.abort();
     await within(aborted);
-    assert.equal(timers(), before, 'the 60 s timer is cleared when the signal ends the wait');
+    assert.equal(activeTimers(), before, 'the 60 s timer is cleared when the signal ends the wait');
 
     const signal = unAborted();
     const waiting = awaitTargets(targets, 'all', 60000, signal, resolve, POLL_MS);
     await settleRun(fake, run);
     await within(waiting);
 
-    assert.equal(timers(), before, 'the 60 s timer is cleared once the condition holds');
+    assert.equal(activeTimers(), before, 'the 60 s timer is cleared once the condition holds');
     assert.equal(getEventListeners(signal, 'abort').length, 0, 'the abort listener is removed once the condition holds');
   });
 });
@@ -454,6 +462,43 @@ describe('Polling', () => {
     assert.equal(doc.timed_out, false);
     assert.equal(doc.runs[0].state, 'settled');
     assert.notEqual(doc.runs[0].result, null);
+  });
+
+  it('a polled target is re-read only until it reads done, while the wait goes on for the others', async (t) => {
+    const { fake, registry, resolve } = rig(t);
+    const live = startRun(registry, fake);
+    const foreign = runIn(fake.runDir, {});
+    const targets = resolveTargets(registry, { runs: [foreign.run, live.record.run] }, resolve);
+    assert.equal(viewStateOf(targets[0]), 'foreign');
+    rmSync(foreign.layout.dir, { recursive: true, force: true });
+
+    let rereads = 0;
+    const reread = (id: string): Resolution => {
+      rereads += 1;
+      return resolve(id);
+    };
+    const before = activeTimers();
+    const waiting = awaitTargets(targets, 'all', 5000, unAborted(), reread, POLL_MS);
+    await pause(20 * POLL_MS);
+    assert.equal(rereads, 1, 'the first re-read finds no evidence (unknown, done); nothing re-reads it again');
+    assert.equal(activeTimers() - before, 1, 'with nothing left to poll, only the wait\'s own timer remains');
+    await settleRun(fake, live);
+    await within(waiting);
+  });
+
+  it('every polled target shares one poll timer', async (t) => {
+    const { fake, registry, resolve } = rig(t);
+    const foreign = Array.from({ length: 20 }, () => runIn(fake.runDir, {}).run);
+    const targets = resolveTargets(registry, { runs: foreign }, resolve);
+    const before = activeTimers();
+    const controller = new AbortController();
+
+    const waiting = awaitTargets(targets, 'all', 5000, controller.signal, resolve, POLL_MS);
+    await pause(4 * POLL_MS);
+    assert.equal(activeTimers() - before, 2, 'the wait\'s timer and one poll timer');
+    controller.abort();
+    await within(waiting);
+    assert.equal(activeTimers(), before, 'ending the wait stops the poll');
   });
 
   it('an unreadable target is listed apart, is not done, and turns settled once its result reads', async (t) => {
@@ -541,6 +586,20 @@ describe('Budget', () => {
     assert.equal(fitting.runs[1].status_only, true, 'the second result does not fit');
     assert.notEqual(fitting.runs[2].result, null, 'a later, smaller result still fits: a total equal to the budget is within it');
     assert.equal(fitting.truncated, true);
+  });
+
+  it('the budget counts UTF-8 bytes, not characters', async (t) => {
+    const { fake, registry, resolve } = rig(t);
+    const first = startRun(registry, fake);
+    const second = startRun(registry, fake);
+    const firstSize = await settleRun(fake, first, 'a'.repeat(200));
+    const secondSize = await settleRun(fake, second, 'é'.repeat(100));
+    const targets = resolveTargets(registry, { runs: [first.record.run, second.record.run] }, resolve);
+
+    const doc = envelope(targets, resolve, { until: 'all', budgetBytes: firstSize + secondSize - 1 });
+
+    assert.equal(doc.runs[1].result, null, 'one byte short: the multibyte result does not fit, though its characters would');
+    assert.equal(doc.truncated, true);
   });
 
   it('a first settled result that cannot be read now is status-only and never sets truncated', async (t) => {

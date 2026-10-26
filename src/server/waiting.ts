@@ -195,8 +195,9 @@ export async function awaitTargets(
 }
 
 /** The condition being reached: every not-done target's own ending, raced or awaited
- *  together as `until` asks. No `reread` is made for a target that is already done, or
- *  that has a promise in this process. */
+ *  together as `until` asks. A target with a promise in this process ends with it; the
+ *  rest end when the one poller reads them done. No `reread` is made for a target that
+ *  is already done, or that has a promise. */
 async function reached(
   targets: Target[],
   until: Until,
@@ -204,30 +205,40 @@ async function reached(
   pollMs: number,
   cleanups: Cleanup[],
 ): Promise<void> {
+  const polled = new Map<string, () => void>();
   const endings = targets
     .filter((target) => !isDone(target.view))
-    .map((target) => ending(target, reread, pollMs, cleanups));
+    .map((target) => target.settled ?? new Promise<void>((resolve) => {
+      polled.set(target.run, resolve);
+    }));
+  if (polled.size > 0) {
+    poll(polled, reread, pollMs, cleanups);
+  }
   await (until === 'all' ? Promise.all(endings) : Promise.race(endings));
 }
 
-/** How one target becomes done (C9): its record's `settled` promise, or — for a run
- *  this server does not hold — a poll of its evidence. */
-function ending(target: Target, reread: (run: string) => Resolution, pollMs: number, cleanups: Cleanup[]): Promise<void> {
-  return target.settled ?? polls(target.run, reread, pollMs, cleanups);
-}
-
-/** Re-read one target's evidence every poll interval until it reads done (C9): the
- *  only polling there is, and it exists only while such a target is waited on. */
-function polls(run: string, reread: (run: string) => Resolution, pollMs: number, cleanups: Cleanup[]): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const handle = setInterval(() => {
+/** Re-read every polled target each poll interval (C9), on one timer: a target leaves
+ *  the poll the moment it reads done, and the timer stops when none is left. The only
+ *  polling there is, and it exists only while such a target is waited on. */
+function poll(
+  polled: Map<string, () => void>,
+  reread: (run: string) => Resolution,
+  pollMs: number,
+  cleanups: Cleanup[],
+): void {
+  const handle = setInterval(() => {
+    for (const [run, done] of polled) {
       if (isDone(viewOfResolution(reread(run)))) {
-        resolve();
+        polled.delete(run);
+        done();
       }
-    }, pollMs);
-    cleanups.push(() => {
+    }
+    if (polled.size === 0) {
       clearInterval(handle);
-    });
+    }
+  }, pollMs);
+  cleanups.push(() => {
+    clearInterval(handle);
   });
 }
 

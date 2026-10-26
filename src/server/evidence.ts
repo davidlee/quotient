@@ -354,7 +354,8 @@ export function writeResult(layout: RunLayout, document: AgentResult): string | 
 /**
  * Read a run's result (design sec-7). Only absence is evidence that no result was
  * written: `absent` when there is no entry at all, `unreadable` for everything else that
- * stops the document being a conforming `pi-agent-result/2`. The document and the
+ * stops the document being a conforming `pi-agent-result/2` that can be serialised
+ * again. The document and the
  * moment it landed come back together, so a reader can judge both.
  */
 export function readResult(
@@ -367,11 +368,22 @@ export function readResult(
     return absent(layout.result, error) ? 'absent' : 'unreadable';
   }
   const found = parseAs(text, isAgentResult);
-  if (found === null) {return 'unreadable';}
+  if (found === null || !reserialisable(found)) {return 'unreadable';}
   try {
     return { found, writtenAt: statSync(layout.result).mtime.toISOString() };
   } catch {
     return 'unreadable';
+  }
+}
+
+/** Whether VALUE can be written out again: every reader of a result serialises it
+ *  (a wait's budget, a reply), and a parse can accept nesting too deep for that. */
+function reserialisable(value: AgentResult): boolean {
+  try {
+    JSON.stringify(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 
