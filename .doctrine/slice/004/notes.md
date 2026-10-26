@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · 6faf117
+fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · d0ae810
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -33,7 +33,7 @@ fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · 6faf117
 - D-12..D-14 — discoverResult(instructions, serverInfo); runCall `present`; legacy id-bearing notifications stay notifications; /reconcile amends sec-7 (§ PHASE-09 execution)
 - D-9..D-11 — HANDLERS shape, sec-5 refused-wait ledger line (Codex F1 contested), handle/wait/ack help sections to PHASE-10; /reconcile amends (§ PHASE-08 execution)
 - M4 (at-trigger closing) accepted at runs.test level; closingRefusal unreachable through serve (C13) (§ PHASE-08 execution)
-- open user decision (PHASE-07 close): a client that writes and closes stdin at once may get some or none of its replies — unanswered
+- IDE-006 — drain-on-EOF deferred (user, 2026-10-27); PHASE-10 docs must say: keep stdin open until replies are read; closing it cancels runs in flight
 - D-6 — Context.admission is `AdmissionContext | StartupFailure`; D-7 — runCall handler is `(signal) => Answer`; D-8 — EX-6's auditKinds(runDir, run) kept as auditKinds(layout) (C5); /reconcile amends (§ PHASE-07 execution)
 - PHASE-06 drift — sec-5 `awaitTargets` returns Promise<boolean> vs sec-7 Promise<void>; code follows sec-7; /reconcile amends sec-5 (§ PHASE-06 execution)
 - PHASE-06 F1 — wait reactions retained on live `settled` until settle; accepted (bounded); /reconcile: add to sec-9 Risks
