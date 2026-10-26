@@ -13,7 +13,9 @@ import fs, {
   mkdtempSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
+  type WriteFileOptions,
   type ObjectEncodingOptions,
   type PathOrFileDescriptor,
 } from 'node:fs';
@@ -34,6 +36,7 @@ import type { AgentResult } from './result.ts';
 import { createRegistry, type Registry, type RunRecord, type StartSpec } from './runs.ts';
 import { readHostIdentity, type HostIdentity, type RunOwner } from './session.ts';
 import {
+  auditKinds,
   completedResult,
   fakeLaunch,
   fakeProc,
@@ -327,6 +330,25 @@ function blockResultWrite(layout: RunLayout): void {
   block(join(layout.dir, '.result.json.tmp'));
 }
 
+/** What ACT does while every append to PATH fails, as a full disk would make it:
+ *  the file stays readable and nothing lands. Restored however ACT ends. */
+async function withFailingAppend(path: string, act: () => Promise<void>): Promise<void> {
+  const real = fs.appendFileSync;
+  fs.appendFileSync = (file: PathOrFileDescriptor, data: string | Uint8Array, options?: WriteFileOptions): void => {
+    if (String(file) === path) {
+      throw new Error(`ENOSPC: no space left on device, append '${path}'`);
+    }
+    real(file, data, options);
+  };
+  syncBuiltinESMExports();
+  try {
+    await act();
+  } finally {
+    fs.appendFileSync = real;
+    syncBuiltinESMExports();
+  }
+}
+
 /** One macrotask, so every microtask the registry queued has run. */
 const tick = (): Promise<void> => new Promise<void>((resolve) => {
   setImmediate(resolve);
@@ -486,14 +508,23 @@ describe('On disk', () => {
     assert.equal(view.createdAt, run.stamps[0]);
   });
 
-  it('an audit that cannot be read reads foreign with no pid', (t) => {
+  it('an audit that cannot be read reads unreadable, so a published lost record is never read working (D-5)', (t) => {
     const dir = workspace(t);
-    const run = runIn(dir);
-    block(run.layout.audit);
+    const run = runIn(dir, { records: [{ record: 'lost' }] });
     const procDir = fakeProc(dir, ALIVE);
+    viewIn(viewFromDisk(dir, run.run, procDir, HERE), 'lost');
 
-    const view = viewIn(viewFromDisk(dir, run.run, procDir, HERE), 'foreign');
-    assert.equal(view.foreignPid, null, 'an unreadable audit names no owner, so no pid');
+    block(run.layout.audit);
+    assert.equal(viewFromDisk(dir, run.run, procDir, HERE), 'unreadable');
+  });
+
+  it('a run directory that cannot be read reads unreadable, never unknown (D-5)', (t) => {
+    const dir = workspace(t);
+    const procDir = fakeProc(dir, ALIVE);
+    const looped = runName('loop');
+    symlinkSync(join(dir, looped), join(dir, looped));
+
+    assert.equal(viewFromDisk(dir, looped, procDir, HERE), 'unreadable');
   });
 
   it('no admitted record and a torn line reads foreign', (t) => {
@@ -764,12 +795,14 @@ describe('A settle that left no result', () => {
     const pending = await launchFor(fake, record);
 
     blockResultWrite(record.layout);
-    block(record.layout.audit);
-    pending.result(completedResult(record.layout, record.session));
-    await record.settled;
+    await withFailingAppend(record.layout.audit, async () => {
+      pending.result(completedResult(record.layout, record.session));
+      await record.settled;
+    });
     assert.equal(record.state, 'lost', 'the loss is unpublished but the run is lost');
+    assert.ok(!auditKinds(record.layout).includes('lost'), 'the lost record never landed; the audit still reads');
 
     const view = viewIn(viewFromDisk(fake.runDir, record.run, procDir, HERE), 'foreign');
-    assert.equal(view.foreignPid, null);
+    assert.equal(view.foreignPid, OWNER.pid, 'the readable audit names the live owner');
   });
 });

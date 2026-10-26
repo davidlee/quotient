@@ -2,7 +2,8 @@
 // as a view, or a handle no registry holds, resolved from its evidence directory.
 //
 // `viewOf` copies a record into the view every caller reads; `viewFromDisk` walks
-// sec-3's flowchart exactly — the result first, then a published `lost` record,
+// sec-3's flowchart (with D-5: a failed read of the directory or the audit reads
+// `unreadable`) — the result first, then a published `lost` record,
 // then the `admitted` record's owner and its liveness — so a run that has read
 // `completed` never then reads `working`, and a run is called `lost` only on
 // positive evidence that no one can still write it a result. Nothing here throws:
@@ -17,6 +18,7 @@ import {
   type RunLayout,
 } from './evidence.ts';
 import type { AgentResult, ResultState, Termination } from './result.ts';
+import { absent } from './paths.ts';
 import type { Registry, RunRecord } from './runs.ts';
 import { ownerLiveness, parseRunOwner, type HostIdentity, type RunOwner } from './session.ts';
 
@@ -108,11 +110,11 @@ export function viewFromDisk(
   }
   const layout = layoutFor(runDir, run);
   const mtime = directoryMtime(layout.dir);
-  if (mtime === null) {
-    return null;
+  if (mtime === 'absent' || mtime === 'unreadable') {
+    return mtime === 'absent' ? null : 'unreadable';
   }
   const result = readResult(layout);
-  const read: DiskRead = { layout, run, trail: readTrail(layout, mtime), procDir, here };
+  const read: DiskRead = { layout, run, trail: readTrail(layout, mtime.at), procDir, here };
   if (isFound(result)) {
     return settledAt(read, result);
   }
@@ -220,27 +222,30 @@ function textOf(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-/** The directory's modification time, or null when no directory is there: the run
- *  names no evidence, and a directory's mtime is the oldest stamp a view can use. */
-function directoryMtime(dir: string): string | null {
+/** The directory's modification time — the oldest stamp a view can use — or why
+ *  there is none (D-5): `absent` when no directory is there, so the run names no
+ *  evidence; `unreadable` for any other failure, which is no evidence of absence. */
+function directoryMtime(dir: string): { at: string } | 'absent' | 'unreadable' {
   try {
     const stat = statSync(dir);
-    return stat.isDirectory() ? stat.mtime.toISOString() : null;
-  } catch {
-    return null;
+    return stat.isDirectory() ? { at: stat.mtime.toISOString() } : 'absent';
+  } catch (error) {
+    return absent(dir, error) ? 'absent' : 'unreadable';
   }
 }
 
 /**
  * The result was absent: the owner decides (design sec-3). An audit that cannot be
- * read, or one with no `admitted` record and a torn line, names no owner but is no
- * evidence that none was recorded, so it reads `foreign`; a whole trail with no
- * `admitted` record, or one whose record names no owner, reads `lost`.
+ * read is a failed observation and reads `unreadable` (D-5); one with no `admitted`
+ * record and a torn line names no owner but is no evidence that none was recorded,
+ * so it reads `foreign`; a whole trail with no `admitted` record, or one whose
+ * record names no owner, reads `lost`.
  */
 function ownerResolution(read: DiskRead): Resolution {
   const { admitted, readable, torn } = read.trail;
+  // A failed read of the audit could hide a published `lost` record (D-5).
   if (!readable) {
-    return withoutResult(read, 'foreign', null);
+    return 'unreadable';
   }
   if (admitted === null) {
     return withoutResult(read, torn ? 'foreign' : 'lost', null);

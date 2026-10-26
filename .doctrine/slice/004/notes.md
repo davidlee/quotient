@@ -98,6 +98,35 @@ unshare --user --pid --fork (host /proc)    NSpid: <hostpid> 1  two fields → p
   `ackDocument` will import it). Reconcile must amend: sec-7 `runs.ts` type
   block and its Publish/launch-guard prose; sec-9 Keys bullet.
 
+- **D-4 `here` on viewFromDisk and resolveRun (2026-10-27, PHASE-05
+  planning).** Agent's proposal; user assented 2026-10-27 ("agreed"). What
+  diverges: sec-7 gives `viewFromDisk(runDir, run, procDir)` and
+  `resolveRun(registry, runDir, procDir, run)`; code adds `here: HostIdentity`
+  after `procDir` in both, because `ownerLiveness(procDir, here, owner)` needs
+  the reader's identity, which sec-3 says is read once at start-up. Reading it
+  per resolution would break that, and takes the hostname from the OS, so a
+  fixture owner (`host-a`) could never be judged `stale`. Same reason as D-2.
+  Reconcile must amend: sec-7 `views.ts` type block (and sec-7 `waiting.ts`'s
+  `resolve` closures, which bind it).
+
+- **D-5 a failed read of the audit or the run directory reads `unreadable`
+  (2026-10-27, PHASE-05 Codex F1/F3).** Agent's proposal; user assented
+  2026-10-27 ("agreed"). What diverges: sec-3's flowchart sends "result absent,
+  audit unreadable" to `foreign`, and "no directory" to unknown for any stat
+  failure. A published `lost` run whose audit then hits a transient read error
+  would read `working` after `failed` (terminal status changed); an EIO on the
+  directory would read unknown, which wait counts as done. Now: result absent +
+  audit unreadable → `unreadable`; directory stat failing other than absence
+  (paths.ts `absent`) → `unreadable`; a file at the run's path → unknown. A torn
+  audit with no `admitted` record still reads `foreign` (it was read). Same
+  rationale as DEC-068's amendment (a failed observation reports no status).
+  EX-4's second case now fails only the `lost` append (fs.appendFileSync hook),
+  so the audit stays readable and the run reads `foreign` with the owner's pid,
+  as EX-4 states. Reconcile must amend: sec-3 flowchart + "lost requires
+  positive evidence" bullet, sec-7 `views.ts` prose, sec-9 views.test bullet
+  ("an audit that cannot be read → foreign"), DEC-068 (`unreadable` widens to
+  the audit and the directory).
+
 ## Plan amendments
 
 - **VT-1 keyword (2026-10-26, PHASE-03 planning).** `request-invalid` →
