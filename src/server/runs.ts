@@ -179,9 +179,15 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve: (value: T): void => { box.resolve?.(value); } };
 }
 
-/** One line from a caught value, for a diagnostic or a refusal's detail. */
+/** One line from a caught value, for a diagnostic or a refusal's detail. Total:
+ *  a value that cannot be printed (`Object.create(null)`) must not stop the
+ *  settlement that reports it. */
 function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return 'a value that cannot be printed';
+  }
 }
 
 /** Whether a record has reached a terminal state: settled, or lost. */
@@ -282,6 +288,7 @@ function audit(state: RegistryState, record: RunRecord, fields: AuditRecord): st
  * a refused start re-admits.
  */
 function start(state: RegistryState, spec: StartSpec): { ok: true; record: RunRecord; document: Promise<AgentResult> } | Refused {
+  if (state.closed) { return closingRefusal(spec.admitted); }
   const layout = runLayout(spec.admitted.runDir, spec.admitted.callId);
   const predecessor = previousRun(state, spec.lane);
   const settled = deferred<undefined>();
@@ -303,6 +310,13 @@ function start(state: RegistryState, spec: StartSpec): { ok: true; record: RunRe
     state.admitting = false;
   }
   return { ok: true, record, document: document.promise };
+}
+
+/** A start the closing server will not take: nothing is published, so nothing is
+ *  left for `close()` to settle, and the session goes back. */
+function closingRefusal(admitted: Admitted): Refused {
+  admitted.session.release();
+  return { ok: false, reason: 'server-error', detail: 'the server is closing: no new run is started' };
 }
 
 /** One run's record, published but not yet inserted: the handle is the evidence
@@ -412,7 +426,7 @@ function run(state: RegistryState, record: RunRecord): void {
   const queued = !state.admitting;
   record.state = 'running';
   Promise.resolve()
-    .then(() => state.launch(record, held.admitted, queued, (ts) => { record.updatedAt = ts; }))
+    .then(() => launchUnlessClosing(state, record, held.admitted, queued))
     .then(
       (outcome) => { ended(state, record, outcome); },
       (error: unknown) => { crashed(state, record, error); },
@@ -420,9 +434,26 @@ function run(state: RegistryState, record: RunRecord): void {
     .catch((error: unknown) => { report(state, `run ${record.run} could not record its ending: ${messageOf(error)}`); });
 }
 
+/** The launch itself, unless EOF was observed since the run was placed: a run
+ *  that never launched is dropped as a queued one is, so `close()` still finds
+ *  every record settled. */
+async function launchUnlessClosing(
+  state: RegistryState,
+  record: RunRecord,
+  admitted: Admitted,
+  queued: boolean,
+): Promise<{ refused: Refused } | { result: AgentResult } | null> {
+  if (state.closed) {
+    dropQueued(state, record);
+    return null;
+  }
+  return state.launch(record, admitted, queued, (ts) => { record.updatedAt = ts; });
+}
+
 /** A launch's answer: the run's own document, or the refusal re-admission decided,
  *  which is recorded as a `refused` record before the run settles as it. */
-function ended(state: RegistryState, record: RunRecord, outcome: { refused: Refused } | { result: AgentResult }): void {
+function ended(state: RegistryState, record: RunRecord, outcome: { refused: Refused } | { result: AgentResult } | null): void {
+  if (outcome === null) { return; }
   if ('refused' in outcome) {
     audit(state, record, { record: 'refused', reason: outcome.refused.reason, detail: outcome.refused.detail });
     settle(state, record, refusedResult(outcome.refused.reason, outcome.refused.detail));

@@ -324,22 +324,39 @@ describe('Settle', () => {
     assert.deepEqual(registry.ack([run.record.run]), [{ taskId: run.record.run, acknowledged: true }]);
   });
 
-  it('a second settlement of a terminal record changes nothing', async (t) => {
+  it('a cancel and close() of a terminal record change nothing', async (t) => {
+    const fake = fakeLaunch(t);
+    const registry = registryFor(fake);
+    const head = startRun(registry, fake, { lane: 'again' });
+    const queued = startRun(registry, fake, { lane: 'again' });
+    const pending = await launchFor(fake, head.record);
+    await registry.cancel([queued.record.run]);
+    const document = settledDocument(queued.record.layout);
+
+    const again = registry.cancel([queued.record.run]);
+    const closed = registry.close();
+    pending.result(completedResult(head.record.layout, head.record.session));
+    await again;
+    await closed;
+
+    assert.deepEqual(settledDocument(queued.record.layout), document, 'the first settlement is the only one');
+    assert.deepEqual(auditKinds(queued.record.layout), ['admitted', 'cancelled'], 'no second ending is recorded');
+    assert.equal(queued.record.state, 'settled');
+    assert.equal(queued.release.calls.length, 1, 'a session is released once');
+    assert.equal(fake.launches.length, 1);
+  });
+
+  it('a launch that rejects with an unprintable value still settles failed', async (t) => {
     const fake = fakeLaunch(t);
     const registry = registryFor(fake);
     const run = startRun(registry, fake);
     const pending = await launchFor(fake, run.record);
-    const document = completedResult(run.record.layout, run.record.session);
-    pending.result(document);
+
+    pending.reject(Object.create(null));
     await run.record.settled;
 
-    pending.result(failedResult('error', ['error'], run.record.session, EMPTY_STATUS, run.record.layout));
-    await tick();
-
-    assert.deepEqual(settledDocument(run.record.layout), document, 'the first settlement is the only one');
-    assert.equal(run.record.state, 'settled');
-    assert.equal(run.release.calls.length, 1, 'a session is released once');
-
+    assert.deepEqual(run.record.outcome, { state: 'failed', causes: ['error'] });
+    assert.equal(run.release.calls.length, 1);
     await registry.close();
   });
 
@@ -798,6 +815,37 @@ describe('Cancel', () => {
 });
 
 describe('Close', () => {
+  it('closing() before a launch fires drops the run instead of launching it', async (t) => {
+    const fake = fakeLaunch(t);
+    const registry = registryFor(fake);
+    const run = startRun(registry, fake);
+
+    registry.closing();
+    await run.record.settled;
+
+    assert.equal(wasLaunched(fake, run.record), false, 'nothing launches after closing()');
+    assert.deepEqual(run.record.outcome, { state: 'incomplete', causes: ['eof'] });
+    assert.deepEqual(auditKinds(run.record.layout), ['admitted', 'dropped']);
+    assert.equal(run.release.calls.length, 1);
+    await registry.close();
+  });
+
+  it('a start after closing() refuses and frees its session', (t) => {
+    const fake = fakeLaunch(t);
+    const registry = registryFor(fake);
+    registry.closing();
+    const fixture = fake.admitted();
+
+    const refused = registry.start({ ...DEFAULT_START, lane: 'late', admitted: fixture.admitted });
+
+    if (refused.ok) {
+      assert.fail('a closing registry must not take a new run');
+    }
+    assert.equal(refused.reason, 'server-error');
+    assert.equal(releaseOf(fixture.release).state, 'unwatched', 'no record was inserted');
+    assert.deepEqual(registry.implicit(), []);
+  });
+
   it('after closing() a head that settles launches no successor', async (t) => {
     const fake = fakeLaunch(t);
     const registry = registryFor(fake);

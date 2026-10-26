@@ -684,8 +684,8 @@ export type Pending = {
   result(document: AgentResult): void;
   /** End it as a re-admission refusal: the registry writes the `refused` record. */
   refuse(refused: Refused): void;
-  /** End it by rejecting, as a run task that threw after launch. */
-  reject(error: Error): void;
+  /** End it by rejecting, as a run task that threw after launch — with any value. */
+  reject(error: unknown): void;
 };
 
 /** One fixture admission: what `start` consumes, and the spy to read afterwards. */
