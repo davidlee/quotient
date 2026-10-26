@@ -50,6 +50,7 @@ touched file is at zero. A phase may not end above these.
 server.ts 13 · spawn.ts 21 · session.ts 17 · result.ts 10 · help/help.ts 11
 test-rig.ts 27 · server.test.ts 32 · spawn.test.ts 38 · session.test.ts 36
 result.test.ts 16 · gate.test.ts 56 · childview.test.ts 16 · evidence.ts 0
+profiles.test.ts 49 · reduce/reduce.ts 125 · help.test.ts 0 · drift.test.ts 0
 ```
 
 Host probe (PHASE-02 EN-2), this host, Node 22:
