@@ -10,13 +10,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawnSync, type ChildProcess } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SESSION_GRAMMAR, acquireSession, isSessionId, mintSessionId, processStartTime, releaseSession, sessionPaths, type SessionPaths } from './session.ts';
-import { attempts } from './test-rig.ts';
+import {
+  SESSION_GRAMMAR,
+  acquireSession,
+  isSessionId,
+  mintSessionId,
+  ownerLiveness,
+  processStartTime,
+  readHostIdentity,
+  releaseSession,
+  sessionPaths,
+  type HostIdentity,
+  type Liveness,
+  type RunOwner,
+  type SessionPaths,
+} from './session.ts';
+import { attempts, fakeProc, type FakeProcOwner } from './test-rig.ts';
 
 const SESSION_MODULE = new URL('./session.ts', import.meta.url).href;
+
+/** This server's host identity, as `readHostIdentity` reads it once at start-up. */
+const HERE: HostIdentity = { boot: 'boot-a', pidns: 'pid:[1]', host: 'host-a' };
 
 // The caller the tests drive: an ordinary process using session.ts, never the
 // server. `fork`ed for the cases that need a second live owner; `spawnSync`ed for
@@ -220,7 +237,7 @@ function mode(path: string): number {
 
 test('a call with no session mints one and lays out owner-only state beside it (EX-1, EX-9)', () => {
   const { home, runDir } = state();
-  const acquisition = acquireSession({ sessionHome: home, runDir, root: '/work/one', capability: 'read', callId: 7 });
+  const acquisition = acquireSession({ sessionHome: home, runDir, root: '/work/one', capability: 'read', callId: 7, here: HERE });
   assert.equal(acquisition.ok, true);
   if (!acquisition.ok) {return;}
 
@@ -274,6 +291,7 @@ test('the grammar accepts one alnum character and refuses a trailing "." "_" or 
       root: '/work/one',
       capability: 'read',
       callId: 1,
+      here: HERE,
     });
     assert.equal(acquisition.ok, false);
     if (acquisition.ok) {return;}
@@ -287,7 +305,7 @@ test('the grammar accepts one alnum character and refuses a trailing "." "_" or 
 
 test('a second caller is refused session-busy while the first holds the lock (EX-2)', () => {
   const { home, runDir, helperPath } = state();
-  const held = acquireSession({ sessionHome: home, runDir, session: 'oneshot', root: '/work/one', capability: 'read', callId: 1 });
+  const held = acquireSession({ sessionHome: home, runDir, session: 'oneshot', root: '/work/one', capability: 'read', callId: 1, here: HERE });
   assert.equal(held.ok, true);
   if (!held.ok) {return;}
 
@@ -302,6 +320,7 @@ test('a second caller is refused session-busy while the first holds the lock (EX
         root: '/work/one',
         capability: 'read',
         callId: 2,
+        here: HERE,
       }),
     },
     encoding: 'utf8',
@@ -336,7 +355,7 @@ test('a refused acquisition creates no session directory: the layout is made onl
   });
   assert.equal(existsSync(paths.sessionDir), false, 'nothing has created the session directory yet');
 
-  const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5 });
+  const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5, here: HERE });
   assert.equal(refused.ok, false);
   if (refused.ok) {return;}
   assert.equal(refused.reason, 'session-busy');
@@ -352,7 +371,7 @@ test('two forked callers racing for one session: exactly one owns it, the other 
   const { home, runDir, helperPath } = state();
   const session = 'race';
   const raced = await callers(t, helperPath, 2);
-  const options = { sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1 };
+  const options = { sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1, here: HERE };
   for (const caller of raced) {caller.send({ action: 'acquire', options, hold: true });}
   const answers = await Promise.all(raced.map((caller) => caller.next()));
 
@@ -378,7 +397,7 @@ test('a first-use race with conflicting roots binds exactly once; another root o
   const session = 'bind';
   const roots = ['/work/one', '/work/two'];
   const raced = await callers(t, helperPath, 2);
-  raced.forEach((caller, index) => { caller.send({ action: 'acquire', hold: true, options: { sessionHome: home, runDir, session, root: roots[index], capability: 'read', callId: index } }); });
+  raced.forEach((caller, index) => { caller.send({ action: 'acquire', hold: true, options: { sessionHome: home, runDir, session, root: roots[index], capability: 'read', callId: index, here: HERE } }); });
   const answers = await Promise.all(raced.map((caller) => caller.next()));
 
   const winnerIndex = answers.findIndex((answer) => answer.ok === true);
@@ -393,13 +412,13 @@ test('a first-use race with conflicting roots binds exactly once; another root o
   await Promise.all(raced.map((caller) => caller.stop()));
 
   // Resuming on another root or another capability is refused, never rebound.
-  const otherRoot = acquireSession({ sessionHome: home, runDir, session, root: roots[1 - winnerIndex], capability: 'read', callId: 2 });
+  const otherRoot = acquireSession({ sessionHome: home, runDir, session, root: roots[1 - winnerIndex], capability: 'read', callId: 2, here: HERE });
   assert.equal(otherRoot.ok, false);
   if (otherRoot.ok) {return;}
   assert.equal(otherRoot.reason, 'session-root-mismatch');
   assert.ok(otherRoot.detail.includes(roots[winnerIndex]));
 
-  const otherCapability = acquireSession({ sessionHome: home, runDir, session, root: roots[winnerIndex], capability: 'write', callId: 3 });
+  const otherCapability = acquireSession({ sessionHome: home, runDir, session, root: roots[winnerIndex], capability: 'write', callId: 3, here: HERE });
   assert.equal(otherCapability.ok, false);
   if (otherCapability.ok) {return;}
   assert.equal(otherCapability.reason, 'session-capability-mismatch');
@@ -408,7 +427,7 @@ test('a first-use race with conflicting roots binds exactly once; another root o
   assert.equal(existsSync(paths.lock), false);
   assert.equal(readRecord(paths.binding).root, roots[winnerIndex]);
 
-  const resumed = acquireSession({ sessionHome: home, runDir, session, root: roots[winnerIndex], capability: 'read', callId: 4 });
+  const resumed = acquireSession({ sessionHome: home, runDir, session, root: roots[winnerIndex], capability: 'read', callId: 4, here: HERE });
   assert.equal(resumed.ok, true, 'the bound pair still resumes');
   if (resumed.ok) {resumed.release();}
 });
@@ -421,7 +440,7 @@ test('two callers presented with one stale lock: exactly one reclaims under <loc
   const paths = writeLock(home, session, staleOwner(session));
 
   const raced = await callers(t, helperPath, 2);
-  const options = { sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1 };
+  const options = { sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1, here: HERE };
   for (const caller of raced) {caller.send({ action: 'acquire', options, hold: true });}
   const answers = await Promise.all(raced.map((caller) => caller.next()));
 
@@ -450,7 +469,7 @@ test('no caller wins an O_EXCL create of <lock> across a reclaim: the rename nev
   const probing = await prober.next();
   assert.equal(probing.probing, true);
 
-  const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 3 });
+  const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 3, here: HERE });
   assert.equal(reclaimed.ok, true);
   if (!reclaimed.ok) {return;}
 
@@ -470,7 +489,7 @@ test('a killed reclaimer leaves a live lock plus an orphan claim: the next calle
   // replacing, and the claim it never released.
   writeFileSync(paths.claim, '');
 
-  const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 9 });
+  const refused = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 9, here: HERE });
   assert.equal(refused.ok, false);
   if (refused.ok) {return;}
   assert.equal(refused.reason, 'session-busy');
@@ -479,14 +498,14 @@ test('a killed reclaimer leaves a live lock plus an orphan claim: the next calle
   assert.equal(existsSync(paths.claim), true, 'the claim is left in place: one level of indirection, no recursion');
 
   // A second caller refuses identically: a lost claim is not a retry storm.
-  const again = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 10 });
+  const again = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 10, here: HERE });
   assert.equal(again.ok, false);
   if (again.ok) {return;}
   assert.equal(again.reason, 'session-busy');
 
   // Only an operator clears it; then the stale lock is reclaimed normally.
   unlinkSync(paths.claim);
-  const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 11 });
+  const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 11, here: HERE });
   assert.equal(reclaimed.ok, true, 'once the operator clears the claim, the stale lock is reclaimable');
   if (reclaimed.ok) {reclaimed.release();}
 });
@@ -503,7 +522,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
     paths.lock,
     `${JSON.stringify({ ...staleOwner(session), pid: process.pid, starttime: ownStartTime() })}\n`,
   );
-  const busy = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1 });
+  const busy = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 1, here: HERE });
   assert.equal(busy.ok, false);
   if (busy.ok) {return;}
   assert.equal(busy.reason, 'session-busy');
@@ -512,7 +531,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
   // A reused pid: same pid, another start time -> another owner, and that owner
   // is gone, so the lock is stale rather than live.
   writeFileSync(paths.lock, `${JSON.stringify(staleOwner(session))}\n`);
-  const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 2 });
+  const reclaimed = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 2, here: HERE });
   assert.equal(reclaimed.ok, true, 'a reused pid does not read as the same owner');
   if (reclaimed.ok) {reclaimed.release();}
 
@@ -527,6 +546,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
     root: '/work/one',
     capability: 'read',
     callId: 3,
+    here: HERE,
   });
   assert.equal(unknowable.ok, false);
   if (unknowable.ok) {return;}
@@ -536,10 +556,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
 
   // Unknown for the holder alone: a pid table that reports this process but
   // carries a stat line without field 22 for the owner.
-  const fake = join(dir, 'fake-proc');
-  mkdirSync(join(fake, String(process.pid)), { recursive: true });
-  copyFileSync(join('/proc', String(process.pid), 'stat'), join(fake, String(process.pid), 'stat'));
-  mkdirSync(join(fake, '999999'), { recursive: true });
+  const fake = fakeProc(dir, { pid: 999_999, starttime: '1' });
   writeFileSync(join(fake, '999999', 'stat'), '999999 (node) S\n');
   const unparsable = acquireSession({
     sessionHome: home,
@@ -549,6 +566,7 @@ test('owner identity is pid plus kernel start time: a reused pid is stale, and u
     root: '/work/one',
     capability: 'read',
     callId: 4,
+    here: HERE,
   });
   assert.equal(unparsable.ok, false);
   if (unparsable.ok) {return;}
@@ -564,7 +582,7 @@ test('every reclaim leaves an attempts.jsonl line naming the replaced record, th
   const stale = staleOwner(session);
   const paths = writeLock(home, session, stale);
 
-  const acquisition = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5 });
+  const acquisition = acquireSession({ sessionHome: home, runDir, session, root: '/work/one', capability: 'read', callId: 5, here: HERE });
   assert.equal(acquisition.ok, true);
   if (!acquisition.ok) {return;}
 
@@ -633,4 +651,92 @@ test('release never unlinks a lock that is not this owner\'s record (sec-6: no u
     diagnostics,
   );
   assert.deepEqual(notes, [], 'releasing an already-absent lock says nothing');
+});
+
+// ── Host identity and run owners (PHASE-02 VT-1) ───────────────────────────
+
+/** A staged pid table in a fresh temp directory: one process as the tables see it. */
+function procTable(staged: FakeProcOwner | 'unreadable'): string {
+  return fakeProc(mkdtempSync(join(tmpdir(), 'pi-mcp-proc-')), staged);
+}
+
+test('an acquisition reports the owner it recorded, with this server\'s identity carried verbatim (PHASE-02 VT-1)', () => {
+  const { home, runDir } = state();
+  const acquisition = acquireSession({ sessionHome: home, runDir, root: '/work/one', capability: 'read', callId: 1, here: HERE });
+  assert.equal(acquisition.ok, true);
+  // The record the lock carries is this process's own kernel start time, so the
+  // owner names the same process on the same host, and nothing more.
+  assert.deepEqual(acquisition.owner, { pid: process.pid, starttime: ownStartTime(), ...HERE });
+  acquisition.release();
+});
+
+test('readHostIdentity reads boot, pid namespace and host, and each is null when it cannot be read (PHASE-02 VT-1)', () => {
+  const staged = procTable({ pid: 999_999, starttime: '1', boot: 'b1', pidns: 'pid:[7]' });
+  assert.deepEqual(readHostIdentity(staged, () => 'h1'), { boot: 'b1', pidns: 'pid:[7]', host: 'h1' }, 'the boot id is trimmed of its newline');
+
+  const bare = procTable({ pid: 999_999, starttime: '1' });
+  assert.deepEqual(readHostIdentity(bare, () => 'h1'), { boot: null, pidns: null, host: 'h1' }, 'no boot_id and no ns link read as null');
+  assert.equal(readHostIdentity(bare, () => { throw new Error('no hostname'); }).host, null, 'a hostname probe that throws is null');
+  assert.equal(readHostIdentity(bare, () => '').host, null, 'an empty hostname is null');
+
+  const unreadable = procTable('unreadable');
+  assert.deepEqual(readHostIdentity(unreadable, () => 'h1'), { boot: null, pidns: null, host: 'h1' }, 'an unreadable pid table has no boot and no pidns');
+
+  // The namespace is only this process's when NSpid names exactly one: two fields
+  // are a nested namespace, and a missing line says nothing at all.
+  const nested = procTable({ pid: 999_999, starttime: '1', pidns: 'pid:[7]', nspid: [4242, 1] });
+  assert.equal(readHostIdentity(nested, () => 'h1').pidns, null, 'two NSpid fields do not name this process\'s namespace');
+  const unnamed = procTable({ pid: 999_999, starttime: '1', pidns: 'pid:[7]', nspid: [] });
+  assert.equal(readHostIdentity(unnamed, () => 'h1').pidns, null, 'a missing NSpid line names no namespace');
+});
+
+test('readHostIdentity on this host names its boot, its pid namespace and its hostname (PHASE-02 VT-1)', () => {
+  const here = readHostIdentity('/proc');
+  assert.ok(typeof here.boot === 'string' && here.boot.length > 0, 'this host has a readable boot id');
+  // The namespace is named only when this /proc numbers pids in this process's
+  // own namespace (one NSpid field); under an ancestor's /proc it must be null.
+  const nspid = readFileSync('/proc/self/status', 'utf8').split('\n').find((line) => line.startsWith('NSpid:')) ?? '';
+  const ownTable = nspid.slice('NSpid:'.length).trim().split(/\s+/).length === 1;
+  assert.equal(here.pidns, ownTable ? readlinkSync('/proc/self/ns/pid') : null);
+  assert.equal(here.host, hostname());
+});
+
+/** The staged table the liveness rows read, and the two identities they vary. */
+const STAGED_OWNER: FakeProcOwner = { pid: 999_999, starttime: '100', boot: 'b', pidns: 'pid:[1]' };
+const THIS_HOST: HostIdentity = { boot: 'b', pidns: 'pid:[1]', host: 'h' };
+/** A pid no staged table carries: absent from the table, not unreadable. */
+const ABSENT = 888_888;
+
+/** An owner record on THIS_HOST, unless the row says otherwise. */
+const ownerOn = (fields: Partial<RunOwner> = {}): RunOwner => ({ ...STAGED_OWNER, ...THIS_HOST, ...fields });
+
+test('ownerLiveness is alive for one identity, stale for a gone owner or another boot, and unknown when it cannot know (PHASE-02 VT-1)', () => {
+  const rows: [string, FakeProcOwner | 'unreadable', HostIdentity, RunOwner, Liveness][] = [
+    ['same host, boot and pidns, same start time', STAGED_OWNER, THIS_HOST, ownerOn(), 'alive'],
+    ['same identity, another start time', STAGED_OWNER, THIS_HOST, ownerOn({ starttime: '200' }), 'stale'],
+    ['same identity, the owner pid absent from the table', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT }), 'stale'],
+    ['same identity, an unreadable table', 'unreadable', THIS_HOST, ownerOn(), 'unknown'],
+    // The boot decides before the table is read: an owner alive there is still stale.
+    ['another boot, with the owner alive in the table', STAGED_OWNER, THIS_HOST, ownerOn({ boot: 'other' }), 'stale'],
+    ['another boot, with the table unreadable', 'unreadable', THIS_HOST, ownerOn({ boot: 'other' }), 'stale'],
+    // An ended boot outranks a namespace mismatch: its pids are all gone.
+    ['another boot and another pid namespace', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, boot: 'other', pidns: 'pid:[2]' }), 'stale'],
+    ['another host, the owner pid absent', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, host: 'elsewhere' }), 'unknown'],
+    // Another boot means stale only on this host: elsewhere, a boot id says nothing.
+    ['another host and another boot', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, host: 'elsewhere', boot: 'other' }), 'unknown'],
+    ['another pid namespace, the owner pid absent', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, pidns: 'pid:[2]' }), 'unknown'],
+    // A component either side cannot read is unknown, never a steal.
+    ['the owner names no boot', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, boot: null }), 'unknown'],
+    ['the owner names no pid namespace', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, pidns: null }), 'unknown'],
+    ['the owner names no host', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, host: null }), 'unknown'],
+    ['this server names no boot', STAGED_OWNER, { ...THIS_HOST, boot: null }, ownerOn({ pid: ABSENT }), 'unknown'],
+    ['this server names no pid namespace', STAGED_OWNER, { ...THIS_HOST, pidns: null }, ownerOn({ pid: ABSENT }), 'unknown'],
+    ['this server names no host', STAGED_OWNER, { ...THIS_HOST, host: null }, ownerOn({ pid: ABSENT }), 'unknown'],
+    ['neither side names a pid namespace', STAGED_OWNER, { ...THIS_HOST, pidns: null }, ownerOn({ pid: ABSENT, pidns: null }), 'unknown'],
+    ['another boot, but no pid namespace on this side', STAGED_OWNER, { ...THIS_HOST, pidns: null }, ownerOn({ pid: ABSENT, boot: 'other' }), 'unknown'],
+    ['another boot, but no pid namespace on the owner side', STAGED_OWNER, THIS_HOST, ownerOn({ pid: ABSENT, pidns: null, boot: 'other' }), 'unknown'],
+  ];
+  for (const [name, staged, here, owner, expected] of rows) {
+    assert.equal(ownerLiveness(procTable(staged), here, owner), expected, name);
+  }
 });

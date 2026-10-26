@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -575,4 +576,59 @@ export async function converse(
 export function resultDocument(reply: Record<string, any>): Record<string, any> {
   assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
   return JSON.parse(reply.result.content[0].text) as Record<string, any>;
+}
+
+/** One process as a fake pid table should show it: its start time, and the host
+ *  facts the session module reads to decide where a pid means something. */
+export type FakeProcOwner = { pid: number; starttime: string; boot?: string; pidns?: string; nspid?: number[] };
+
+/**
+ * A pid table staged under DIR, for `ServeOptions.procDir` and
+ * `AcquireOptions.procDir`: `<proc>/<pid>/stat` for the staged owner with
+ * `starttime` at field 22, PLUS this process's own stat line copied from /proc/self, so
+ * an acquisition always finds its own start time under any staged owner.
+ *
+ * `boot` stages `sys/kernel/random/boot_id`, `pidns` a `self/ns/pid` symlink and
+ * `nspid` the `NSpid:` line of `self/status` (an empty list omits it). Nothing
+ * staged is nothing written: the reader sees null. `'unreadable'` is a path that
+ * does not exist, which is what an unreadable pid table looks like.
+ */
+export function fakeProc(dir: string, staged: FakeProcOwner | 'unreadable'): string {
+  const procDir = join(dir, 'proc');
+  if (staged === 'unreadable') {return procDir;}
+
+  const own = join(procDir, String(process.pid), 'stat');
+  mkdirSync(dirname(own), { recursive: true });
+  // `/proc/self`, not `/proc/<process.pid>`: under a /proc mounted from an
+  // ancestor pid namespace, `process.pid` numbers another process there.
+  copyFileSync('/proc/self/stat', own);
+
+  // A staged owner that IS this process keeps the real stat line: its start time
+  // is the one the kernel reports, so the record and the table agree.
+  if (staged.pid !== process.pid) {
+    const owner = String(staged.pid);
+    const stat = join(procDir, owner, 'stat');
+    mkdirSync(dirname(stat), { recursive: true });
+    const fields = Array.from({ length: 18 }, () => '0');
+    writeFileSync(stat, `${owner} (node) S ${fields.join(' ')} ${staged.starttime} 0 0\n`);
+  }
+
+  const nspid = staged.nspid ?? [process.pid];
+  const status = join(procDir, 'self', 'status');
+  mkdirSync(dirname(status), { recursive: true });
+  writeFileSync(status, `Name:\tnode\n${nspid.length === 0 ? '' : `NSpid:\t${nspid.join('\t')}\n`}`);
+
+  if (staged.boot !== undefined) {
+    const bootId = join(procDir, 'sys', 'kernel', 'random', 'boot_id');
+    mkdirSync(dirname(bootId), { recursive: true });
+    writeFileSync(bootId, `${staged.boot}\n`);
+  }
+
+  if (staged.pidns !== undefined) {
+    const ns = join(procDir, 'self', 'ns', 'pid');
+    mkdirSync(dirname(ns), { recursive: true });
+    symlinkSync(staged.pidns, ns);
+  }
+
+  return procDir;
 }

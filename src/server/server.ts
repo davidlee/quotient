@@ -23,7 +23,7 @@ import { admitCall, clampCeilings, formExtensions, selectSlot, transcriptBudget,
 import { checkProfileExtensions, effectiveTools, loadProfiles, resolveProfile, resolveRoot, type Snapshot } from './profiles.ts';
 import { absent } from './paths.ts';
 import { chooseForm, lookupProjectForm } from './forms.ts';
-import { acquireSession } from './session.ts';
+import { acquireSession, readHostIdentity, type HostIdentity } from './session.ts';
 import { checkChildView } from './childview.ts';
 import { attemptsPath, appendAttempt, runLayout, writeAttemptProbe, type CallId, type RunLayout } from './evidence.ts';
 import { runChild, DEFAULT_GRACE_MS } from './spawn.ts';
@@ -105,6 +105,9 @@ type Context = {
   /** Where the policy, evidence and sessions are: resolved once, from the
    *  environment, which is fixed for the process lifetime. */
   locations: Locations;
+  /** This server's host identity, read once at start-up: where its pid means
+   *  something (design sec-3 Start step 4). */
+  here: HostIdentity;
   /** `tools/call` is the only method that overlaps the reader (design sec-4); a
    *  cancellation names one of these by its request id. The id is the client's to
    *  repeat, so one key holds every call running under it: the invariant is that
@@ -341,6 +344,7 @@ async function callTool(
     capability: profile.profile.filesystem,
     callId: id,
     policyDigest: admission.digest,
+    here: context.here,
   });
   if (!session.ok) {return refuse(session.reason, session.detail);}
 
@@ -727,6 +731,7 @@ export async function serve(
   const launchDir = options.launchDir ?? process.cwd();
   const locations = resolveLocations(env);
   const startup = loadStartup(locations, launchDir);
+  const here = readHostIdentity('/proc');
   // One line, naming the path: the server refuses from here on, and an operator
   // needs to know which file to fix.
   if (!startup.ok) {diagnostics.write(`quotient: ${startupFailure(startup)}\n`);}
@@ -737,6 +742,7 @@ export async function serve(
     startup,
     launchDir,
     locations,
+    here,
     inFlight: new Map(),
     closed: false,
     graceMs: options.graceMs ?? DEFAULT_GRACE_MS,

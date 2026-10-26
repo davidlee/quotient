@@ -27,12 +27,14 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { hostname as osHostname } from 'node:os';
 import { join } from 'node:path';
 import { errorCode } from './paths.ts';
 import { appendAttempt, type CallId } from './evidence.ts';
@@ -118,6 +120,8 @@ export type AcquireOptions = {
   procDir?: string;
   /** Recorded on a reclaim line when the policy was readable. */
   policyDigest?: string | null;
+  /** This server's host identity, read once at start-up (`readHostIdentity`). */
+  here: HostIdentity;
 };
 
 export type SessionAcquisition =
@@ -129,6 +133,8 @@ export type SessionAcquisition =
       root: string;
       capability: Filesystem;
       binding: BindingRecord;
+      /** Who holds the lock, and where its pid means something (design sec-3 Start step 4). */
+      owner: RunOwner;
       /** Release last: only after the work this lock protects has finished. */
       release: () => void;
     }
@@ -214,6 +220,86 @@ export function observeLiveness(procDir: string, pid: number, starttime: string)
   const observed = processStartTime(procDir, pid);
   if (!observed.ok) {return observed.missing ? 'stale' : 'unknown';}
   return observed.starttime === starttime ? 'alive' : 'stale';
+}
+
+// ── Run owners ─────────────────────────────────────────────────────────────
+
+/**
+ * Where a pid means something (design sec-3, DEC-067): the boot, the pid
+ * namespace and the host. Each is null when it cannot be read.
+ */
+export type HostIdentity = { boot: string | null; pidns: string | null; host: string | null };
+
+/** A run's owning server: the session lock's pid and start time, plus where they mean something. */
+export type RunOwner = { pid: number; starttime: string } & HostIdentity;
+
+/** What one read says: its value, or null when the read throws. */
+function readOrNull<T>(read: () => T): T | null {
+  try {
+    return read();
+  } catch {
+    return null;
+  }
+}
+
+/** A text file's trimmed content, or null when it is unreadable or empty. */
+function readTextOrNull(path: string): string | null {
+  const text = readOrNull(() => readFileSync(path, 'utf8'))?.trim();
+  return text === undefined || text === '' ? null : text;
+}
+
+/**
+ * The pid namespace the pid table at `procDir` numbers pids in, or null when it
+ * cannot say. `NSpid`'s leftmost value is numbered in the namespace that owns the
+ * pid table and its last in this process's, so exactly one field means the table
+ * numbers pids in this process's own namespace — and the `ns/pid` id then names
+ * the numbering `observeLiveness` reads. Two fields are a nested namespace, and a
+ * missing line says nothing at all: both are null.
+ */
+function readPidNamespace(procDir: string): string | null {
+  const status = readTextOrNull(join(procDir, 'self/status'));
+  const line = status?.split('\n').find((each) => each.startsWith('NSpid:'));
+  const fields = line?.slice('NSpid:'.length).trim().split(/\s+/).filter(Boolean) ?? [];
+  if (fields.length !== 1) {return null;}
+  return readOrNull(() => readlinkSync(join(procDir, 'self/ns/pid')));
+}
+
+/**
+ * Where this server's pid means something (design sec-3 Start step 4, sec-7
+ * `session.ts`): read ONCE at start-up, so the boot, the pid namespace and the host
+ * are a fixed answer for the process lifetime. Each component is null when it is
+ * unreadable; nothing here throws.
+ */
+export function readHostIdentity(procDir: string, hostname: () => string = osHostname): HostIdentity {
+  const boot = readTextOrNull(join(procDir, 'sys/kernel/random/boot_id'));
+  const pidns = readPidNamespace(procDir);
+  const host = readOrNull(hostname);
+  return { boot, pidns, host: host === null || host === '' ? null : host };
+}
+
+/**
+ * Whether every component of an identity could be read. An unreadable one decides
+ * nothing, so it can never take part in a verdict but `unknown`.
+ */
+function fullyNamed(identity: HostIdentity): boolean {
+  return identity.boot !== null && identity.pidns !== null && identity.host !== null;
+}
+
+/**
+ * The owner's liveness on the host-identity rule (design sec-3, DEC-067): a pid
+ * means something only in one boot, on one host, in one pid namespace, so those
+ * decide first and the pid table is consulted last. A component either side cannot
+ * read is `unknown`, never a steal; another host's boot says nothing about this one,
+ * so host is compared before boot. This governs run resolution only: session locks
+ * keep `observeLiveness` alone (RSK-003).
+ */
+export function ownerLiveness(procDir: string, here: HostIdentity, owner: RunOwner): Liveness {
+  if (!fullyNamed(here) || !fullyNamed(owner)) {return 'unknown';}
+  if (here.host !== owner.host) {return 'unknown';}
+  // The owner's boot has ended: its pid table is not consulted.
+  if (here.boot !== owner.boot) {return 'stale';}
+  if (here.pidns !== owner.pidns) {return 'unknown';}
+  return observeLiveness(procDir, owner.pid, owner.starttime);
 }
 
 // ── Records ────────────────────────────────────────────────────────────────
@@ -586,6 +672,7 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
     root,
     capability,
     binding: bound.binding,
+    owner: { pid: record.pid, starttime: record.starttime, ...options.here },
     release: () => { releaseSession(paths, record); },
   };
 }
