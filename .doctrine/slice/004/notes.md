@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-05 in_progress (code done, wrap pending) · 4b48ddf
+fresh-as-of: 2026-10-27 · PHASE-05 completed; PHASE-06 next · 412f01a
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -15,7 +15,7 @@ fresh-as-of: 2026-10-27 · PHASE-05 in_progress (code done, wrap pending) · 4b4
 - PHASE-03 done — callTool extracted to tools/admission/execute/documents (656c57b, cb45a56; delta 9f4d8b1..cb45a56); Codex pass 4 minor fixed (§ PHASE-03 execution)
 - PHASE-04 done — runs.ts registry, fakeLaunch, runs.test.ts (175442c, 032df24; delta 3060d07..032df24); Codex pass 1 high + 1 medium + 1 minor fixed (§ PHASE-04 execution)
 - isRecord consolidated into src/json.ts (ceb2ce3; user request; outside phase range)
-- PHASE-05 code — views.ts, documents.ts + suites (6322f83, fa36bf7, 4b48ddf); Codex 2 high + 2 medium fixed (§ PHASE-05 execution); wrap pending
+- PHASE-05 done — views.ts, documents.ts + suites (6322f83, fa36bf7, 4b48ddf; delta ceb2ce3..4b48ddf); Codex 2 high + 2 medium fixed (§ PHASE-05 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -23,7 +23,7 @@ fresh-as-of: 2026-10-27 · PHASE-05 in_progress (code done, wrap pending) · 4b4
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-05 wrap (gate, record-delta ceb2ce3..tip, verify-vt, flip completed), then PHASE-06
+- next: PHASE-06 (Waiting), pi-orchestrated
 - D-4 — `here` on viewFromDisk/resolveRun; D-5 — failed audit/dir read → `unreadable`; /reconcile amends (§ Divergences)
 - D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
 - D-3 — matchKey in runs.ts; start refuses while closing; /reconcile amends sec-7 (§ Divergences)
@@ -366,5 +366,5 @@ Codex pass (gpt-6.1-sol, high), 4 findings:
 - F4 medium: settled wait entry could contradict its result; STATUSES_OF
   duplicated the table. Fixed: one statusOf; agreementFault; isAgentResult
   moved to result.ts.
-Gate green 563 at 6322f83; post-fix gate at 4b48ddf: see phase sheet.
+Gate green 563 at 6322f83; 565 at 412f01a (code = 4b48ddf). Delta ceb2ce3..4b48ddf; verify-vt VT-1, VT-2 pass; completed 2026-10-27.
 
