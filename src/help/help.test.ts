@@ -27,7 +27,7 @@ import {
   xdgProfileLayer,
   type Env,
 } from '../server/test-rig.ts';
-import { HELP_SECTIONS, clientsSnippets, loadHelp, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type RenderContext } from './help.ts';
+import { HELP_SECTIONS, clientsSnippets, loadHelp, maximaTable, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type RenderContext } from './help.ts';
 
 /** Two empty override layers, higher first: the loader still takes a list, though
  *  production supplies only the XDG one. */
@@ -52,6 +52,8 @@ function loaded(all: readonly string[]): HelpSnapshot {
 }
 
 const builtin = (path: string): string => readFileSync(join(packageRoot, path), 'utf8');
+
+const MAXIMA = { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 300 };
 
 const CONTEXT: RenderContext = {
   profiles: [],
@@ -209,7 +211,7 @@ test('help: the profile table renders each profile with its pinned capability, o
   if (!snapshot.ok) {assert.fail(snapshot.detail);}
   const profiles = [...snapshot.snapshot.profiles.values()];
 
-  const pinned = profileTable(profiles, { ok: true, profiles: { read: 'read' }, wallClockS: 300 });
+  const pinned = profileTable(profiles, { ok: true, profiles: { read: 'read' }, maxima: MAXIMA });
   assert.match(pinned, /\| `read` \| .* \| off \| .* \| read \|/);
   assert.match(pinned, /\| `write` \| .* \| not listed: every call refuses \|/);
   assert.ok(pinned.includes(join(layer, 'read.md')), 'the table names the source path');
@@ -220,8 +222,19 @@ test('help: the profile table renders each profile with its pinned capability, o
   assert.match(profileTable([], { ok: false, detail: 'no policy' }), /no profiles/);
 });
 
+test('help: the maxima table renders each per-run maximum, or why the policy is unreadable', () => {
+  const known = maximaTable({ ok: true, profiles: {}, maxima: MAXIMA });
+  for (const [unit, value] of Object.entries(MAXIMA)) {assert.match(known, new RegExp(`\\| \`${unit}\` \\| ${String(value)} \\|`), unit);}
+  assert.match(known, /re-read on every call/);
+  assert.ok(known.includes('`ceilings`'), 'says a call\'s ceilings may only lower them');
+
+  const unknown = maximaTable({ ok: false, detail: 'no policy here' });
+  assert.match(unknown, /no policy here/);
+  assert.doesNotMatch(unknown, /\| `requests` \|/);
+});
+
 test('clients: both snippets carry the absolute bin path; tool_timeout_sec is wall_clock_s + 60', () => {
-  const text = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, wallClockS: 300 } });
+  const text = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, maxima: MAXIMA } });
   const json = /```json\n([\s\S]*?)```/.exec(text);
   assert.ok(json !== null, 'a json block');
   assert.deepEqual(JSON.parse(json[1]), { mcpServers: { quotient: { command: '/abs/bin/quotient' } } });
@@ -299,7 +312,7 @@ test('the launch-dir guard catches a layer description and admits the start-up f
 });
 
 test('help: the rendered clients snippet and the setup section teach XDG only, and project forms', () => {
-  const clients = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, wallClockS: 300 } });
+  const clients = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, maxima: MAXIMA } });
   assert.deepEqual(launchDirLayerViolations(clients), [], 'the snippet names no launch-dir layer');
   assert.match(clients, /only defaults/, 'the `cwd` note says the launch dir only defaults a call\'s cwd');
   const setup = builtin('help/setup.md');
@@ -313,9 +326,9 @@ test('help: the setup section names the doc that builds a form family', () => {
   assert.ok(builtin('help/setup.md').includes('docs/nix-forms.md'), 'the setup section points at docs/nix-forms.md');
 });
 
-test('policyView: a readable policy gives its pins and wall clock; otherwise why not', () => {
+test('policyView: a readable policy gives its pins and maxima; otherwise why not', () => {
   const { dir, policyPath } = workspace();
-  assert.deepEqual(policyView({ ok: true, path: policyPath }), { ok: true, profiles: { read: 'read', write: 'write' }, wallClockS: 600 });
+  assert.deepEqual(policyView({ ok: true, path: policyPath }), { ok: true, profiles: { read: 'read', write: 'write' }, maxima: { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 } });
   const missing = policyView({ ok: true, path: join(dir, 'absent.json') });
   if (missing.ok) {assert.fail('an absent policy has no view');}
   assert.match(missing.detail, /ENOENT/);
@@ -353,6 +366,7 @@ test('server: initialize instructions equals the assembled agent section; the to
   assert.equal(instructions, want.agent);
   assert.equal(description, want.tool);
   assert.match(instructions, /\| `read` \| .* \| read \|/, 'the table pins read as the policy reads');
+  assert.match(instructions, /\| `requests` \| 20 \|/, 'the instructions carry the policy maxima');
 });
 
 test('server: an XDG override wins for agent and tool, as read at start-up', async () => {

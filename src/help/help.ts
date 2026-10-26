@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { packageRoot, runningBin } from '../root.ts';
-import { readPolicy } from '../server/policy.ts';
+import { MAXIMA_FIELDS, readPolicy, type Maxima } from '../server/policy.ts';
 import { absent, errorCode } from '../server/paths.ts';
 import type { Filesystem, Profile } from '../server/profiles.ts';
 import type { Locations, Resolved } from '../config.ts';
@@ -135,10 +135,10 @@ export function loadHelp(layers: readonly string[], root: string = packageRoot):
   return { ok: true, snapshot: Object.freeze({ texts, sources, digest: digest.digest('hex') }) };
 }
 
-/** What the rendered parts read from the policy: the pins and the wall clock,
- *  or why the policy could not be read. */
+/** What the rendered parts read from the policy: the pins and the maxima, or
+ *  why the policy could not be read. */
 export type PolicyView =
-  | { ok: true; profiles: Readonly<Record<string, Filesystem>>; wallClockS: number }
+  | { ok: true; profiles: Readonly<Record<string, Filesystem>>; maxima: Readonly<Required<Maxima>> }
   | { ok: false; detail: string };
 
 /** The policy as the rendered sections see it, read now. */
@@ -146,7 +146,7 @@ export function policyView(policyPath: Resolved): PolicyView {
   if (!policyPath.ok) {return { ok: false, detail: policyPath.detail };}
   const loaded = readPolicy(policyPath.path);
   if (!loaded.ok) {return { ok: false, detail: loaded.detail };}
-  return { ok: true, profiles: loaded.policy.profiles, wallClockS: loaded.policy.maxima.wall_clock_s };
+  return { ok: true, profiles: loaded.policy.profiles, maxima: loaded.policy.maxima };
 }
 
 /** The inputs of the rendered sections. */
@@ -194,6 +194,19 @@ export function profileTable(profiles: readonly Profile[], policy: PolicyView): 
   ].join('');
 }
 
+/** The policy's per-run maxima, as read now. */
+export function maximaTable(policy: PolicyView): string {
+  const heading = '## Per-run maxima\n\n';
+  if (!policy.ok) {return `${heading}The policy could not be read when this text was rendered (${policy.detail}); it is re-read on every call.\n`;}
+  return [
+    heading,
+    'The policy\'s bounds on one run, as read when this text was rendered; the policy is re-read on every call. A call\'s `ceilings` may only lower them.\n\n',
+    '| unit | maximum |\n',
+    '|---|---|\n',
+    ...(MAXIMA_FIELDS as (keyof Maxima)[]).map((unit) => `| \`${unit}\` | ${String(policy.maxima[unit])} |\n`),
+  ].join('');
+}
+
 /** The margin over `maxima.wall_clock_s` for spawn, the kill ladder, reduction
  *  and evidence writes (design sec-5). */
 const TIMEOUT_MARGIN_S = 60;
@@ -203,7 +216,7 @@ const PLACEHOLDER_TIMEOUT_S = 360;
 export function clientsSnippets(context: RenderContext): string {
   const bin = JSON.stringify(context.bin);
   const timeout = context.policy.ok
-    ? `tool_timeout_sec = ${context.policy.wallClockS + TIMEOUT_MARGIN_S}     # policy maxima.wall_clock_s + ${TIMEOUT_MARGIN_S}`
+    ? `tool_timeout_sec = ${context.policy.maxima.wall_clock_s + TIMEOUT_MARGIN_S}     # policy maxima.wall_clock_s + ${TIMEOUT_MARGIN_S}`
     : `tool_timeout_sec = ${PLACEHOLDER_TIMEOUT_S}     # placeholder: no readable policy (${context.policy.detail}); set maxima.wall_clock_s + ${TIMEOUT_MARGIN_S}`;
   return `# Clients
 
@@ -233,7 +246,7 @@ export function sectionText(snapshot: HelpSnapshot, section: Section, context: R
   const text = snapshot.texts.get(section) ?? null;
   switch (section) {
     case 'agent':
-      return `${text}\n${profileTable(context.profiles, context.policy)}`;
+      return `${text}\n${profileTable(context.profiles, context.policy)}\n${maximaTable(context.policy)}`;
     case 'clients':
       return text ?? clientsSnippets(context);
     case 'reduce':
