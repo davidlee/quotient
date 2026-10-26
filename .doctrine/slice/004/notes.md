@@ -6,11 +6,12 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · PHASE-01 · f955e40
+fresh-as-of: 2026-10-26 · PHASE-02 · 9ccee47
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
 - PHASE-01 done — evidence foundations, reducer guard, lane refusal reason (f9944c6; delta recorded); Codex pass 6 findings fixed; choices in § PHASE-01 execution
+- PHASE-02 done — owner identity, ownerLiveness, shared fakeProc (9ccee47; delta recorded); Codex pass: 3 minor fixed, 2 major raised (§ PHASE-02 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -18,7 +19,8 @@ fresh-as-of: 2026-10-26 · PHASE-01 · f955e40
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-02 (owner identity) — EN-2 host probe first, see § Plan baselines
+- next: PHASE-03 (admission extraction)
+- PHASE-02 Codex F1/F2 — challenges to DEC-067's identity rule; awaiting user (§ PHASE-02 execution)
 - IMP-004 — expected satisfied by PHASE-03; resolve at close
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
@@ -128,3 +130,40 @@ Decisions carried forward:
   `onRecord` cannot hide a settle.
 - `runName` is exported; `writeResult` creates the run directory.
 
+
+## PHASE-02 execution (2026-10-26)
+
+EN-2 host probe matched § Plan baselines (own-/proc NSpid printed `1`, not `2`:
+node ran as the namespace's first process; still one field). Two pi runs
+(implement), $0.066 total: fakeProc + tests (red recorded), then session.ts +
+server.ts. I added one liveness row and refactored two small things; five
+mutation controls each turned a test red. Codex pass (gpt-6.1-sol, high).
+
+What pi got wrong: nothing functional. Dead code (`readlink` empty check) and
+a helper named for less than it did (`sameHost` also checked completeness).
+
+Choices carried forward:
+- `AcquireOptions.here: HostIdentity` is required; `serve()` reads
+  `readHostIdentity('/proc')` once into `Context.here`. PHASE-03 moves it
+  under `AdmissionContext` beside `procDir`.
+- ownerLiveness precedence: any null → unknown; host → unknown; boot → stale
+  (table not read); pidns → unknown; else observeLiveness.
+- fakeProc copies `/proc/self/stat` (not `/proc/<process.pid>/stat`) and
+  `nspid: []` stages a status with no NSpid line.
+
+Codex findings:
+- F3 (fixed) fakeProc copied another process's stat under an ancestor /proc.
+- F4 (fixed) the real-host test demanded a non-null pidns; now asserts it
+  tracks NSpid's field count. Whole suite passes under
+  `unshare --user --map-root-user --pid --fork`.
+- F5 (fixed) no row pinned boot-before-pidns; added, with a mutation control.
+- F1 (raised) equal hostnames do not prove one machine: two hosts named
+  `localhost` sharing a run dir, or an nspawn container (own boot_id) sharing
+  a hostname, read a live owner `stale` → false `lost`. Challenges DEC-067.
+- F2 (raised) /proc/<pid>/stat start time is offset by the reader's time
+  namespace; same host/boot/pidns with different time namespaces reads a live
+  owner `stale`. Also applies to session locks today. Inference; the
+  nonzero-offset case was not executed.
+- Observation (mine, pre-existing): `acquireSession` reads
+  `<procDir>/<process.pid>/stat`; under an ancestor's /proc that is another
+  process, so the lock records the wrong start time. RSK-003 family.
