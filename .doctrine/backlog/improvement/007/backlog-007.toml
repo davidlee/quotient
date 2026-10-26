@@ -5,10 +5,10 @@ id = 7
 slug = "gate-builds-the-nix-server-package"
 title = "Gate builds the Nix server package"
 kind = "improvement"
-status = "started"
-resolution = ""
+status = "resolved"
+resolution = "done"
 created = "2026-10-24"
-updated = "2026-10-24"
+updated = "2026-10-26"
 tags = []
 
 # outbound-only. Cross-kind structural edges (e.g. references with a role

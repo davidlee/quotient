@@ -5,10 +5,10 @@ id = 3
 slug = "optional-jailnix-form-builder"
 title = "Optional jail.nix form builder"
 kind = "improvement"
-status = "started"
-resolution = ""
+status = "resolved"
+resolution = "done"
 created = "2026-10-23"
-updated = "2026-10-24"
+updated = "2026-10-26"
 tags = ["area:nix"]
 
 # outbound-only. Cross-kind structural edges (e.g. references with a role

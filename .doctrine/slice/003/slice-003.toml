@@ -1,7 +1,7 @@
 id = 3
 slug = "jailnix-form-builder"
 title = "Optional jail.nix form builder"
-status = "reconcile"
+status = "done"
 created = "2026-10-24"
 updated = "2026-10-26"
 tags = []
