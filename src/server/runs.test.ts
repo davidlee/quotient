@@ -15,97 +15,36 @@
 // exist yet, so the disk half of the answer is `readAudit` plus the record.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PassThrough } from 'node:stream';
 import { reduce } from '../reduce/reduce.ts';
-import type { Admitted } from './admission.ts';
 import { RUN_NAME_GRAMMAR, readAudit, readResult, type RunLayout } from './evidence.ts';
 import { failedResult, refusedResult, validateAgentResult, type AgentResult } from './result.ts';
-import { createRegistry, matchKey, type Registry, type RunRecord, type StartSpec } from './runs.ts';
+import { matchKey, type RunRecord } from './runs.ts';
 import {
   attempts,
   auditKinds,
+  block,
   completedResult,
+  DEFAULT_START,
   fakeLaunch,
-  type FakeAdmission,
+  foundResult,
+  launchFor,
+  registryFor,
+  startRun,
+  tick,
   type FakeLaunch,
-  type Pending,
   type ReleaseCall,
   type ReleaseSpy,
+  type Started,
 } from './test-rig.ts';
 
 /** The status an unread stream leaves: the reducer's own empty verdict. */
 const EMPTY_STATUS = reduce([], {}).status;
 
-/** One run a test started: the registry's record, its document, and the spy. */
-type Started = {
-  record: RunRecord;
-  document: Promise<AgentResult>;
-  admitted: Admitted;
-  release: ReleaseSpy;
-};
-
-/** The fields `startRun` defaults: a plain unlaned start in the only door a suite
- *  takes, with no key and one digest (a key's own cases pass both). */
-const DEFAULT_START: Omit<StartSpec, 'admitted'> = {
-  origin: 'start',
-  lane: null,
-  needsSuccess: false,
-  key: null,
-  argsDigest: 'digest-1',
-};
-
-/** One admitted run, with the release spy wired to the record `start` answered.
- *  A launch runs in a microtask, so naming the record here is always in time. */
-function startRun(
-  registry: Registry,
-  fake: FakeLaunch,
-  options: Partial<Omit<StartSpec, 'admitted'>> & { fixture?: FakeAdmission } = {},
-): Started {
-  const fixture = options.fixture ?? fake.admitted();
-  const started = registry.start({ ...DEFAULT_START, ...options, admitted: fixture.admitted });
-  if (!started.ok) {
-    assert.fail(`start refused: ${started.reason}: ${started.detail}`);
-  }
-  fixture.release.watch(started.record);
-  return { record: started.record, document: started.document, admitted: fixture.admitted, release: fixture.release };
-}
-
-/** One macrotask, so every microtask the registry queued has run. */
-const tick = (): Promise<void> => new Promise<void>((resolve) => {
-  setImmediate(resolve);
-});
-
-/** The launch the fake recorded for RECORD, once the registry's microtask ran it. */
-async function launchFor(fake: FakeLaunch, record: RunRecord): Promise<Pending> {
-  for (let tries = 0; tries < 50; tries += 1) {
-    const found = fake.launches.find((pending) => pending.record.run === record.run);
-    if (found !== undefined) {
-      return found;
-    }
-    await tick();
-  }
-  assert.fail(`no launch for ${record.run}`);
-}
-
 /** Whether RECORD was ever handed to the fake launch. */
 const wasLaunched = (fake: FakeLaunch, record: RunRecord): boolean =>
   fake.launches.some((pending) => pending.record.run === record.run);
-
-/** A registry over the fake launch; its diagnostics sink is not asserted here. */
-function registryFor(fake: FakeLaunch): Registry {
-  return createRegistry({ launch: fake.launch, diagnostics: new PassThrough() });
-}
-
-/** The one result document a run left, or a failed expectation. */
-function settledDocument(layout: RunLayout): AgentResult {
-  const read = readResult(layout);
-  if (typeof read === 'string') {
-    assert.fail(`the run must have left a result, saw ${read}`);
-  }
-  return read.found;
-}
 
 /** The one release the spy saw, or a failed expectation. */
 function releaseOf(release: ReleaseSpy): ReleaseCall {
@@ -115,18 +54,11 @@ function releaseOf(release: ReleaseSpy): ReleaseCall {
 
 /** The refusal a settled run recorded, or a failed expectation. */
 function refusalOf(layout: RunLayout): { reason: string; detail: string } {
-  const written = settledDocument(layout);
+  const written = foundResult(layout).found;
   if (written.refusal === null) {
     assert.fail('the run must have settled as a refusal');
   }
   return written.refusal;
-}
-
-/** Make PATH unwritable as a file, by replacing whatever is there with a
- *  non-empty directory (C6): neither a rename nor an append can land on it. */
-function block(path: string): void {
-  rmSync(path, { recursive: true, force: true });
-  mkdirSync(join(path, 'x'), { recursive: true });
 }
 
 /** Every record in RUN's audit names the policy it was admitted under and its
@@ -241,7 +173,7 @@ describe('Settle', () => {
     pending.result(document);
     await run.record.settled;
 
-    const written = settledDocument(run.record.layout);
+    const written = foundResult(run.record.layout).found;
     assert.deepEqual(written, document);
     assert.equal(validateAgentResult(written).ok, true, 'a landed result must conform');
     assert.deepEqual(await run.document, document, 'the blocking caller is handed the document written');
@@ -263,7 +195,7 @@ describe('Settle', () => {
     await run.record.settled;
 
     assert.ok(auditKinds(run.record.layout).includes('refused'), 'the refusal is recorded');
-    const written = settledDocument(run.record.layout);
+    const written = foundResult(run.record.layout).found;
     assert.equal(written.state, 'refused');
     assert.equal(written.refusal?.reason, 'root-missing');
     assert.equal(run.record.state, 'settled');
@@ -331,7 +263,7 @@ describe('Settle', () => {
     const queued = startRun(registry, fake, { lane: 'again' });
     const pending = await launchFor(fake, head.record);
     await registry.cancel([queued.record.run]);
-    const document = settledDocument(queued.record.layout);
+    const document = foundResult(queued.record.layout).found;
 
     const again = registry.cancel([queued.record.run]);
     const closed = registry.close();
@@ -339,7 +271,7 @@ describe('Settle', () => {
     await again;
     await closed;
 
-    assert.deepEqual(settledDocument(queued.record.layout), document, 'the first settlement is the only one');
+    assert.deepEqual(foundResult(queued.record.layout).found, document, 'the first settlement is the only one');
     assert.deepEqual(auditKinds(queued.record.layout), ['admitted', 'cancelled'], 'no second ending is recorded');
     assert.equal(queued.record.state, 'settled');
     assert.equal(queued.release.calls.length, 1, 'a session is released once');
@@ -460,7 +392,7 @@ describe('Lanes', () => {
     await head.record.settled;
     await guarded.record.settled;
 
-    assert.equal(settledDocument(guarded.record.layout).state, 'refused');
+    assert.equal(foundResult(guarded.record.layout).found.state, 'refused');
     const refusal = refusalOf(guarded.record.layout);
     assert.equal(refusal.reason, 'lane-predecessor-failed');
     assert.ok(refusal.detail.includes(head.record.run), `the detail names the predecessor handle: ${refusal.detail}`);
@@ -764,7 +696,7 @@ describe('Cancel', () => {
     assert.deepEqual(queued.record.outcome, { state: 'cancelled', causes: ['cancelled'] });
     assert.deepEqual(auditKinds(queued.record.layout), ['admitted', 'cancelled']);
     assertStamped(queued);
-    assert.equal(settledDocument(queued.record.layout).state, 'cancelled');
+    assert.equal(foundResult(queued.record.layout).found.state, 'cancelled');
     assert.equal(wasLaunched(fake, queued.record), false);
     assert.equal(releaseOf(queued.release).state, 'queued', 'released before the state flips, never launched');
     assert.equal(queued.release.calls.length, 1);
@@ -900,7 +832,7 @@ describe('Close', () => {
     assert.deepEqual(queued.record.outcome, { state: 'incomplete', causes: ['eof'] });
     assert.deepEqual(auditKinds(queued.record.layout), ['admitted', 'dropped']);
     assertStamped(queued);
-    assert.equal(settledDocument(queued.record.layout).causes[0], 'eof');
+    assert.equal(foundResult(queued.record.layout).found.causes[0], 'eof');
     assert.equal(wasLaunched(fake, queued.record), false);
     assert.equal(releaseOf(queued.release).state, 'queued', 'released before the state flips, never launched');
     assert.equal(queued.release.calls.length, 1);

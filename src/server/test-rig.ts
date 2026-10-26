@@ -1,6 +1,8 @@
 // The rig the spawn and gate suites run against: a stub launcher this module
 // writes into a temp tree it creates, a deployment naming it, and a server in
-// this process whose input channel the test owns.
+// this process whose input channel the test owns. The run suites share it too:
+// the fake launch, the staged pid table and the run-directory fixtures below are
+// the same levers `runs.test.ts` and `views.test.ts` drive.
 //
 // The stub records what it was given — argv, environment, file descriptors,
 // stdin — into a marker directory OUTSIDE the run dir, so the run's evidence is
@@ -33,10 +35,22 @@ import { isRecord } from '../json.ts';
 import { serve, type ServeOptions } from './server.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
 import type { Admitted, Refused } from './admission.ts';
-import { attemptsPath, readAudit, sha256Hex, type CallId, type RunLayout } from './evidence.ts';
+import {
+  appendAudit,
+  attemptsPath,
+  layoutFor,
+  readAudit,
+  readResult,
+  runName,
+  sha256Hex,
+  writeResult,
+  type AuditRecord,
+  type CallId,
+  type RunLayout,
+} from './evidence.ts';
 import type { Filesystem } from './profiles.ts';
-import type { Launch, RunRecord } from './runs.ts';
-import type { RunOwner } from './session.ts';
+import { createRegistry, type Launch, type Registry, type RunRecord, type StartSpec } from './runs.ts';
+import type { HostIdentity, RunOwner } from './session.ts';
 import { admitCall, type Admission } from './policy.ts';
 import { resultFor, type AgentResult, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
@@ -701,16 +715,6 @@ export type FakeLaunch = {
   admitted(options?: { runDir?: string; session?: string; callId?: CallId }): FakeAdmission;
 };
 
-/** The owner every fixture admission records: one server, one host. */
-const FIXTURE_OWNER: RunOwner = {
-  pid: 4242,
-  starttime: '1000',
-  boot: 'boot-a',
-  pidns: 'pid:[1]',
-  timens: 'time:[1]',
-  host: 'host-a',
-};
-
 /** The audit record kinds a run left, in order; none when the audit is unreadable. */
 export function auditKinds(layout: RunLayout): string[] {
   const audit = readAudit(layout);
@@ -718,10 +722,11 @@ export function auditKinds(layout: RunLayout): string[] {
 }
 
 /** A completed `pi-agent-result/2` document for a run at LAYOUT, from the real
- *  reducer and builder: exactly what a run that answered and exited 0 writes. */
-export function completedResult(layout: RunLayout, session: string): AgentResult {
+ *  reducer and builder: exactly what a run that answered and exited 0 writes.
+ *  TEXT is the answer, so a case can choose a result's size. */
+export function completedResult(layout: RunLayout, session: string, text = 'the answer'): AgentResult {
   return resultFor({
-    reduced: reduce([messageEnd('stop'), SETTLED_RECORD], {}),
+    reduced: reduce([messageEnd('stop', text), SETTLED_RECORD], {}),
     outcome: { exitCode: 0, spawnFailed: false, layout },
     causes: [],
     session,
@@ -852,4 +857,214 @@ export function fakeLaunch(t?: TestContext): FakeLaunch {
       return { release, admitted: admittedFixture(options.runDir ?? runDir, session, callId, release) };
     },
   };
+}
+
+// ── Run fixtures shared by the runs and views suites ──────────────────────
+//
+// Both suites drive the registry through the one fake launch, and both stage run
+// directories on disk, so the pieces they each carried live here once: the
+// identity a fixture records and the liveness rows that identity is read
+// against, the disk fixture (`runIn`) with the records it writes, the temp-path
+// blockers, and the registry levers (`registryFor`, `startRun`, `tick`,
+// `launchFor`).
+
+/** The owner every fixture records: one server, one host. */
+export const FIXTURE_OWNER: RunOwner = {
+  pid: 4242,
+  starttime: '1000',
+  boot: 'boot-a',
+  pidns: 'pid:[1]',
+  timens: 'time:[1]',
+  host: 'host-a',
+};
+
+/** The reader's identity when it is that same server (D-4: `here` is passed in). */
+export const FIXTURE_HERE: HostIdentity = { boot: 'boot-a', pidns: 'pid:[1]', timens: 'time:[1]', host: 'host-a' };
+
+/** The session a fixture run owns, unless it names one. */
+export const FIXTURE_SESSION = 'sess-views';
+
+/** The owner's pid alive in the staged table: same pid, same start time. */
+export const OWNER_ALIVE: FakeProcOwner = { pid: FIXTURE_OWNER.pid, starttime: FIXTURE_OWNER.starttime };
+
+/** The owner's pid reused by another process: a different kernel start time. */
+export const OWNER_REUSED: FakeProcOwner = { pid: FIXTURE_OWNER.pid, starttime: '2000' };
+
+/** The owner's pid gone: the table stages some other process instead. */
+export const OWNER_GONE: FakeProcOwner = { pid: 5000, starttime: '1000' };
+
+/** Append one audit record the test can name: a fixture's records must land. */
+export function appendRecord(layout: RunLayout, record: AuditRecord): string {
+  const ts = appendAudit(layout, record);
+  if (ts === null) {
+    assert.fail(`the ${record.record} record must land`);
+  }
+  return ts;
+}
+
+/** What a fixture run directory is asked to hold. */
+export type RunSpec = {
+  /** Whether an `admitted` record is written at all (default true). */
+  admitted?: boolean;
+  /** The owner the admitted record names; null records none (default FIXTURE_OWNER). */
+  owner?: RunOwner | null;
+  lane?: string | null;
+  key?: string | null;
+  predecessor?: string | null;
+  session?: string;
+  /** Extra audit records, appended after the admitted one. */
+  records?: AuditRecord[];
+  /** Whether a completed `result.json` is written (default false). */
+  result?: boolean;
+  /** Start the audit with a partly written line that has no newline (sec-7). */
+  torn?: boolean;
+};
+
+/** One fixture run directory, and the timestamps its records were given. */
+export type Fixture = {
+  run: string;
+  layout: RunLayout;
+  session: string;
+  /** Each `appendAudit` answer, in the order the records were appended. */
+  stamps: string[];
+};
+
+/** The `admitted` record a run from this release leaves: where it sits, the
+ *  session it owns and the owner; a run from before the release named no owner. */
+export function admittedRecord(owner: RunOwner | null, spec: RunSpec, session: string): AuditRecord {
+  const record: AuditRecord = {
+    record: 'admitted',
+    origin: 'start',
+    lane: spec.lane ?? null,
+    predecessor: spec.predecessor ?? null,
+    needs_success: false,
+    key: spec.key ?? null,
+    session,
+    policy_digest: 'policy-digest-1',
+  };
+  if (owner !== null) {
+    record.owner = owner;
+  }
+  return record;
+}
+
+/** A record that was only partly written: no newline, so `appendAudit` starts the
+ *  next record on a fresh line and a torn line never hides the records after it. */
+export function tornLine(layout: RunLayout): void {
+  writeFileSync(layout.audit, '{"record":"admit');
+}
+
+/**
+ * One run directory under DIR: an `admitted` record naming LANE, KEY,
+ * PREDECESSOR, SESSION and the owner, any extra records, a torn line if asked,
+ * and a completed `result.json` if asked.
+ */
+export function runIn(dir: string, spec: RunSpec = {}): Fixture {
+  const run = runName('call');
+  const layout = layoutFor(dir, run);
+  const session = spec.session ?? FIXTURE_SESSION;
+  mkdirSync(layout.dir, { recursive: true });
+  if (spec.torn === true) {
+    tornLine(layout);
+  }
+  const stamps = auditRecords(layout, spec, session);
+  if (spec.result === true) {
+    writeResult(layout, completedResult(layout, session));
+  }
+  return { run, layout, session, stamps };
+}
+
+/** The trail a fixture leaves: the admitted record unless a pre-release run is
+ *  staged, then any extra records, each stamped as it lands. */
+export function auditRecords(layout: RunLayout, spec: RunSpec, session: string): string[] {
+  const stamps: string[] = [];
+  if (spec.admitted !== false) {
+    const owner = spec.owner === undefined ? FIXTURE_OWNER : spec.owner;
+    stamps.push(appendRecord(layout, admittedRecord(owner, spec, session)));
+  }
+  for (const record of spec.records ?? []) {
+    stamps.push(appendRecord(layout, record));
+  }
+  return stamps;
+}
+
+/** The result document a run left and the moment it was written, or a failed
+ *  expectation: the one read every suite asks of `result.json`. */
+export function foundResult(layout: RunLayout): { found: AgentResult; writtenAt: string } {
+  const read = readResult(layout);
+  if (read === 'absent' || read === 'unreadable') {
+    assert.fail(`the run must have left a result, saw ${read}`);
+  }
+  return read;
+}
+
+/** Make PATH unwritable as a file, by replacing whatever is there with a
+ *  non-empty directory (C6): neither a rename nor an append can land on it, and
+ *  a read of it fails with something other than ENOENT. */
+export function block(path: string): void {
+  rmSync(path, { recursive: true, force: true });
+  mkdirSync(join(path, 'x'), { recursive: true });
+}
+
+/** Make RUN's `result.json` unwritable while leaving it absent: the temp it is
+ *  written to cannot be made, so the rename never happens — what a failed commit
+ *  leaves on disk (blocking `result.json` itself would make it unreadable). */
+export function blockResultWrite(layout: RunLayout): void {
+  block(join(layout.dir, '.result.json.tmp'));
+}
+
+/** One run a test started: the registry's record, its document, and the spy. */
+export type Started = {
+  record: RunRecord;
+  document: Promise<AgentResult>;
+  admitted: Admitted;
+  release: ReleaseSpy;
+};
+
+/** The fields `startRun` defaults: a plain unlaned start in the only door a suite
+ *  takes, with no key and one digest (a key's own cases pass both). */
+export const DEFAULT_START: Omit<StartSpec, 'admitted'> = {
+  origin: 'start',
+  lane: null,
+  needsSuccess: false,
+  key: null,
+  argsDigest: 'digest-1',
+};
+
+/** One admitted run, with the release spy wired to the record `start` answered.
+ *  A launch runs in a microtask, so naming the record here is always in time. */
+export function startRun(
+  registry: Registry,
+  fake: FakeLaunch,
+  options: Partial<Omit<StartSpec, 'admitted'>> & { fixture?: FakeAdmission } = {},
+): Started {
+  const fixture = options.fixture ?? fake.admitted();
+  const started = registry.start({ ...DEFAULT_START, ...options, admitted: fixture.admitted });
+  if (!started.ok) {
+    assert.fail(`start refused: ${started.reason}: ${started.detail}`);
+  }
+  fixture.release.watch(started.record);
+  return { record: started.record, document: started.document, admitted: fixture.admitted, release: fixture.release };
+}
+
+/** One macrotask, so every microtask the registry queued has run. */
+export const tick = (): Promise<void> => new Promise<void>((resolve) => {
+  setImmediate(resolve);
+});
+
+/** The launch the fake recorded for RECORD, once the registry's microtask ran it. */
+export async function launchFor(fake: FakeLaunch, record: RunRecord): Promise<Pending> {
+  for (let tries = 0; tries < 50; tries += 1) {
+    const found = fake.launches.find((pending) => pending.record.run === record.run);
+    if (found !== undefined) {
+      return found;
+    }
+    await tick();
+  }
+  assert.fail(`no launch for ${record.run}`);
+}
+
+/** A registry over the fake launch; its diagnostics sink is not asserted here. */
+export function registryFor(fake: FakeLaunch): Registry {
+  return createRegistry({ launch: fake.launch, diagnostics: new PassThrough() });
 }
