@@ -20,7 +20,7 @@ fresh-as-of: 2026-10-26 · PHASE-02 · 9ccee47
 
 ### Open
 - next: PHASE-03 (admission extraction)
-- PHASE-02 Codex F1/F2 — challenges to DEC-067's identity rule; awaiting user (§ PHASE-02 execution)
+- PHASE-02 Codex F1/F2 — recorded on RSK-003 (user: record, don't chase); /reconcile: add both to design sec-9 Risks
 - IMP-004 — expected satisfied by PHASE-03; resolve at close
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
