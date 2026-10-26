@@ -205,6 +205,35 @@ server reads profiles and help once, at start-up, so restart it after changing
 them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
 (`quotient help setup`) is the same walk-through, in the order to do it.
 
+## Delegating from your agent
+
+The calling agent needs no setup to use `pi_agent`. The server's instructions
+cover a single call: the profiles, the per-run maxima, and how to read a
+result. `quotient help orchestrate` is the guide for an agent that drives many
+runs: probing the form, writing briefs, continuing a run that stopped short,
+and the verification it must keep for itself.
+
+To make an agent follow that guide, write a short skill that points to it and
+adds only what belongs to your project or workflow. For Claude Code, put it in
+`~/.claude/skills/pi-orchestrate/SKILL.md`:
+
+```markdown
+---
+name: pi-orchestrate
+description: Use when asked to delegate work to pi workers through `pi_agent` while you keep judgement and verification.
+---
+
+Run `quotient help orchestrate` and follow it. In this project, also:
+
+- Briefs name the acceptance criteria the task must meet.
+- Never let a worker commit; review and commit its changes yourself.
+- Run `just gate` yourself before reporting work as done.
+```
+
+Pointing to the guide keeps the skill current as quotient changes. To own the
+whole text instead, start from a copy: `quotient help orchestrate > SKILL.md`,
+then add the frontmatter and edit it.
+
 ## Project forms
 
 A project may substitute the executable that confines its own root: a link at
