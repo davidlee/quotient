@@ -10,3 +10,6 @@ Driving a slice's phases through `mcp__quotient__pi_agent` (`implement` worker, 
 
 - No solo phase binding runs on this path, so nothing records the phase's source delta. After committing each phase, run `doctrine slice record-delta <slice> PHASE-NN --start <pre-phase commit> --end <phase tip>`; otherwise `slice conformance` reads every selector undelivered at audit. SL-002 bootstrapped all six rows at audit (RV-009 F-6). A phase sheet scaffolded before an earlier phase landed carries a stale start stamp, and `--commit` then needs `--force`.
 - `slice verify-vt` matches each VT criterion's keywords literally against its test file. Put the plan's keywords in test titles while writing them; SL-002's audit renamed seven titles (RV-009 F-3).
+
+- Briefs: Claude's scratchpad (`/tmp/claude-*/…`) is invisible inside the pi sandbox (it sees only its cwd). Write long briefs and spec extracts under `.doctrine/state/slice/NNN/phases/` (gitignored) and pass the relative path (SL-004 PHASE-06).
+- Contract tests from pi often pass against plausible wrong implementations: a hang guard equal to the wait's own timeout, order fixtures that cannot tell two orderings apart, boundary slack. Read every test and run mutation controls before the code run (SL-004 PHASE-05/06).

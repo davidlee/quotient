@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-05 completed; PHASE-06 next · 412f01a
+fresh-as-of: 2026-10-27 · PHASE-06 completed; PHASE-07 next · e5c1b3b
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -16,6 +16,7 @@ fresh-as-of: 2026-10-27 · PHASE-05 completed; PHASE-06 next · 412f01a
 - PHASE-04 done — runs.ts registry, fakeLaunch, runs.test.ts (175442c, 032df24; delta 3060d07..032df24); Codex pass 1 high + 1 medium + 1 minor fixed (§ PHASE-04 execution)
 - isRecord consolidated into src/json.ts (ceb2ce3; user request; outside phase range)
 - PHASE-05 done — views.ts, documents.ts + suites (6322f83, fa36bf7, 4b48ddf; delta ceb2ce3..4b48ddf); Codex 2 high + 2 medium fixed (§ PHASE-05 execution)
+- PHASE-06 done — waiting.ts + suite, shared run fixtures in test-rig (4e3fe68, b8f6950, e5c1b3b; delta e3fb817..e5c1b3b); Codex 3 medium (2 fixed, F1 accepted) + 1 low fixed (§ PHASE-06 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -23,7 +24,9 @@ fresh-as-of: 2026-10-27 · PHASE-05 completed; PHASE-06 next · 412f01a
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-06 (Waiting), pi-orchestrated
+- next: PHASE-07 (blocking pi_agent through the registry)
+- PHASE-06 drift — sec-5 `awaitTargets` returns Promise<boolean> vs sec-7 Promise<void>; code follows sec-7; /reconcile amends sec-5 (§ PHASE-06 execution)
+- PHASE-06 F1 — wait reactions retained on live `settled` until settle; accepted (bounded); /reconcile: add to sec-9 Risks
 - D-4 — `here` on viewFromDisk/resolveRun; D-5 — failed audit/dir read → `unreadable`; /reconcile amends (§ Divergences)
 - D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
 - D-3 — matchKey in runs.ts; start refuses while closing; /reconcile amends sec-7 (§ Divergences)
@@ -368,3 +371,49 @@ Codex pass (gpt-6.1-sol, high), 4 findings:
   moved to result.ts.
 Gate green 563 at 6322f83; 565 at 412f01a (code = 4b48ddf). Delta ceb2ce3..4b48ddf; verify-vt VT-1, VT-2 pass; completed 2026-10-27.
 
+## PHASE-06 execution (2026-10-27)
+
+Four pi runs (implement), ~$0.18 total: T0 test-rig refactor ($0.050, 38 req),
+T1 waiting.test.ts ($0.093 + $0.001 failed start), T3 waiting.ts ($0.039,
+11 req). Red recorded in the phase sheet. Tests: waiting 28; evidence +1 case.
+
+Pre-code refactor 4e3fe68 (T0): runs.test and views.test each carried
+DEFAULT_START, startRun, tick, launchFor, registryFor, block and a result
+reader; views.test's OWNER duplicated FIXTURE_OWNER. One copy each now lives
+in test-rig.ts (counts 41/31 unchanged).
+
+Choices C1–C13 (phase sheet extract; told to the user): timeout and budget
+as pure functions of the request and the read maxima; the first-whole rule
+passes to the first *readable* settled result; `truncated` only for a
+readable result left out; no targets → condition holds; lanes lane by lane
+via `implicit([lane])`. Design-internal drift for /reconcile: sec-5's inline
+`awaitTargets(...): Promise<boolean>` vs sec-7's `Promise<void>` with
+reread/pollMs; code follows sec-7 (timed_out from re-resolved states).
+
+What pi got wrong: T1 — nothing wrong, but weak: a guard equal to the waits'
+timeout (a timer-only awaitTargets passed), an order fixture that could not
+tell named-first from lanes-first, unreadable never shown not-done in
+awaitTargets, budget boundary slack. My brief had an unsatisfiable budget
+case; pi split it and said so. T3 — duplicated the 'pi-agent-wait/1' literal
+(the brief forbade touching documents.ts); I exported WAIT_SCHEMA instead.
+Briefs in Claude's scratchpad are invisible to the pi sandbox: put them
+under .doctrine/state.
+
+Mutation controls: 26 + 7 mutants on waiting.ts; all killed after pinning
+the budget boundary, abort-listener removal and the poll timer's lifecycle.
+
+Codex pass (gpt-6.1-sol, high), 0 high, 3 medium, 1 low:
+- F1 medium: each wait leaves a reaction on a live record's `settled`
+  promise until the run settles. Accepted: bounded by the run's lifetime
+  (wall_clock_s ceiling; a queued run waits only on bounded predecessors),
+  small, released at settle; removable subscriptions would need a Registry
+  API beyond sec-7.
+- F2 medium: a done foreign target kept polling during a mixed wait; one
+  interval per target. Fixed: one shared poller; a target leaves it on done.
+- F3 medium: a conforming result nested too deep to re-serialise made
+  waitEnvelope throw (constructed input). Fixed at the shared boundary:
+  readResult reads it `unreadable` (evidence.ts).
+- F4 low: UTF-8 byte accounting and exactly-once resolution unpinned. Fixed
+  (tests).
+
+Gate green 593 at e5c1b3b. Delta e3fb817..e5c1b3b; verify-vt VT-1, VT-2 pass; completed 2026-10-27.
