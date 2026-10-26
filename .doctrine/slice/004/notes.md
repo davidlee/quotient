@@ -6,12 +6,13 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-26 · PHASE-02 + D-1 · 4459ed8
+fresh-as-of: 2026-10-26 · PHASE-03 · cb45a56
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
 - PHASE-01 done — evidence foundations, reducer guard, lane refusal reason (f9944c6; delta recorded); Codex pass 6 findings fixed; choices in § PHASE-01 execution
 - PHASE-02 done — owner identity, ownerLiveness, shared fakeProc (9ccee47; delta recorded); Codex pass: 3 minor fixed, 2 major raised (§ PHASE-02 execution)
+- PHASE-03 done — callTool extracted to tools/admission/execute/documents (656c57b, cb45a56; delta 9f4d8b1..cb45a56); Codex pass 4 minor fixed (§ PHASE-03 execution)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -19,10 +20,13 @@ fresh-as-of: 2026-10-26 · PHASE-02 + D-1 · 4459ed8
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-03 (admission extraction)
+- next: PHASE-04 (run registry)
+- PHASE-03 VT-3 keyword `export function executeRun` vs `export async function` — pending user
+- D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
+- isRecord: now 7 private copies (tools.ts added one); consolidation candidate, not filed
 - PHASE-02 Codex F1 — recorded on RSK-003 (user: record, don't chase); /reconcile: add to design sec-9 Risks
 - DIVERGENCE (F2, timens) — implementation adds a 4th identity component; /reconcile amends DEC-067 + design (§ Divergences)
-- IMP-004 — expected satisfied by PHASE-03; resolve at close
+- IMP-004 — satisfied by PHASE-03 (Step<T>, recording at the boundary); resolve at close
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
 - RSK-003 — session locks judge liveness by pid+starttime across pid namespaces
@@ -202,3 +206,42 @@ Codex findings:
 - Observation (mine, pre-existing): `acquireSession` reads
   `<procDir>/<process.pid>/stat`; under an ancestor's /proc that is another
   process, so the lock records the wrong start time. RSK-003 family.
+
+
+## PHASE-03 execution (2026-10-26)
+
+Two pi runs (implement), $0.141 total: admission.test.ts from the spec (red:
+module missing), then the moves. Suites unchanged but server.test.ts's import
+line; new files lint 0/0; server.ts lint 13 → 9. Gate green, 466 tests.
+
+What pi got wrong: named the step-8/probe function `runnable`/`launch`, not the
+design's `checkLaunchable`, and decided recordability by testing
+`reason === 'audit-unavailable'`; built Admitted inside the probe step; one
+comment claimed tests replace /proc in serve. The test writer asserted "some
+line" for steps 1-2, leaving double-recording unpinned. The T2 run used its
+whole 60-request cap; split such moves in two next time.
+
+Choices carried forward:
+- readToolCall stays in server.ts (tools/call unwrapping; becomes dispatch by
+  name later). readAgentRequest keeps its Record signature until PHASE-08.
+- AdmissionContext is built per call in callTool from Context (startup is
+  narrowed there); Context gained `procDir` ('/proc'). PHASE-06 adds
+  `Context.admission` and `ServeOptions.procDir`.
+- Startup/StartupFailure types moved to admission.ts so nothing imports
+  server.ts.
+- A throw inside admit after step 7 releases the session and reaches the
+  tools/call catch arm as `server-error` (was failedResult('error')); the gate
+  is built inside executeRun, after step 8.
+- server passes a no-op onAudit; the registry wires it.
+
+Mutation controls: 14 mutants, 13 killed; the survivor (recording the probe
+refusal) is equivalent — the append targets the ledger that failed.
+
+Codex pass (gpt-6.1-sol, high), 4 findings, all fixed in cb45a56:
+- F1 admit released the session before recording a step-8 refusal (parent
+  recorded first). Not test-pinned (in-process ordering).
+- F2 executeRun built the gate outside its try (pre-existing shape), so it
+  could reject; now inside.
+- F3 tests ignored ledger detail and digest; now pinned.
+- F4 no first-failure precedence; three competing-failure cases added.
+
