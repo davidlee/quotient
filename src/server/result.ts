@@ -89,9 +89,16 @@ export const CAUSE_STATE: Record<Termination, ResultState> = {
  * failure to record one. Steps 1-8 own the tokens they raise (`disabled`,
  * `profile-invalid`, `session-busy`, …) and name them where they are raised;
  * `server-error` is the outer `tools/call` catch's, for a throw that landed before
- * any run was established.
+ * any run was established. `lane-predecessor-failed` is a laned run settled at
+ * launch because the run before it in its lane did not complete.
  */
-export const RESULT_REFUSAL_REASONS = ['request-invalid', 'audit-failed', 'audit-unavailable', 'server-error'] as const;
+export const RESULT_REFUSAL_REASONS = [
+  'request-invalid',
+  'audit-failed',
+  'audit-unavailable',
+  'server-error',
+  'lane-predecessor-failed',
+] as const;
 
 /** Where a spawned run's evidence lives. Null for a refusal: nothing ran. */
 export type Artifacts = {
@@ -424,11 +431,11 @@ export const REACHABILITY: {
     failed: { producedBy: 'resultFor: an `error`/`aborted` terminal reason, a nonzero (or absent) exit, or a failed spawn' },
     incomplete: { producedBy: 'resultFor: `toolUse`/`deferred`, or a stream that ended without a terminal answer or without settling' },
     timeout: { producedBy: 'resultFor: the wall-clock backstop aborted the run with cause `timeout`' },
-    cancelled: { producedBy: 'resultFor: a cancellation notification (`cancelled`), or the switch (`switch`)' },
+    cancelled: { producedBy: 'resultFor: a cancellation notification (`cancelled`), or the switch (`switch`); a queued run cancelled before it launched, with no process' },
     ceiling_exceeded: { producedBy: 'resultFor: the gate measured a ceiling crossing and aborted with cause `ceiling`' },
     accounting_unknown: { producedBy: 'resultFor: an ordinary response or compaction result with absent or invalid cost (cause `accounting`)' },
     audit_failed: { producedBy: 'resultFor: an evidence append failed on a run that spawned (cause `audit`)' },
-    refused: { producedBy: 'refusedResult: nothing spawned (steps 1-8, a pre-spawn audit failure, an unallocatable run directory)' },
+    refused: { producedBy: 'refusedResult: nothing spawned (steps 1-8, a pre-spawn audit failure, an unallocatable run directory), or a run settled at launch (re-admission, a failed lane predecessor)' },
   },
   terminations: {
     stop: { producedBy: 'the terminal assistant message stopped for `stop` and the success predicate held' },
@@ -437,15 +444,15 @@ export const REACHABILITY: {
     aborted: { producedBy: 'the terminal assistant message stopped for `aborted`' },
     toolUse: { producedBy: 'the terminal assistant message stopped for `toolUse`: paid for, not an answer' },
     deferred: { producedBy: 'the terminal assistant message stopped for `deferred`: paid for, not an answer' },
-    eof: { producedBy: 'the stream ended with no answer-bearing terminal message, `pending`, or without settling; or the client went away (stdin EOF, SIGTERM, SIGINT) and the run was aborted, with no result written' },
+    eof: { producedBy: 'the stream ended with no answer-bearing terminal message, `pending`, or without settling; or the client went away (stdin EOF, SIGTERM, SIGINT) and the run was aborted, with no result written; or a queued run settled at shutdown without a process' },
     exit: { producedBy: 'the child exited nonzero, or never exited at all' },
     spawn: { producedBy: 'the launch form could not be executed: nothing ran' },
     timeout: { producedBy: 'the gate\'s wall-clock backstop aborted the run' },
-    cancelled: { producedBy: 'a cancellation notification aborted the run' },
+    cancelled: { producedBy: 'a cancellation notification aborted the run, or a queued run was cancelled without a process' },
     switch: { producedBy: 'the gate re-read the policy switch (or lost its source) and aborted the run' },
     ceiling: { producedBy: 'the gate measured a requests/context_tokens/cost crossing and aborted the run' },
     accounting: { producedBy: 'an ordinary response or compaction result with absent or invalid cost marked accounting unknown' },
     audit: { producedBy: 'an evidence append failed on a run that spawned' },
-    refused: { producedBy: 'refusedResult: the call ran nothing' },
+    refused: { producedBy: 'refusedResult: the call ran nothing, or a run was settled at launch' },
   },
 };

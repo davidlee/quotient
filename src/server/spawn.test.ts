@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { spawn as spawnProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { reduce, type Tally } from '../reduce/reduce.ts';
 import { buildArgv, childEnv, runChild, type SpawnPlan } from './spawn.ts';
 import { runLayout, type RunLayout } from './evidence.ts';
 import type { Profile } from './profiles.ts';
@@ -990,4 +991,85 @@ test('stdin EOF aborts every in-flight run through the same ladder, writes no re
   );
   assert.equal(records[1].cause, 'eof');
   assert.equal(records.at(-1)?.signal, 'SIGKILL');
+});
+
+// ── the audit hook and malformed stream lines (design sec-7) ───────────────
+
+test('onAudit sees the ts of every audit record the run appends, in order', async (t) => {
+  const rig = newRig(t, { read: [answer('end'), SETTLED, 'exit 0'].join('\n') });
+  const seen: string[] = [];
+  const outcome = await runChild(planFor(rig), {
+    signal: noAbort().signal,
+    env: rig.env,
+    onAudit: (ts) => { seen.push(ts); },
+  });
+
+  const written = jsonLines(outcome.layout.audit).map((record) => String(record.ts));
+  assert.ok(seen.length >= 2, `at least the spawn and exit records fire it, saw ${String(seen.length)}`);
+  assert.deepEqual(seen, written, 'every appended record, once, in the order it was written');
+});
+
+test('non-object stream lines (null among them) are malformed, never records, and do not crash the run', async (t) => {
+  const junk = [
+    "printf '%s\\n' 'null'",
+    "printf '%s\\n' 'true'",
+    "printf '%s\\n' '42'",
+    `printf '%s\\n' '"x"'`,
+    "printf '%s\\n' '[]'",
+  ];
+  const rig = newRig(t, {
+    read: [emit({ type: 'message_start', message: { role: 'assistant' } }), ...junk, answer('end'), SETTLED, 'exit 0'].join('\n'),
+  });
+  const live: { tally: Tally | null } = { tally: null };
+  const outcome = await runChild(planFor(rig), {
+    signal: noAbort().signal,
+    env: rig.env,
+    onRecord: (tally) => { live.tally = tally; },
+  });
+
+  // The junk rode the stream: it is in `lines`, and the run still ended itself.
+  assert.deepEqual(outcome.lines.slice(1, 6), ['null', 'true', '42', '"x"', '[]']);
+  assert.equal(outcome.settled, true);
+  assert.equal(outcome.exitCode, 0);
+
+  const reduced = reduce(outcome.lines);
+  assert.equal(reduced.status.transcript.malformed, 5);
+  assert.equal(reduced.status.transcript.records, 3, 'the three real events, the junk excluded');
+  assert.notEqual(live.tally, null, 'the observer saw at least one record');
+  assert.equal(live.tally?.requests, reduced.status.requests, 'the live tally and the reduction agree');
+});
+
+test('a record whose handling throws is skipped and reported, and the run still ends itself', async (t) => {
+  const rig = newRig(t, { read: [answer('end'), SETTLED, 'exit 0'].join('\n') });
+  let calls = 0;
+  const outcome = await runChild(planFor(rig), {
+    signal: noAbort().signal,
+    env: rig.env,
+    // The first call is the fresh tally, before any child output; every later
+    // one handles a record from the stream.
+    onRecord: () => {
+      calls += 1;
+      if (calls > 1) {throw new Error('the reader failed');}
+    },
+  });
+
+  assert.ok(calls > 2, `the reader threw on each stream record, called ${String(calls)} times`);
+  assert.equal(outcome.exitCode, 0);
+  assert.equal(outcome.abort, null, 'nothing aborted the run');
+  assert.equal(outcome.settled, true, 'a later record was still observed: the run settled');
+  assert.equal(outcome.lines.length, 2, 'every line still reached the record list');
+});
+
+test('onAudit also sees the abort record of a cancelled run', async (t) => {
+  const rig = newRig(t, { read: ['printf \'%s\\n\' $$ > "@MARKER@/pid"', 'sleep 60'].join('\n') });
+  const controller = noAbort();
+  const seen: string[] = [];
+  const running = runChild(planFor(rig), { signal: controller.signal, env: rig.env, onAudit: (ts) => { seen.push(ts); } });
+  await waitForPath(join(rig.markerDir, 'pid'), 'the launcher pid');
+  controller.abort('cancelled');
+  const outcome = await running;
+
+  const records = jsonLines(outcome.layout.audit);
+  assert.deepEqual(records.map((record) => String(record.record)), ['spawn', 'abort', 'exit']);
+  assert.deepEqual(seen, records.map((record) => String(record.ts)));
 });

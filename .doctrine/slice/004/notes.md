@@ -124,3 +124,27 @@ process itself) are documented behaviour, not yet exercised; the first phase
 that touches `session.ts` should confirm them on the target host. The
 2026-07-28 wire details beyond EVD-004 rest on the server's own choices
 (sec-2), which a client-interop probe after implementation would test.
+
+## PHASE-01 execution (2026-10-26)
+
+Orchestrated with quotient pi workers (implement profile, deepseek-flash): four
+runs, $0.089 total — evidence.test.ts, reduce.test.ts cases, evidence.ts,
+spawn.test.ts cases. Small edits (reducer guard, spawn.ts, result.ts, contract)
+done directly: briefing would have cost more. Then one Codex pass
+(gpt-6.1-sol, high): 3 medium, 3 low, all verified and fixed with tests.
+
+What pi got wrong: duplicated a parse-then-guard helper and a private
+`errorCode` that `paths.ts` already owns; one test (onAudit) covered only the
+happy path. Briefs that point at existing helpers would avoid the first.
+
+Decisions carried forward:
+- `isEventObject` (reduce.ts) returns `boolean`, not a type guard: as a guard it
+  narrows the reducer's deliberately-`any` events and breaks typechecking.
+- `readResult` uses `absent()` (paths.ts): a dangling `result.json` symlink reads
+  `unreadable`, not `absent` — the stricter reading of "only absence is evidence".
+- `appendAudit` prefixes a newline whenever the tail cannot be proven clean (not
+  only when the last byte is not LF); readers skip blank lines.
+- `observe` detects `agent_settled` before the guarded count, so a throwing
+  `onRecord` cannot hide a settle.
+- `runName` is exported; `writeResult` creates the run directory.
+

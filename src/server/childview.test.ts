@@ -349,7 +349,7 @@ test('an exposure path is part of the child view: one exposing a protected store
 
 // ── The one evidence layout (EX-5, VT-4) ───────────────────────────────────
 
-test('the evidence layout is one directory per run under the run dir with its five files, plus attempts.jsonl at the run-dir root (EX-5)', () => {
+test('the evidence layout is one directory per run under the run dir with its six files, plus attempts.jsonl at the run-dir root (EX-5)', () => {
   const t = tree();
   const layout = runLayout(t.runDir, 42);
 
@@ -359,9 +359,11 @@ test('the evidence layout is one directory per run under the run dir with its fi
   assert.equal(layout.transcript, join(layout.dir, 'transcript.md'));
   assert.equal(layout.status, join(layout.dir, 'status.json'));
   assert.equal(layout.audit, join(layout.dir, 'audit.jsonl'));
+  assert.equal(layout.result, join(layout.dir, 'result.json'));
   assert.deepEqual(Object.values(RUN_EVIDENCE_FILES).sort(), [
     'audit.jsonl',
     'events.jsonl',
+    'result.json',
     'status.json',
     'stderr.log',
     'transcript.md',

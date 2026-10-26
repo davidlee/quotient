@@ -657,6 +657,64 @@ test('malformed lines are counted, not fatal', () => {
   assert.equal(status.transcript.malformed, 1);
 });
 
+test('a line that parses to null, a boolean, a number, a string or an array is malformed, not a record', () => {
+  // One shared rule: a parsed line is a record only if it is a non-null,
+  // non-array object. Anything else is skipped like unparseable input.
+  const junk = ['null', 'true', '42', '"x"', '[]'];
+  const cleanLines = (): string[] => run(says('Answered.', 'stop', tokenUsage()));
+  const clean = reduceLines(cleanLines()).status;
+
+  // Lace the junk through the stream so it cannot be dismissed as a trailing
+  // artefact of the writer.
+  const laced = cleanLines();
+  laced.splice(3, 0, junk[0], junk[1]);
+  laced.splice(8, 0, junk[2], junk[3], junk[4]);
+
+  const { status } = reduceLines(laced);
+  assert.equal(status.transcript.malformed, 5);
+  // Only the object lines are records: the junk adds nothing to the count.
+  assert.equal(status.transcript.records, clean.transcript.records);
+  // And it costs nothing: the accounting is the same as the clean run's.
+  assert.equal(status.requests, clean.requests);
+  assert.deepEqual(status.tokens, clean.tokens);
+  assert.equal(status.cost_usd, clean.cost_usd);
+});
+
+test('an empty object and an unknown event object are records, not malformed: the control', () => {
+  const control = ['{}', '{"type":"weird"}'];
+  const cleanLines = (): string[] => run(says('Answered.', 'stop', tokenUsage()));
+  const clean = reduceLines(cleanLines()).status;
+
+  const { status } = reduceLines([...cleanLines(), ...control]);
+  assert.equal(status.transcript.records, clean.transcript.records + 2);
+  assert.equal(status.transcript.malformed, 0);
+});
+
+test('the live tally over object lines equals the reduction, junk lines and all', () => {
+  const lines = run(says('Answered.', 'stop', tokenUsage()));
+  const mixed = [...lines.slice(0, 6), 'null', 'true', '{}', ...lines.slice(6), '[]'];
+
+  // What the server's live observer does: parse each arrival, guard it with the
+  // same non-null, non-array object rule, and count it.
+  const live = createTally();
+  for (const line of mixed) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const isRecord = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+    if (isRecord) {countRecord(parsed, live);}
+  }
+
+  const { status } = reduceLines(mixed);
+  assert.equal(live.requests, status.requests);
+  assert.equal(live.requests_unmeasured, status.requests_unmeasured);
+  assert.deepEqual(live.tokens, status.tokens);
+  assert.equal(live.cost, status.cost_usd);
+});
+
 test('cli: one status line by default, exit 0 when completed', () => {
   const stdout = execFileSync('node', [cli, 'reduce', '--out', mkdtempSync(join(tmpdir(), 'reduce-'))], {
     input: run(says('ok', 'stop', tokenUsage())).join('\n'),

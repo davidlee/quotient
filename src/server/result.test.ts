@@ -305,6 +305,8 @@ test('the abort latch defeats provisional success: a cause recorded before the c
 // ── EX-3 / VT-3: the refusal arm ───────────────────────────────────────────
 
 test('a refusal is the arm where nothing ran: status, artifacts, result and session null (EX-3, VT-3)', async (t) => {
+  // A laned run whose predecessor did not complete is refused at launch, not run.
+  assert.ok(RESULT_REFUSAL_REASONS.includes('lane-predecessor-failed'), 'the lane refusal is declared here');
   for (const reason of RESULT_REFUSAL_REASONS) {
     await t.test(reason, () => {
       const doc = refusedResult(reason, `recorded for ${reason}`);

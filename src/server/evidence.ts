@@ -7,9 +7,23 @@
 // the child-view check consumes these paths rather than a bind list of its own.
 // A refusal is evidence, and evidence that cannot be written is reported on
 // stderr without changing the refusal the caller receives.
-import { appendFileSync, closeSync, mkdirSync, openSync, rmSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
+import { absent } from './paths.ts';
+import { validateAgentResult, type AgentResult } from './result.ts';
 
 /** The JSON-RPC id a call carried, or null when the call had none. */
 export type CallId = string | number | null;
@@ -50,7 +64,7 @@ export function attemptsPath(runDir: string): string {
 }
 
 /**
- * The five files one run's evidence directory holds (design sec-6, EX-5). They
+ * The six files one run's evidence directory holds (design sec-6, EX-5). They
  * are named once here so a reader, a writer and the child-view check cannot
  * disagree about the layout.
  */
@@ -60,9 +74,10 @@ export const RUN_EVIDENCE_FILES = {
   transcript: 'transcript.md',
   status: 'status.json',
   audit: 'audit.jsonl',
+  result: 'result.json',
 } as const;
 
-/** One run's evidence: its own directory and the five files inside it. */
+/** One run's evidence: its own directory and the six files inside it. */
 export type RunLayout = {
   /** The run's directory, exactly one level under `QUOTIENT_RUN_DIR`. */
   dir: string;
@@ -71,14 +86,23 @@ export type RunLayout = {
   transcript: string;
   status: string;
   audit: string;
+  /** The run's `pi-agent-result/2` document, landed by a rename (sec-7). */
+  result: string;
 };
+
+/**
+ * The one grammar a run directory's name obeys (design sec-7): a UTC stamp, a
+ * safe slug and a 12-hex token. A name outside it names no run, so a reader
+ * consults a run directory only through a name it can prove was minted here.
+ */
+export const RUN_NAME_GRAMMAR = /^run-[0-9TZ]+-[A-Za-z0-9_-]{1,32}-[0-9a-f]{12}$/;
 
 /**
  * A run directory's name: a UTC stamp, the call id reduced to a safe component
  * and a fresh token. `../` and `/` cannot survive it, so a caller-controlled id
  * cannot name a path outside the run dir, and two calls never share a run.
  */
-function runName(callId: CallId): string {
+export function runName(callId: CallId): string {
   const stamp = new Date().toISOString().replace(/[-:.]/g, '');
   const id = String(callId ?? 'call')
     .replace(/[^A-Za-z0-9_-]+/g, '-')
@@ -89,12 +113,12 @@ function runName(callId: CallId): string {
 }
 
 /**
- * Name one run's evidence directory and its five files (design sec-6, EX-5).
- * Pure naming: nothing is created here, because the run directory is allocated
- * only after validation step 8 and its allocation is PHASE-06's.
+ * Name one run's evidence directory and its six files (design sec-7). Pure
+ * naming: nothing is created here, because the run directory is allocated only
+ * after validation step 8 and its allocation is PHASE-06's.
  */
-export function runLayout(runDir: string, callId: CallId): RunLayout {
-  const dir = join(runDir, runName(callId));
+export function layoutFor(runDir: string, run: string): RunLayout {
+  const dir = join(runDir, run);
   return {
     dir,
     events: join(dir, RUN_EVIDENCE_FILES.events),
@@ -102,7 +126,13 @@ export function runLayout(runDir: string, callId: CallId): RunLayout {
     transcript: join(dir, RUN_EVIDENCE_FILES.transcript),
     status: join(dir, RUN_EVIDENCE_FILES.status),
     audit: join(dir, RUN_EVIDENCE_FILES.audit),
+    result: join(dir, RUN_EVIDENCE_FILES.result),
   };
+}
+
+/** One run's layout, named from the call it answers (design sec-7). */
+export function runLayout(runDir: string, callId: CallId): RunLayout {
+  return layoutFor(runDir, runName(callId));
 }
 
 /**
@@ -175,8 +205,16 @@ export function writeAttemptProbe(runDir: string): boolean {
   }
 }
 
-/** The control decisions a spawned run's audit records (design sec-6, EX-5). */
-export type AuditKind = 'spawn' | 'abort' | 'exit';
+/** The control decisions a run's audit records (design sec-6, sec-7). */
+export type AuditKind =
+  | 'spawn'
+  | 'abort'
+  | 'exit'
+  | 'admitted'
+  | 'refused'
+  | 'cancelled'
+  | 'dropped'
+  | 'lost';
 
 /**
  * One `<run>/audit.jsonl` line. A record rather than a closed union: the phases
@@ -186,20 +224,162 @@ export type AuditKind = 'spawn' | 'abort' | 'exit';
 export type AuditRecord = Record<string, unknown> & { record: AuditKind };
 
 /**
- * Append one control decision to a run's audit and report whether it landed. An
- * audit that cannot be written fails the run closed (design sec-6): the caller
- * decides what that means before spawn (a refusal, the directory discarded) and
- * after (an `audit_failed` state), so this function only reports the fact.
+ * The file at PATH may end mid-record: its last byte is not a newline, or it
+ * could not be inspected. Only absence proves there is nothing to step over; an
+ * unneeded newline costs a blank line, which a reader skips.
  */
-export function appendAudit(layout: RunLayout, record: AuditRecord): boolean {
+function mayEndMidLine(path: string): boolean {
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      const { size } = fstatSync(fd);
+      if (size === 0) {return false;}
+      const last = Buffer.alloc(1);
+      readSync(fd, last, 0, 1, size - 1);
+      return last[0] !== 0x0a;
+    } finally {
+      closeSync(fd);
+    }
+  } catch (error) {
+    return !absent(path, error);
+  }
+}
+
+/**
+ * Append one control decision to a run's audit and report the `ts` it wrote, or
+ * null when nothing landed. An audit that cannot be written fails the run closed
+ * (design sec-6): the caller decides what that means before spawn (a refusal, the
+ * directory discarded) and after (an `audit_failed` state), so this function only
+ * reports the fact. A record whose predecessor ended mid-line is prefixed with a
+ * newline in the same append, so a torn write never glues two records together
+ * (design sec-7); one writer per run, so there is no race here.
+ */
+export function appendAudit(layout: RunLayout, record: AuditRecord): string | null {
+  const ts = new Date().toISOString();
   try {
     mkdirSync(layout.dir, { recursive: true });
-    appendFileSync(layout.audit, `${JSON.stringify({ ts: new Date().toISOString(), ...record })}\n`);
-    return true;
+    const lead = mayEndMidLine(layout.audit) ? '\n' : '';
+    // The server stamps the record: `ts` leads the line and a caller's cannot replace it.
+    const line = { ts, ...record };
+    line.ts = ts;
+    appendFileSync(layout.audit, `${lead}${JSON.stringify(line)}\n`);
+    return ts;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`quotient: could not append ${layout.audit}: ${message}\n`);
-    return false;
+    return null;
+  }
+}
+
+/** TEXT parsed as JSON and accepted by IS, or null when it is neither — or when
+ *  either throws: a reader of untrusted bytes answers, it does not throw. */
+function parseAs<T>(text: string, is: (value: unknown) => value is T): T | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return is(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * VALUE is a non-null, non-array object carrying a string `record`. That field is
+ * the only member the trail claims on: the audit is read by an operator rather
+ * than by a closed-union parser, so a kind this build does not name is still a
+ * record, not a torn line.
+ */
+function isAuditRecord(value: unknown): value is AuditRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {return false;}
+  return 'record' in value && typeof value.record === 'string';
+}
+
+/**
+ * Read a run's audit (design sec-7). A line that does not parse, or parses to
+ * something that is not a record, is skipped and marks the trail torn — a reader
+ * learns that the evidence has a hole rather than silently losing a record. An
+ * audit that cannot be read at all is null: the run left no trail.
+ */
+export function readAudit(layout: RunLayout): { records: AuditRecord[]; torn: boolean } | null {
+  let text: string;
+  try {
+    text = readFileSync(layout.audit, 'utf8');
+  } catch {
+    return null;
+  }
+  const records: AuditRecord[] = [];
+  let torn = false;
+  for (const line of text.split('\n')) {
+    if (line.length === 0) {continue;}
+    const record = parseAs(line, isAuditRecord);
+    if (record !== null) {
+      records.push(record);
+      continue;
+    }
+    torn = true;
+    process.stderr.write(`quotient: skipped a torn line in ${layout.audit}\n`);
+  }
+  return { records, torn };
+}
+
+/** The temp the result is written to before it is renamed into place (sec-7). */
+const RESULT_TMP = '.result.json.tmp';
+
+/**
+ * Land one run's result document (design sec-7). The document is written to a
+ * temp inside the run directory, timed, then renamed over `result.json`: a reader
+ * never sees a partial document, and a failure before the rename leaves no
+ * residue. Null means no `result.json` was written. Once the rename lands the
+ * answer is the time, never null: a rename keeps the mtime read before it.
+ */
+export function writeResult(layout: RunLayout, document: AgentResult): string | null {
+  const tmp = join(layout.dir, RESULT_TMP);
+  try {
+    mkdirSync(layout.dir, { recursive: true });
+    writeFileSync(tmp, `${JSON.stringify(document, null, 2)}\n`);
+    const writtenAt = statSync(tmp).mtime.toISOString();
+    renameSync(tmp, layout.result);
+    return writtenAt;
+  } catch (error) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Best-effort: a temp that cannot be removed is not the caller's problem.
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`quotient: could not write ${layout.result}: ${message}\n`);
+    return null;
+  }
+}
+
+/**
+ * VALUE is a `pi-agent-result/2` document: `validateAgentResult` is the one
+ * conformance check, so a reader and a writer cannot disagree about the shape.
+ */
+function isAgentResult(value: unknown): value is AgentResult {
+  return validateAgentResult(value).ok;
+}
+
+/**
+ * Read a run's result (design sec-7). Only absence is evidence that no result was
+ * written: `absent` when there is no entry at all, `unreadable` for everything else that
+ * stops the document being a conforming `pi-agent-result/2`. The document and the
+ * moment it landed come back together, so a reader can judge both.
+ */
+export function readResult(
+  layout: RunLayout,
+): { found: AgentResult; writtenAt: string } | 'absent' | 'unreadable' {
+  let text: string;
+  try {
+    text = readFileSync(layout.result, 'utf8');
+  } catch (error) {
+    return absent(layout.result, error) ? 'absent' : 'unreadable';
+  }
+  const found = parseAs(text, isAgentResult);
+  if (found === null) {return 'unreadable';}
+  try {
+    return { found, writtenAt: statSync(layout.result).mtime.toISOString() };
+  } catch {
+    return 'unreadable';
   }
 }
 

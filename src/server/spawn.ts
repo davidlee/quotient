@@ -27,7 +27,7 @@ import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
-import { countRecord, createTally, type Tally } from '../reduce/reduce.ts';
+import { countRecord, createTally, isEventObject, type Tally } from '../reduce/reduce.ts';
 import { attemptsPath, appendAudit, removeRun, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
 import type { Form, FormSource } from './policy.ts';
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument, type Profile } from './profiles.ts';
@@ -104,6 +104,9 @@ export type RunControl = {
    *  again immediately after every `countRecord`, so a second consumer reads the
    *  one accumulator instead of keeping its own. */
   onRecord?: (tally: Tally) => void;
+  /** Called with the `ts` of every audit record the run appends, so the caller
+   *  can follow the run's last change without reading the audit back. */
+  onAudit?: (ts: string) => void;
 };
 
 /**
@@ -258,9 +261,13 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   });
 
   const audit = (record: AuditRecord): boolean => {
-    const ok = appendAudit(layout, { policy_digest: plan.policyDigest, session: plan.session, ...record });
-    if (!ok) {auditFailed = true;}
-    return ok;
+    const ts = appendAudit(layout, { policy_digest: plan.policyDigest, session: plan.session, ...record });
+    if (ts === null) {
+      auditFailed = true;
+      return false;
+    }
+    control.onAudit?.(ts);
+    return true;
   };
 
   try {
@@ -346,9 +353,19 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     } catch {
       return; // malformed: the reducer counts it, this only watches for settling
     }
-    countRecord(event, tally);
-    control.onRecord?.(tally);
+    // Not an object (`null`, `[]` …): malformed by the reducer's own rule, so the
+    // live tally and the reduction count the same lines.
+    if (!isEventObject(event)) {return;}
     if ((event as { type?: unknown }).type === 'agent_settled') {settled = true;}
+    // This runs inside a stream event, outside any promise: a record whose
+    // handling throws is treated as malformed rather than ending the server.
+    try {
+      countRecord(event, tally);
+      control.onRecord?.(tally);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`quotient: skipped a stream record that could not be counted: ${message}\n`);
+    }
   };
   const stdout = child.stdout!;
   stdout.on('data', (chunk: Buffer) => {

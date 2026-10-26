@@ -74,8 +74,8 @@ key listed is always present; `nullable` says whether its value may be `null`.
 | `status.alerts[].text` | string | no | a snippet of the matching text |
 | `status.transcript` | object | no | what the reducer read and kept |
 | `status.transcript.bytes` | number | no | bytes of transcript returned |
-| `status.transcript.records` | number | no | JSON records read from the stream |
-| `status.transcript.malformed` | number | no | records that were not JSON |
+| `status.transcript.records` | number | no | JSON objects read from the stream |
+| `status.transcript.malformed` | number | no | lines that were not a JSON object |
 | `status.transcript.elided` | number | no | transcript entries cut by the budget |
 | `artifacts` | object | yes | where this run's evidence lives; `null` for a refusal |
 | `artifacts.dir` | string | no | the run directory |
@@ -215,6 +215,7 @@ before step 1.
 | `view-overlaps-protected` | step 8 | the child could write to a store it must not |
 | `audit-unavailable` | before the run | the attempts ledger cannot be appended to, so nothing is launched |
 | `audit-failed` | before the run | the run's first audit record cannot be written, so nothing is launched |
+| `lane-predecessor-failed` | at launch | a laned run with `needs_success` whose predecessor in the lane did not complete, so it is not launched |
 | `server-error` | any step | the server failed before a run was established |
 
 A later build may add a reason to this table without minting a new version: the
