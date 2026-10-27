@@ -59,3 +59,19 @@ pi_agent_wait(run…)                   → pi-agent-result/2  blocks; observes 
 
 Contract change (new tools, result/status docs, help sections): needs a slice
 and design.
+
+## Evidence after the split (probed 2026-10-27, Claude Code main conversation, server at f337403 as `quotient-dev`)
+
+Two `pi_agent_start` calls in one message, write-capable profiles, different
+roots, each running `date +%s.%N; sleep 20; date +%s.%N`; then one
+`pi_agent_wait` (runs: both, until: all) answered both settled, `timed_out: false`.
+
+| run | profile, root | admitted / spawn | sleep (epoch s) | exit |
+|---|---|---|---|---|
+| A `run-20261027T002746902Z-1-909d3cd45b35` | `write`, /home/david/dev/quotient | 00:27:46.903 / .904 | 868.882 → 888.883 | 00:28:10.048 |
+| B `run-20261027T002746913Z-2-b53db5204dea` | `implement`, /home/david/dev/satan | 00:27:46.913 / .914 | 868.983 → 888.985 | 00:28:09.963 |
+
+Starts 10 ms apart; the sleeps overlap for ~19.9 s of 20. Write-capable runs now
+run concurrently under Claude Code: the starts serialise but return at once,
+and one wait collects both. (Sleep times are `1793060…` epoch seconds, prefix
+elided.)
