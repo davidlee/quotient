@@ -11,7 +11,7 @@ typecheck:
 test:
     npm test
 
-build:
+build: specs
     npm run build
 
 nix-build:
