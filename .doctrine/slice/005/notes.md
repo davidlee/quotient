@@ -126,3 +126,18 @@ Observed: pi_agent calls from this client run serially (~2 min each).
   which is why `slice phases` skipped PHASE-01. Restored in the audit.
 - pack-check checks committed HEAD by design; re-run the gate after
   committing to pack-check the new code.
+
+## Harvest
+<!-- single-copy: updated in place each harvest; ids only, never restated content -->
+fresh-as-of: 2026-10-27 · close · c5509c3
+
+### Produced
+- PHASE-01..05 done — lint 526 → 0, lint in `just gate` (b2c183b); audit ee0496f; reconcile c5509c3
+- resolved: IMP-002 — strict lint adopted and gated
+
+### Learned
+- mem.pattern.quotient.pi-agent-orchestration — differential review for refactors; `git add -N` before gate
+
+### Open
+- none: out-of-contract divergences are recorded in design.md D4 and above, not open questions
+

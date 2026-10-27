@@ -13,3 +13,6 @@ Driving a slice's phases through `mcp__quotient__pi_agent` (`implement` worker, 
 
 - Briefs: Claude's scratchpad (`/tmp/claude-*/…`) is invisible inside the pi sandbox (it sees only its cwd). Write long briefs and spec extracts under `.doctrine/state/slice/NNN/phases/` (gitignored) and pass the relative path (SL-004 PHASE-06).
 - Contract tests from pi often pass against plausible wrong implementations: a hang guard equal to the wait's own timeout, order fixtures that cannot tell two orderings apart, boundary slack. Read every test and run mutation controls before the code run (SL-004 PHASE-05/06).
+
+- Refactors: a worker's "order/behaviour preserved" claim is not evidence. A `review` worker running the old (HEAD) and new code side by side on generated inputs caught a policy check-order regression the suite missed (SL-005 PHASE-04, RV-017). Run one per risky production refactor.
+- `just gate`'s nix-build sees only git-tracked files: a new source file needs `git add -N` (intent-to-add) before gating an uncommitted tree (SL-005 PHASE-03).

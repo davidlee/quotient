@@ -6,7 +6,7 @@ status = "active"
 title = "Orchestrating slice phases through quotient pi_agent workers"
 summary = "30-request cap per call; rotate sessions near 120k context via a handover block in the phase sheet; workers have no git; pack-check builds committed HEAD"
 created = "2026-10-24"
-updated = "2026-10-26"
+updated = "2026-10-27"
 
 [scope]
 paths = []
