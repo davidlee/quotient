@@ -63,7 +63,8 @@ server sharing the run directory, is resolved from disk. Each run records its
 owner when it is admitted: the server's pid and start time, and the host, boot
 and namespaces in which those mean something. A run with a result is settled.
 A run without one is `lost` only on positive evidence that no result can still
-arrive: a published `lost` record, or an owner confirmed dead. Otherwise it
+arrive: a published `lost` record, an owner confirmed dead, or a trail that
+names no owner (a run from an earlier release). Otherwise it
 belongs to another live server and reads as still working, and a result that
 exists but cannot be read now is reported as unreadable, with no status, until
 it reads.
@@ -240,7 +241,7 @@ writable, holding pi's own session state.
 
 There are two kinds of evidence, kept apart:
 
-- **The attempts ledger** records attempts that spawned nothing: a call
+- **The attempts ledger** (`attempts.jsonl`) records attempts that spawned nothing: a call
   refused before a run existed, and a run refused at launch, by re-admission or
   `lane-predecessor-failed`. What was asked, and why it was refused.
 - **The run's audit** records a run that was admitted. It opens with

@@ -258,7 +258,6 @@ ids = [start(..., key: "a").taskId, start(..., key: "b").taskId, start(..., key:
 until ids is empty:
   w = pi_agent_wait(runs: ids, until: "any")     # timeout_s defaults to 45
   for each entry in w.runs that is settled and has a result: use entry.result
-  pi_agent_ack(runs: the ids just used)
   drop from ids: the ids just used, every entry whose state is lost
     (no result; its evidence is under artifacts.dir), and every id in w.unknown
 ```

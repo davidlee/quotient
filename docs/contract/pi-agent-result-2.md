@@ -15,8 +15,9 @@ content item whose text is this JSON document. `isError` is `false` exactly
 when `state` is `completed`. Two requests answer otherwise:
 
 - A request that declares the MCP tasks extension is answered with a task, not
-  this document; once the task has settled, `tasks/get` carries the tool result
-  above (`docs/contract/pi-run-handle-1.md` says how its status reads). A
+  this document; once the task has completed, `tasks/get` carries the tool result
+  above; a cancelled task carries none, and `pi_agent_wait` naming its task id
+  reads its document (`docs/contract/pi-run-handle-1.md` says how its status reads). A
   refusal at admission is not a task: it answers this document's refusal, as a
   blocking call does.
 - A request the client cancelled (`notifications/cancelled`) gets no reply at
@@ -63,8 +64,9 @@ when `state` is `completed`. Two requests answer otherwise:
   published only once it passed admission: a refusal at admission writes no
   `result.json`.
 - **A run started by `pi_agent_start` can settle as a refusal.** A run queued in
-  a lane — whichever tool started it — is re-admitted against the policy,
-  profiles and approvals as they read when it launches; a refusal there, or
+  a lane — whichever tool started it — is re-admitted against the policy
+  and approvals as they read when it launches (profiles stay as read at
+  start-up); a refusal there, or
   `lane-predecessor-failed`, settles it as this document's refusal arm without
   launching. So a refusal is not only something `pi_agent_start` answers at
   once: it can be what the run's wait entry later carries.
@@ -238,7 +240,7 @@ in the order below, and the first failure wins. The request shape is checked
 before step 1.
 
 A run queued in a lane is admitted when it is started and again when it
-launches, against the policy, profiles and approvals as they read then: steps 1
+launches, against the policy and approvals as they read then and the profiles as read at start-up: steps 1
 to 8 run again (the session is not re-acquired, since the run has held it since
 it started, and step 6 narrows the ceilings to the current maxima rather than
 refusing), and the first failure settles the run as that refusal without
@@ -271,7 +273,7 @@ reaches the head of its lane, before re-admission.
 | `view-overlaps-protected` | step 8 | the child could write to a store it must not |
 | `audit-unavailable` | before the run | the attempts ledger cannot be appended to, so nothing is launched |
 | `audit-failed` | before the run | the run's first audit record, or its `spawn` record, cannot be written, so nothing is launched |
-| `lane-predecessor-failed` | at launch | a laned run with `needs_success` whose predecessor in the lane did not complete, so it is not launched |
+| `lane-predecessor-failed` | at start or at launch | a laned run with `needs_success` whose predecessor in the lane did not complete, so it is not launched |
 | `server-error` | any step | the server failed before a run was established |
 
 A later build may add a reason to this table without minting a new version: the

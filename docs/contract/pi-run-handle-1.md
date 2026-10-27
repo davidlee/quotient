@@ -44,9 +44,11 @@ result also carries `resultType: "complete"`.
 
 ## The run document
 
-Every document that describes a run is an MCP Task with the task extension's
-field names verbatim, plus quotient's extras in snake_case. A client that knows
-tasks reads the Task fields; the extras are quotient's.
+Every surface describes a run with the same seven MCP Task fields, their names
+verbatim from the tasks extension: `taskId` to `pollIntervalMs` below. A handle
+and a wait entry add quotient's extras in snake_case, `state` to `artifacts`; a
+created task and a `tasks/get` answer carry the Task fields only (see Tasks). A
+client that knows tasks reads the Task fields; the extras are quotient's.
 
 | path | type | nullable | meaning |
 |---|---|---|---|
@@ -64,7 +66,7 @@ tasks reads the Task fields; the extras are quotient's.
 | `artifacts` | object | no | where the run's evidence lives |
 | `artifacts.dir` | string | no | the run's evidence directory. Its `result.json`, once present, is the run's `pi-agent-result/2` document |
 
-Every key listed is always present. A run document never holds the run's result;
+In a handle or a wait entry every key listed is always present. A run document never holds the run's result;
 a wait entry carries it beside the run document (`pi-agent-wait/1`).
 
 ## States
@@ -75,15 +77,21 @@ a wait entry carries it beside the run document (`pi-agent-wait/1`).
 | `running` | no | launched: re-admitted if it was queued, and its process started or starting |
 | `foreign` | no | another quotient server sharing the run directory owns it and may still be running it, or its owner's liveness cannot be known |
 | `settled` | yes | a `pi-agent-result/2` document was written to `result.json` |
-| `lost` | yes | no result was recorded and none ever will be: `result.json` could not be written, or the owner is confirmed dead without having written one |
+| `lost` | yes | no result was recorded and none ever will be: `result.json` could not be written, the owner is confirmed dead without having written one, or the evidence names no owner (a run directory from an earlier release, or an `admitted` record without one) |
 
 A server holds `queued`, `running`, `settled` and `lost` for the runs it started.
 A run it does not hold — started by another server, or before a restart — is
 resolved from its evidence directory: `settled` when a result reads, `lost` on
-positive evidence that no one can still write one, and `foreign` otherwise. A
+positive evidence that no one can still write one (a published `lost` record,
+an owner confirmed dead, or evidence that names no owner), and `foreign`
+otherwise. A
 run is never guessed dead. A terminal state never changes: it is derived only
 from `result.json`, a recorded loss and the owner's confirmed death, all of
 which are permanent, so it reads the same before and after the server ends.
+One exception: when neither `result.json` nor the `lost` record can be written
+(the run directory itself has become unwritable), the owning server reports the
+run `lost` while any other server reads it `foreign` until the owner is
+confirmed dead.
 
 Two answers are not states, and no run document carries them: an id with no
 evidence directory at all (*unknown*) and a run whose `result.json` exists but
@@ -98,7 +106,7 @@ terminal status is what the written result says.
 
 | `state` | `status` | `statusMessage` | `tasks/get` adds |
 |---|---|---|---|
-| `queued` | `working` | `queued in lane <lane> behind <predecessor>` (or `queued in lane <lane>` with no predecessor); `cancelling` once a cancel has marked it | — |
+| `queued` | `working` | `queued in lane <lane> behind <predecessor>` (or `queued in lane <lane>` with no predecessor, or `queued` with no lane); `cancelling` once a cancel has marked it | — |
 | `running` | `working` | `running`; `cancelling` once a cancel has marked it | — |
 | `foreign` | `working` | `owned by another quotient server (pid <pid>)`, or without the pid when none was recorded or it cannot be read | — |
 | `settled`, result state `cancelled` | `cancelled` | the result's `causes`, joined with `, ` | nothing: `pi_agent_wait` naming the task id still reads the run's `pi-agent-result/2` document |
@@ -112,6 +120,48 @@ given. `failed` is kept for the one case where no answer exists.
 `tasks/get` answers an unreadable run, or a settled one whose `result.json`
 cannot be read now, with error `-32603` ("the result could not be read;
 retry"), and an unknown or malformed task id with `-32602`.
+
+## Tasks
+
+Only `pi_agent` answers with a task, and only to a request that declares the
+tasks extension in its own `params._meta`:
+
+```json
+{
+  "_meta": {
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientCapabilities": {
+      "extensions": { "io.modelcontextprotocol/tasks": {} }
+    }
+  }
+}
+```
+
+The declaration is per request: one made at `initialize`, or on an earlier
+request, does not carry over. A request without it, in either protocol era,
+blocks and answers `pi-agent-result/2`. A version other than `2026-07-28` is
+error `-32022`, naming the supported version; a version that is not a string,
+or capabilities that are not an object, is `-32602`.
+
+The answer is the run's Task fields, flat, beside `resultType`:
+
+```json
+{
+  "taskId": "run-20261026T120301123Z-7-3f9a0c1d2e4b",
+  "status": "working",
+  "statusMessage": "running",
+  "createdAt": "2026-10-26T12:03:01.123Z",
+  "lastUpdatedAt": "2026-10-26T12:03:01.123Z",
+  "ttlMs": null,
+  "pollIntervalMs": 2000,
+  "resultType": "task"
+}
+```
+
+`tasks/get` answers the same Task fields, the member the Status table names,
+and `resultType: "complete"`. `tasks/cancel` and `tasks/update` answer an empty
+result. A refusal at admission is not a task: it answers the
+`pi-agent-result/2` refusal.
 
 ## The handle
 
@@ -158,8 +208,8 @@ terminal:
 - A key replay answers the original run in whatever state it is in now.
 
 A queued run may still settle as a refusal later: when it reaches the head of
-its lane it is re-admitted against the policy, profiles and approvals as they
-read then, and a refusal there settles the run without launching. Its result
+its lane it is re-admitted against the policy and approvals as they read then
+(profiles stay as read at start-up), and a refusal there settles the run without launching. Its result
 is a `pi-agent-result/2` refusal whose `session` and `artifacts` are null, while
 its run document keeps the run's `session` and `artifacts.dir`: the run was
 published, and its directory holds its evidence.
