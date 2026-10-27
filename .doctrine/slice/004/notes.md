@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-10 in_progress (VH-1 probe pending) · f337403
+fresh-as-of: 2026-10-27 · PHASE-10 completed; all phases done; /audit next · 6dc49d7
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -19,7 +19,7 @@ fresh-as-of: 2026-10-27 · PHASE-10 in_progress (VH-1 probe pending) · f337403
 - PHASE-06 done — waiting.ts + suite, shared run fixtures in test-rig (4e3fe68, b8f6950, e5c1b3b; delta e3fb817..e5c1b3b); Codex 3 medium (2 fixed, F1 accepted) + 1 low fixed (§ PHASE-06 execution)
 - PHASE-07 done — blocking pi_agent through the registry; call driver + reply gate; EOF at the trigger (3095a6f, 70e02a4; delta 5d8e37c..70e02a4); Codex 1 medium fixed (§ PHASE-07 execution)
 - PHASE-08 done — five tools, readers + argsDigest, start/wait/ack/cancel handlers, readmit, tool help sections, sleeper form (b1c9981; delta recorded); Codex 3 fixed + 1 contested (§ PHASE-08 execution)
-- PHASE-10 in progress — contracts handle/wait/ack + help sections, result-2, docs/design.md, README, help (737519c, f337403); gate 741; VA-1 + Codex 6 findings integrated (§ PHASE-10 execution); VH-1 pending
+- PHASE-10 done — contracts handle/wait/ack + help sections, result-2, docs/design.md, README, help (737519c..6dc49d7; delta recorded); gate 741; VA-1 + Codex 6 findings integrated; VH-1 probe: write runs overlap ~19.9 s (76bd49c, on IMP-011) (§ PHASE-10 execution)
 - PHASE-09 done — protocol.ts (eras, server/discover, tasks/*), era routing, task-answering pi_agent, taskOf, modernLine (6bfb2f8, 6faf117; delta recorded); Codex 1 medium fixed (§ PHASE-09 execution)
 
 ### Learned
@@ -30,7 +30,8 @@ fresh-as-of: 2026-10-27 · PHASE-10 in_progress (VH-1 probe pending) · f337403
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: VH-1 probe via user-scope MCP server `quotient-dev` (dist/ at f337403; Claude Code restart), record on IMP-011, then complete PHASE-10 → audit
+- next: `doctrine slice status 4 audit` → /audit → /reconcile → /close; IMP-011 resolve at close (probe evidence on it)
+- user-scope MCP server `quotient-dev` (repo dist/) registered for the probe; remove when done: `claude mcp remove quotient-dev -s user`
 - D-15, D-16 + contract-agent notes — design text to amend at /reconcile (§ PHASE-10 execution)
 - cancel answer reports timed_out: true when a target is foreign/unreadable — documented; raise at /audit
 - D-12..D-14 — discoverResult(instructions, serverInfo); runCall `present`; legacy id-bearing notifications stay notifications; /reconcile amends sec-7 (§ PHASE-09 execution)
