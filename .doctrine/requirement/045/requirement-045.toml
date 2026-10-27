@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 45
+slug = "live-help-sections-render-from-current-state"
+title = "Live help sections render from current state"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The agent section appends a profile table (each loaded profile's model, thinking, tools, source and the capability the policy pins, as read at render time) and the policy's per-run maxima; the clients section renders snippets naming the running binary (or QUOTIENT_LAUNCHER) and a timeout derived from the policy's wall-clock maximum."
+tags = []
+acceptance_criteria = [
+  "The agent section lists every loaded profile with its pinned capability, or says the policy is unavailable.",
+  "The clients section's Codex timeout is the policy's maxima.wall_clock_s plus 60 when the policy reads, and a labelled placeholder otherwise.",
+]

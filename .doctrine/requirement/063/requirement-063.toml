@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 63
+slug = "the-unconfined-form-is-explicit-and-holds-no-guarantee"
+title = "The unconfined form is explicit and holds no guarantee"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "When the policy names pi itself as an unconfined write form, the server runs `<pi> <pi argv\u2026>` with no session positional, and the shipped contract states that none of the form guarantees hold."
+tags = []
+acceptance_criteria = [
+  "An unconfined launch passes pi's argv alone.",
+  "The form contract states that G1\u2013G8 do not hold for the unconfined form.",
+  "No run is launched unconfined unless the policy names an unconfined form for its capability.",
+]

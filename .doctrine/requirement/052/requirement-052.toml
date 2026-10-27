@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 52
+slug = "signals-shut-the-server-down-through-the-eof-path"
+title = "Signals shut the server down through the EOF path"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "While serving, the first SIGTERM or SIGINT triggers the same shutdown as stdin EOF; a second delivery of the same signal takes the default action."
+tags = []
+acceptance_criteria = [
+  "SIGTERM to a serving process ends every running run with the shutdown cause and the process exits 0.",
+  "A second SIGTERM or SIGINT during shutdown terminates the process by the default action.",
+]

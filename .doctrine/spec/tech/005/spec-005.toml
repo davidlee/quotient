@@ -1,0 +1,42 @@
+schema = "doctrine.spec.tech"
+version = 1
+
+id = 5
+slug = "config-and-profiles"
+title = "Config and profiles"
+status = "draft"
+kind = "tech"
+tags = ["config", "profiles", "help"]
+responsibilities = [
+  "Resolve every location quotient reads or writes from the environment, by one pure function.",
+  "Keep run-deciding configuration out of the project tree; refuse start-up on a legacy launch-dir layer.",
+  "Load, validate and freeze the profile snapshot at start-up, and define the profile document grammar.",
+  "Load and freeze the help snapshot at start-up, with per-section operator overrides for non-contract sections.",
+  "Render the help sections that depend on live state from caller-supplied inputs.",
+  "Digest each snapshot so every run's audit names the profiles and help it ran under.",
+]
+
+category = "configuration"
+c4_level = "component"
+descends_from = "PRD-001"
+parent = "SPEC-002"
+
+[[source]]
+language = "typescript"
+identifier = "src/config.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/profiles.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/help/help.ts"
+
+[[source]]
+language = "markdown"
+identifier = "help/"
+
+[[source]]
+language = "markdown"
+identifier = "examples/profiles/"

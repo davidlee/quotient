@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 34
+slug = "the-approvals-store-is-closed-world-and-a-malformed-store-refuses"
+title = "The approvals store is closed-world and a malformed store refuses"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The approvals store admits exactly its schema's keys, one entry per root and capability, canonical paths and lowercase sha256 digests; a malformed or unreadable store refuses every call that reaches form selection with form-unapproved naming the store and the fault, and is never overwritten by the verbs."
+tags = []
+acceptance_criteria = [
+  "A duplicate (root, capability) pair makes every form-selecting call refuse form-unapproved.",
+  "A non-canonical root (trailing separator) is malformed, not normalised.",
+  "allow and revoke exit non-zero on a malformed store and leave it byte-identical.",
+]

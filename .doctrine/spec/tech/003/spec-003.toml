@@ -1,0 +1,58 @@
+schema = "doctrine.spec.tech"
+version = 1
+
+id = 3
+slug = "confinement-policy"
+title = "Confinement policy"
+status = "draft"
+kind = "tech"
+tags = ["policy", "admission", "approvals"]
+responsibilities = [
+  "Read, validate and apply the operator policy on every call, refusing anything absent, unknown or unreadable.",
+  "Judge each call through one fixed admission order, first failure wins, and hand the decided grant to the server.",
+  "Re-admit a queued run at launch against current authority: refuse or narrow, never widen or move.",
+  "Keep the child's view off every protected store further than that store allows.",
+  "Select each call's form from the machine slot, the governing approval and the project link, with no fallback once governed.",
+  "Own the approvals store: closed format, containment rule, single locked writer, allow and revoke semantics.",
+]
+
+category = "policy"
+c4_level = "component"
+descends_from = "PRD-001"
+parent = "SPEC-002"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/admission.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/policy.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/childview.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/paths.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/forms.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/approvals.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/approve.ts"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/quotient-policy-2.md"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/quotient-approvals-1.md"

@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 18
+slug = "verdicts-are-tool-results-never-protocol-errors"
+title = "Verdicts are tool results, never protocol errors"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every tools/call answers an MCP tool result whose single text item is a versioned JSON document; a refusal or a failed run is never a JSON-RPC error. isError is true for a refusal from any tool, and for pi_agent whenever the result's state is not completed."
+tags = []
+acceptance_criteria = [
+  "A refused call from each of the five tools answers a pi-agent-result/2 refusal with isError true.",
+  "A handle, wait answer or ack answer is never isError because of the runs it describes.",
+  "Only protocol faults (unknown method, unparsable line, malformed _meta) are JSON-RPC errors.",
+]

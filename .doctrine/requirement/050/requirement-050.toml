@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 50
+slug = "help-clients-renders-this-installs-client-snippets"
+title = "help clients renders this install's client snippets"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "`quotient help clients` prints Claude Code and Codex configuration naming this binary (by `QUOTIENT_LAUNCHER` when absolute, else by the path it was run as), the launch dir, and a Codex tool timeout derived from the policy's wall-clock maximum."
+tags = []
+acceptance_criteria = [
+  "Both snippets name the binary by the path it was invoked as, not its symlink target.",
+  "An absolute `QUOTIENT_LAUNCHER` replaces that path; a relative one is ignored.",
+  "The Codex timeout is the policy's `maxima.wall_clock_s` plus 60 when the policy reads, and a marked placeholder otherwise.",
+]

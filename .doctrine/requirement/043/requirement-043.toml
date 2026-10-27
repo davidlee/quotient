@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 43
+slug = "one-help-corpus-serves-human-and-model"
+title = "One help corpus serves human and model"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Help is one sectioned corpus: the same section text is what `quotient help <section>` prints, what an MCP client receives as the server's instructions (agent) and as each tool's description (tool, tool-start, tool-wait, tool-ack, tool-cancel)."
+tags = []
+acceptance_criteria = [
+  "The server's instructions equal the agent section as `quotient help agent` renders it in the same environment.",
+  "Each tool's description equals its help section's text.",
+]

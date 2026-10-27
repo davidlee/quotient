@@ -1,0 +1,15 @@
+[[edge]]
+target = "SPEC-005"
+type = "uses"
+notes = "admission reads the profile snapshot and config locations"
+
+[[edge]]
+target = "SPEC-004"
+type = "uses"
+notes = "selects a form per capability and checks the child view against form-1's promise"
+# Interactions — outbound spec -> spec edges (tech specs only).
+# Seeded empty; authored via `doctrine spec interactions add`:
+#   [[edge]]
+#   target = "SPEC-002"       # canonical FK into .doctrine/spec/tech/NNN
+#   type = "uses"             # free-text edge kind (calls / extends / uses / …)
+#   notes = "…"               # optional

@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 15
+slug = "shipped-contracts-are-versioned-and-kept-true"
+title = "Shipped contracts are versioned and kept true"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every document quotient emits or reads has a versioned, shipped contract; a change that would break a reader takes a new version, and the shipped contracts are checked mechanically against the implementation."
+tags = []
+acceptance_criteria = [
+  "Each emitted and consumed document names its schema version.",
+  "Contract text and implementation are checked against each other on every release gate.",
+]

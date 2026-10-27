@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 30
+slug = "a-queued-run-is-re-admitted-at-launch-narrowed-never-widened"
+title = "A queued run is re-admitted at launch, narrowed never widened"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "When a queued run reaches launch it passes the policy, profile, root, form, ceilings and child-view checks again against the policy and approvals current then; its ceilings and transcript budget narrow to current maxima rather than refusing; its root, session, capability and tools are kept; any failure settles it as that refusal without launching."
+tags = []
+acceptance_criteria = [
+  "Lowering a maximum while a run is queued launches it with the lower ceiling.",
+  "Disabling the policy while a run is queued settles it refused disabled without launching.",
+  "Re-admission never changes the run's root, session, capability or tools.",
+]

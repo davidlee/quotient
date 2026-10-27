@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 36
+slug = "form-invocation-is-fixed-by-the-contract"
+title = "Form invocation is fixed by the contract"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The server launches a confined run as `<form> <session-dir> <pi argv\u2026>` with the canonical root as working directory, pi's argv verbatim (no executable word, no `--`), the prompt on stdin closed after writing, and pi's event stream on stdout."
+tags = []
+acceptance_criteria = [
+  "A confined launch passes exactly the session directory followed by pi's argv to the form.",
+  "The form's working directory is the run's canonical root.",
+  "stdout and stderr are captured separately and never merged.",
+]

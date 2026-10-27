@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 10
+slug = "every-run-leaves-durable-evidence"
+title = "Every run leaves durable evidence"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Each admitted run keeps an evidence directory with its event stream, audit trail and settled result, outside any delegate's reach; any server sharing the run directory can answer for a run another server or an earlier process started."
+tags = []
+acceptance_criteria = [
+  "A settled run's result is readable from its evidence directory after the server that ran it has exited.",
+  "Attempts that spawned nothing are recorded with what was asked and why it was refused.",
+  "A delegate cannot alter its own run's evidence.",
+]

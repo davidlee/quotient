@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 27
+slug = "only-the-per-call-posture-is-served"
+title = "Only the per-call posture is served"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A policy whose mode is not per-call, or that carries a field belonging only to the static posture, refuses posture-unsupported for every call; it is never read as the nearest posture served."
+tags = []
+acceptance_criteria = [
+  "mode \"static\" refuses posture-unsupported.",
+  "Any of agent, root, filesystem, session_home, run_dir, evidence_dir in the policy refuses posture-unsupported.",
+]

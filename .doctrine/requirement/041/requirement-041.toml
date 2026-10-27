@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 41
+slug = "a-profile-declares-its-capability-for-the-policy-to-pin"
+title = "A profile declares its capability for the policy to pin"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Each profile document declares the filesystem capability its delegate needs, so that admission can refuse any profile whose declaration differs from the capability the operator's policy pins for that name."
+tags = []
+acceptance_criteria = [
+  "Every loaded profile carries a filesystem of read or write taken from its document.",
+  "The declared capability is what admission compares against the policy's pin (SPEC-003).",
+]

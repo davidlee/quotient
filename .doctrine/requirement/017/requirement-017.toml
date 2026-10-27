@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 17
+slug = "pi-agent-answers-a-task-only-to-a-request-declaring-the-tasks-extension"
+title = "pi_agent answers a task only to a request declaring the tasks extension"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "pi_agent answers with an MCP task only when that same request declares the io.modelcontextprotocol/tasks extension in its _meta; every other request blocks and answers pi-agent-result/2. tasks/get and tasks/cancel are served, tasks/update is an empty no-op."
+tags = []
+acceptance_criteria = [
+  "A modern request declaring tasks receives a CreateTaskResult whose taskId is the run's handle.",
+  "A declaration on an earlier request or at initialize does not make a later request a task request.",
+  "An admission refusal answers the pi-agent-result/2 refusal, not a task.",
+]

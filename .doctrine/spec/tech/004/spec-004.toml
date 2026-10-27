@@ -1,0 +1,45 @@
+schema = "doctrine.spec.tech"
+version = 1
+
+id = 4
+slug = "forms-contract"
+title = "Forms contract"
+status = "draft"
+kind = "tech"
+tags = ["forms", "confinement"]
+responsibilities = [
+  "Define the form invocation: argv, working directory, environment, standard streams, exit status and process-group ownership.",
+  "Define the guarantees a form must hold as properties of the child's view and lifetime, independent of mechanism.",
+  "State what a form does not promise, and what quotient verifies, samples, or leaves to the form implementer.",
+  "Mark the unconfined form as a named non-form under which no guarantee holds.",
+  "Version the interface so a breaking change mints a new contract alongside the old.",
+]
+
+category = "confinement"
+c4_level = "component"
+descends_from = "PRD-001"
+parent = "SPEC-002"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/form-1.md"
+
+[[source]]
+language = "markdown"
+identifier = "docs/nix-forms.md"
+
+[[source]]
+language = "nix"
+identifier = "nix/form-family.nix"
+
+[[source]]
+language = "nix"
+identifier = "nix/check-family.nix"
+
+[[source]]
+language = "shell"
+identifier = "scripts/form-probe"
+
+[[source]]
+language = "shell"
+identifier = "scripts/hostile-audit"

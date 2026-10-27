@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 20
+slug = "a-keyed-start-is-idempotent-for-the-servers-life"
+title = "A keyed start is idempotent for the server's life"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "pi_agent_start with a key the server holds answers the original run's handle when the normalised request digest is equal, and refuses request-invalid when it differs; a key is recorded only when its start publishes a run."
+tags = []
+acceptance_criteria = [
+  "A start retried with the same key and arguments answers the same taskId and admits nothing.",
+  "The same key with different arguments is refused request-invalid.",
+  "A refused keyed start records no key, so its retry is admitted afresh.",
+]

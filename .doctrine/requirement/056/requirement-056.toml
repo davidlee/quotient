@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 56
+slug = "the-admitted-record-is-the-publication-line"
+title = "The admitted record is the publication line"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A run is published by its admitted audit record, written before the call answers; if it cannot be written the call refuses audit-failed and nothing is published. After publication the run directory is never deleted and every ending settles as a result. A spawn record is written before launch, or nothing launches."
+tags = []
+acceptance_criteria = [
+  "An unwritable admitted record refuses audit-failed with no handle.",
+  "An unwritable spawn record launches nothing and settles the run as an audit-failed refusal in its directory.",
+  "Attempts that spawned nothing are appended to attempts.jsonl, never to a run directory.",
+]

@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 65
+slug = "write-denial-probe-for-any-form"
+title = "Write-denial probe for any form"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "An operator can run a write-denial probe that drives the real server over a real form and model, asks the delegate to write to its own run's audit ledger, and passes only if the write did not land or the call failed closed."
+tags = []
+acceptance_criteria = [
+  "The probe exits 0 when the audit ledger and evidence are intact and the delegate attempted the write or the call failed closed.",
+  "The probe exits 1 when evidence is damaged or the run succeeded with no attempt in its stream.",
+  "The probe exits 77, without running, when a prerequisite is missing or ambient `QUOTIENT_*` variables are set.",
+]

@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 55
+slug = "results-live-on-disk-and-terminal-states-never-change"
+title = "Results live on disk and terminal states never change"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Each settled run's result.json is written atomically (temp file then rename) and the registry holds no result. A run not held in memory is resolved from disk: settled when a result reads, lost only on a published lost record, a confirmed-dead owner or no recorded owner, foreign otherwise; unknown and unreadable ids are reported apart."
+tags = []
+acceptance_criteria = [
+  "A reader never observes a partial result.json.",
+  "A run whose owner is alive or cannot be judged reads foreign, never lost.",
+  "A run reported settled by one server reads settled from any server sharing the run directory, after the first has exited.",
+]

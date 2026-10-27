@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 31
+slug = "the-childs-view-never-reaches-a-protected-store-further-than-it-allows"
+title = "The child's view never reaches a protected store further than it allows"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Before launch, the union of root, session directory and exposure paths is checked against the protected stores: the evidence directory, attempts ledger and other sessions may be neither read nor written; the policy file, approvals store, profile and help directories may be read but never written; a store is protected whether or not it exists."
+tags = []
+acceptance_criteria = [
+  "A write profile whose root contains the profile directory refuses view-overlaps-protected.",
+  "A read profile whose root contains the run directory refuses view-overlaps-protected.",
+  "An exposure path inside the not-yet-created approvals store location refuses view-overlaps-protected.",
+]

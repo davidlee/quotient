@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 7
+slug = "continue-a-delegates-conversation"
+title = "Continue a delegate's conversation"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A caller can continue a previous run's conversation by naming its session, within the same root and capability the session was first used with."
+tags = []
+acceptance_criteria = [
+  "A run naming a settled session continues that conversation.",
+  "A session cannot be continued in another root or under a wider capability.",
+  "A session in use by another run is refused, not shared.",
+]

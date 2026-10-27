@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 32
+slug = "form-selection-follows-the-governing-approval-with-no-fallback"
+title = "Form selection follows the governing approval with no fallback"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "For a call's capability, the deepest approval whose root contains the call's canonical root governs; a governed call runs exactly the recorded real path and digest or refuses (form-unapproved on mismatch, form-invalid when the link is gone); an ungoverned call runs the machine form only when no project link exists."
+tags = []
+acceptance_criteria = [
+  "Each row of the policy contract's project-forms selection table holds as a unit test of selection.",
+  "Deleting a governed root's link refuses form-invalid and never runs the machine form.",
+  "An approval keeps governing after its root is removed from roots.",
+]

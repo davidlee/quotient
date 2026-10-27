@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 21
+slug = "lanes-execute-in-start-order-and-re-admit-at-launch"
+title = "Lanes execute in start order and re-admit at launch"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Runs in one lane launch one at a time in start order, skipping cancelled runs; needs_success refuses lane-predecessor-failed when the predecessor did not complete, cascading; a queued run is re-admitted against the current policy and approvals at launch and may be refused or narrowed but keeps its root, session and capability."
+tags = []
+acceptance_criteria = [
+  "A laned run does not launch before its predecessor in the lane has settled.",
+  "A needs_success run whose predecessor did not complete settles as a lane-predecessor-failed refusal without launching, whether the predecessor failed before or after the start.",
+  "A queued run whose policy maxima were lowered while it waited runs under the lowered ceilings; one whose profile is no longer allowed settles as a refusal at launch.",
+]

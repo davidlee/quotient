@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 1
+slug = "delegate-a-bounded-task-and-receive-a-reduced-account"
+title = "Delegate a bounded task and receive a reduced account"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A calling agent can hand one bounded task to a pi delegate, naming a prompt, a profile and a root, and receive a reduced account of the run: a budgeted transcript, a status (usage, cost, request-context peak, counts) and a verdict saying whether it succeeded and, if not, why."
+tags = []
+acceptance_criteria = [
+  "A run started with a prompt and an allowed profile settles with a result carrying transcript, status and verdict.",
+  "The verdict distinguishes success from every way a run can stop short, and names the cause.",
+  "The account is bounded in size by a transcript budget the operator sets and the caller may only lower.",
+]

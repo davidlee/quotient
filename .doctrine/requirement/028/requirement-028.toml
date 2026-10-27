@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 28
+slug = "roots-are-an-allowlist-compared-by-path-component-on-canonical-paths"
+title = "Roots are an allowlist compared by path component on canonical paths"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A call's cwd is canonicalised (symlinks resolved) and must be an allowlisted root or inside one, compared by path component; the same canonicalisation and containment predicate decide the child-view check."
+tags = []
+acceptance_criteria = [
+  "Allowlisting /work/one admits /work/one/sub and refuses /work/oneevil with root-not-allowlisted.",
+  "A cwd reached through a symlink is judged at its real path.",
+  "Root containment and child-view containment share one implementation.",
+]

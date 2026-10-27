@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 58
+slug = "one-reducer-for-server-and-cli"
+title = "One reducer for server and CLI"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The reducer is a pure function from pi --mode json lines to a budgeted transcript and pi-run-status/3; the server and quotient reduce call the same function, and a missing or invalid usage value is reported as unmeasured or unknown, never as zero."
+tags = []
+acceptance_criteria = [
+  "The reducer performs no I/O.",
+  "The final assistant answer is always present and last in the transcript; budget elision cuts from the middle.",
+  "Missing usage increments the documented unmeasured counters rather than adding zero.",
+]

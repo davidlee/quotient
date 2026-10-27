@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 35
+slug = "allow-records-only-the-identity-that-was-reviewed"
+title = "allow records only the identity that was reviewed"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "quotient allow without identities reports each capability's link, real path, digest, governing approval, machine slot and the exact record command, and never writes; with identities it records them only if, under the store lock, each link still resolves to the given real path with the given digest, the slot is confined, and no deeper approval governs \u2014 all or nothing."
+tags = []
+acceptance_criteria = [
+  "A report run leaves the store unchanged.",
+  "A record whose digest differs from the link's current target writes nothing and names both identities.",
+  "A record at a roots entry beneath which a deeper approval governs is refused with the revoke it needs.",
+]

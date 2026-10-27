@@ -1,0 +1,18 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 70
+slug = "version-prints-the-package-version"
+title = "--version prints the package version"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "`quotient --version` prints the installed package's version followed by a newline and exits 0."
+tags = []
+acceptance_criteria = [
+  "`quotient --version` prints the package.json version and a newline, and exits 0.",
+]

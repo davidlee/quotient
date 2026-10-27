@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 57
+slug = "limits-are-evaluated-even-when-the-stream-is-quiet"
+title = "Limits are evaluated even when the stream is quiet"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The gate evaluates ceilings against the admission snapshot, then the wall clock, then the switch, then accounting validity, on every counting record and on an idle poll of about one second; the first crossing fires once into the termination ladder with a cause naming the unit, its reading and its bound."
+tags = []
+acceptance_criteria = [
+  "A child that emits nothing is stopped by the wall clock within about a second of the deadline.",
+  "An unreadable or disabled policy at a gate tick stops a running run with cause switch.",
+  "The usage the gate judges and the usage the result reports come from one accumulator.",
+]

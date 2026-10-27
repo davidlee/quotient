@@ -1,0 +1,93 @@
+schema = "doctrine.spec.tech"
+version = 1
+
+id = 2
+slug = "mcp-server"
+title = "MCP server"
+status = "draft"
+kind = "tech"
+tags = ["mcp", "runs", "results"]
+responsibilities = [
+  "Serve MCP over LF-framed JSON-RPC on stdio, classifying each request's protocol era from its own _meta.",
+  "Expose the five tools (pi_agent, pi_agent_start, pi_agent_wait, pi_agent_ack, pi_agent_cancel) and answer MCP tasks for pi_agent.",
+  "Publish each admitted run as a registry record and an evidence directory, order laned runs, and re-admit queued runs at launch.",
+  "Launch each run through its form, enforce its limits retrospectively, and stop it through one termination ladder.",
+  "Write each settled run's result to disk atomically and answer for any run, live or not, from one view.",
+  "Reduce pi's event stream into the transcript and status every result carries.",
+]
+
+category = "server"
+c4_level = "container"
+parent = "SPEC-001"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/server.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/protocol.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/tools.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/runs.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/waiting.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/views.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/documents.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/execute.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/spawn.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/session.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/evidence.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/result.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/server/gate.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/reduce/reduce.ts"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/pi-agent-result-2.md"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/pi-run-handle-1.md"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/pi-agent-wait-1.md"
+
+[[source]]
+language = "markdown"
+identifier = "docs/contract/pi-agent-ack-1.md"

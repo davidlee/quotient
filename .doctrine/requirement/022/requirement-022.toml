@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 22
+slug = "wait-selects-blocks-and-budgets-as-pi-agent-wait1-defines"
+title = "Wait selects, blocks and budgets as pi-agent-wait/1 defines"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "pi_agent_wait selects targets by runs and/or lanes (implicit selections take only unacknowledged pi_agent_start runs), blocks until all or any are done or a timeout passes (default 45 s, capped at the policy's wall-clock maximum or 900 s), and includes results within budget_bytes, the first readable settled result always whole."
+tags = []
+acceptance_criteria = [
+  "timed_out is computed from the same states the entries report.",
+  "A result that alone exceeds the budget is included when it is the first readable settled result.",
+  "A run started by pi_agent is never an implicit wait target, but is reported when named.",
+]

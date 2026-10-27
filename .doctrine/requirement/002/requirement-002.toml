@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 2
+slug = "run-several-delegations-at-once-or-in-order"
+title = "Run several delegations at once, or in order"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A calling agent can start runs without blocking, wait on any or all of them, cancel them, and queue runs in a named lane so they execute strictly in start order, optionally only after the predecessor succeeded."
+tags = []
+acceptance_criteria = [
+  "A start answers at once with a handle; a wait over several handles answers when any or all have settled, or when its timeout passes.",
+  "Runs in one lane launch one at a time in start order; a run that requires its predecessor's success is refused when the predecessor did not complete.",
+  "A cancelled run settles with a cause, whether it was queued or running.",
+]

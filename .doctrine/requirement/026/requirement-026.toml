@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 26
+slug = "the-policy-is-read-on-every-call-and-nothing-in-it-is-defaulted-or-ignored"
+title = "The policy is read on every call and nothing in it is defaulted or ignored"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The policy is read and schema-validated on each call; an unreadable file refuses policy-unavailable, a malformed one or any unknown field (top level, maxima, form objects) refuses policy-invalid, and only an unset QUOTIENT_* location falls through to its XDG default."
+tags = []
+acceptance_criteria = [
+  "An edit to the policy applies to the next call without a restart.",
+  "An unknown key at any level of the policy refuses policy-invalid.",
+  "A QUOTIENT_POLICY, QUOTIENT_RUN_DIR or QUOTIENT_SESSION_HOME that is set but empty or relative refuses policy-unavailable.",
+]

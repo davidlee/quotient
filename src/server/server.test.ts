@@ -2134,7 +2134,7 @@ test('a policy refusal reaches the caller as a tool result and the ledger', asyn
 
 // ── Jaw policy belongs to the flake (EX-7) ─────────────────────────────────
 
-test('no member of pi/mcp outside its tests authors a jail flag (design sec-3, SPEC-001 REQ-009)', () => {
+test('no member of pi/mcp outside its tests authors a jail flag (design sec-3, SPEC-004)', () => {
   // The tokens the server must never author: --ro-bind, --bind, --tmpfs, bwrap.
   // Jail policy is the flake's; a flag in this module would be a second story.
   const forbidden = /(--ro-bind|--bind|--tmpfs|\bbwrap\b)/;

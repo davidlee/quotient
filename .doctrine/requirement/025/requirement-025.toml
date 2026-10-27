@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 25
+slug = "admission-runs-in-a-fixed-order-and-the-first-failure-decides"
+title = "Admission runs in a fixed order and the first failure decides"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every call is checked request shape, then policy, switch, profile, root, form, ceilings and tools, session, child view, in that order; the first failing check is the refusal, recorded once in the attempts ledger, and later checks do not run."
+tags = []
+acceptance_criteria = [
+  "A call failing two checks is refused with the earlier check's reason.",
+  "Each refusal decided by admission appears once in the attempts ledger.",
+  "The order of refusal reasons in the result contract's Refusals table matches the code's order.",
+]

@@ -49,3 +49,38 @@ Open items the specs must accommodate rather than foreclose:
 - IMP-008 — macOS Seatbelt forms + manual (confinement policy / forms
   contract must stay backend-agnostic).
 - IDE-005 — no bound on runs in flight (stated non-guarantee).
+
+## Progress 2026-10-27 — specs drafted
+
+Coverage map (`.doctrine/state/coverage-map-chr-001.md`, reviewed by the
+user): everything was dark; user chose 1 PRD + tech specs, help owned by
+Config and profiles, and a thin context spec so the container has a parent
+(locked tech-spec shape).
+
+Authored, all `draft`, `spec validate` clean:
+
+| spec | c4 | reqs |
+|---|---|---|
+| PRD-001 delegation under operator authority | capability | 15 |
+| SPEC-001 system context | context | 0 |
+| SPEC-002 MCP server | container | 14 |
+| SPEC-003 Confinement policy | component | 13 |
+| SPEC-004 Forms contract | component | 10 |
+| SPEC-005 Config and profiles | component | 10 |
+| SPEC-006 CLI | component | 8 |
+
+Open items kept open, per spec: IMP-012 (SPEC-005, PRD OQ-1), IMP-013
+(SPEC-002/003/005/006, OQ-2), IDE-007 (SPEC-002/006, OQ-3), IDE-005
+(SPEC-002/003, OQ-4, stated non-guarantee), IMP-008 (SPEC-003/004, OQ-5).
+
+README: Documentation section links each spec by numeric path (no doctrine
+ids; drift test green). `just gate` green.
+
+Found and captured: ISS-004 (form-1 lacks a process-group guarantee; blocks
+IMP-008), ISS-005 (docs say legacy layer fails start-up; it degrades),
+ISS-006 (field-additivity rule undefined in contracts), CHR-002 (foreign ids
+in code comments). Fixed: three code comments whose foreign `SPEC-001
+REQ-009` / `REQ-004` collided with the new ids.
+
+Remaining: user review of the drafts; move specs from `draft` when accepted.
+Requirements are `pending` (coverage not recorded).

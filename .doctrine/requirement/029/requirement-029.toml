@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 29
+slug = "caller-ceilings-above-a-maximum-refuse-omitted-ones-inherit"
+title = "Caller ceilings above a maximum refuse; omitted ones inherit"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A call's ceilings object is closed; each supplied unit at or below its policy maximum is used, an omitted unit inherits the maximum, and a unit above the maximum refuses ceiling-above-maximum; a call's tools may only narrow the profile's."
+tags = []
+acceptance_criteria = [
+  "ceilings.cost_usd above maxima.cost_usd refuses ceiling-above-maximum, not clamped.",
+  "An unknown key in ceilings refuses request-invalid.",
+  "A tool not granted by the profile refuses tools-not-allowed.",
+]

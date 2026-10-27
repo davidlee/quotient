@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 66
+slug = "nix-family-builder-produces-a-read-and-a-write-form"
+title = "Nix family builder produces a read and a write form"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The flake's `lib.mkFormFamily` builds, from the operator's nixpkgs, jail.nix and pi, a read form and a write form meeting the form contract on Linux, plus a comparison baseline, and reports the `exposure` list the policy must carry."
+tags = []
+acceptance_criteria = [
+  "A family built from the documented minimal consumer yields `read`, `write` and `baseline` executables.",
+  "The family exposes the read-write paths it binds as `exposure`.",
+  "The builder fails at evaluation on a platform without bubblewrap.",
+]

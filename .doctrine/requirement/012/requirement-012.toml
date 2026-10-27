@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 12
+slug = "fail-closed"
+title = "Fail closed"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Anything quotient cannot read, resolve, recognise or record refuses the run; nothing unknown or unreadable is ever read as permission, and an unknown configuration field refuses rather than being ignored."
+tags = []
+acceptance_criteria = [
+  "An unreadable or malformed policy, profile directory or approvals store refuses every affected call.",
+  "A configuration field quotient does not recognise refuses rather than being dropped.",
+  "When admission checks fail, the first failing check in a fixed order is the reported reason.",
+]

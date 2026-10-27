@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 69
+slug = "the-shipped-builders-guarantees-are-probed-behaviourally-on-every-release"
+title = "The shipped builder's guarantees are probed behaviourally on every release"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The release gate exercises the Nix builder's forms on a real host for G1\u2013G9 and runs the static family check, so the shipped builder's conformance is evidenced, not asserted."
+tags = []
+acceptance_criteria = [
+  "The release gate runs the form probe over a probe family and fails on any failed or unreported row.",
+  "The release gate runs the static family check, including its negative controls.",
+]

@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 14
+slug = "no-run-outlives-the-server"
+title = "No run outlives the server"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "When the client goes away or the server is signalled, every running run is stopped through one termination path, every queued run settles without launching, and each records its outcome."
+tags = []
+acceptance_criteria = [
+  "After the client closes stdin, no delegate process of that server remains.",
+  "Each run stopped by shutdown records a result naming the shutdown as its cause.",
+]

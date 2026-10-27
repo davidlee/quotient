@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 16
+slug = "protocol-era-is-decided-per-request"
+title = "Protocol era is decided per request"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Each request's protocol era is classified from its own params._meta: a declared 2026-07-28 version is served in the modern era, an absent version in the legacy initialize era, an unsupported version is error -32022 naming the supported one, and malformed _meta is -32602. No era state is kept per process."
+tags = []
+acceptance_criteria = [
+  "A legacy request and a modern request on the same server are each answered in their own era.",
+  "A request naming an unsupported protocol version is answered -32022 with the supported version in its data.",
+  "Every modern-era result carries resultType.",
+]

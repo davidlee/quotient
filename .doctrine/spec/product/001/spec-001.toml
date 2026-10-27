@@ -1,0 +1,25 @@
+schema = "doctrine.spec.product"
+version = 1
+
+id = 1
+slug = "delegation-under-operator-authority"
+title = "quotient — delegation under operator authority"
+status = "draft"
+kind = "product"
+category = "delegation"
+tags = ["mcp", "delegation", "confinement", "operator-authority"]
+product_level = "capability"
+responsibilities = [
+  "Let a calling agent delegate bounded tasks to pi delegates and read a reduced account of each run.",
+  "Let the operator alone decide where delegates work, which profiles exist, their limits and their confinement.",
+  "Keep durable, delegate-proof evidence of every run and every refused attempt.",
+  "Explain itself to the agent using it, with no skill or prompt file required.",
+]
+
+# product_level — closed product ladder: domain | capability | feature. `feature` is
+#   the floor and may parent another feature — decomposition without a new altitude.
+#   Add as:
+#   product_level = "capability"
+# parent — single decomposition parent (PRD-NNN, product→product); the tree must
+#   stay acyclic. Add as:
+#   parent = "PRD-001"

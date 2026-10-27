@@ -1,0 +1,18 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 11
+slug = "reduce-a-pi-event-stream-on-its-own"
+title = "Reduce a pi event stream on its own"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "An operator or tool can turn a pi JSON event stream into the same transcript and status a run's result carries, without running the server."
+tags = []
+acceptance_criteria = [
+  "`quotient reduce` over a pi `--mode json` stream produces the transcript and status a run of that stream would report.",
+]

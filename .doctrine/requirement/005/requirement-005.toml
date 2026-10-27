@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 5
+slug = "every-run-is-confined-by-an-operator-chosen-form"
+title = "Every run is confined by an operator-chosen form"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every run executes inside a form, an executable the operator chose per capability that decides what the delegate can read and write; a project may supply its own form only once the operator has approved that exact executable."
+tags = []
+acceptance_criteria = [
+  "A run launches only through the form selected for its capability and root.",
+  "A project-supplied form runs only when its real path and content digest match an operator approval; otherwise the run is refused, never run with a different form.",
+  "Running pi with no confinement requires an explicit, separately named operator choice.",
+]

@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 8
+slug = "refusals-are-verdicts-the-agent-can-act-on"
+title = "Refusals are verdicts the agent can act on"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every refusal, from any tool, is an ordinary result naming the first check that failed and a detail for the operator, so a calling agent reads it like any other verdict and can tell whether a retry, a different request, or the operator is needed."
+tags = []
+acceptance_criteria = [
+  "A refused call answers with a result whose state is refused and whose reason is one of a documented closed set.",
+  "Each documented refusal reason states what it means, and whether the request alone can clear it or the operator must act.",
+  "A refusal is never delivered as a protocol error.",
+]

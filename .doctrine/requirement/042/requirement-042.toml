@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 42
+slug = "a-failed-start-up-degrades-to-serving-existing-runs"
+title = "A failed start-up degrades to serving existing runs"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "When the legacy-layer check, the profile load or the help load fails, the server still serves: the run-starting tools refuse profile-invalid naming the failing path, and the tools over runs already on disk keep serving with their built-in descriptions."
+tags = []
+acceptance_criteria = [
+  "After a failed profile load, pi_agent and pi_agent_start refuse profile-invalid and the refusal detail names the path.",
+  "After a failed start-up, wait, ack and cancel still answer for runs on disk.",
+  "The server's instructions after a failed start-up say start-up was refused and name the path.",
+]

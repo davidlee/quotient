@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 60
+slug = "the-approvals-store-has-one-serialised-writer-and-atomic-publication"
+title = "The approvals store has one serialised writer and atomic publication"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "allow and revoke write under an exclusive pid lock, validate the new list through the store reader, publish by rename of an exclusively created temp file, and remove the temp file and their own lock on every path; a held lock fails the command and is never reclaimed automatically."
+tags = []
+acceptance_criteria = [
+  "A reader concurrent with a write sees the old store or the new one, never a partial file.",
+  "A second writer while the lock is held exits non-zero naming the holder's pid.",
+  "No temp file or own lock remains after a failed write.",
+]

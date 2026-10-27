@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 47
+slug = "bare-quotient-serves-mcp-on-stdio"
+title = "Bare quotient serves MCP on stdio"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Run with no arguments, the binary serves MCP on stdio until shutdown and exits 0; stdout carries only protocol messages, and a TTY on stdin draws one hint line on stderr naming `quotient help`."
+tags = []
+acceptance_criteria = [
+  "`quotient` with no arguments serves MCP over stdin/stdout and exits 0 after stdin closes.",
+  "Nothing but MCP messages is written to stdout while serving.",
+  "When stdin is a TTY, one line on stderr says the binary speaks MCP and names `quotient help`.",
+]

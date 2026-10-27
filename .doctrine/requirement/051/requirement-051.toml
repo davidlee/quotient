@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 51
+slug = "allow-and-revoke-are-scriptable-operator-verbs"
+title = "allow and revoke are scriptable operator verbs"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "`allow` reports without writing or records the exact identities given, and `revoke` removes approvals for one stored root; neither prompts, each prints a fixed one-line confirmation per change on stdout, and failures go to stderr prefixed with the verb."
+tags = []
+acceptance_criteria = [
+  "`quotient allow` with no identities never writes the approvals store and prints the command that would record what it shows.",
+  "A successful record prints `recorded <cap>=<realpath>@<sha256> for <root>` per identity; a successful revoke prints `revoked <caps> for <root>`.",
+  "No verb reads from the terminal.",
+]

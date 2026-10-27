@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 64
+slug = "the-contract-states-its-evidence-per-guarantee"
+title = "The contract states its evidence per guarantee"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The shipped form contract records, for every guarantee, whether quotient verifies it, and claims no conformance beyond that record."
+tags = []
+acceptance_criteria = [
+  "Every guarantee in the form contract has a row in its Evidence table.",
+  "The write-denial probe is documented as sampling one protected-store case and as not establishing conformance.",
+]

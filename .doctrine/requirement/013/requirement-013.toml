@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 13
+slug = "a-settled-status-never-changes"
+title = "A settled status never changes"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Once a run's status has been reported as settled or lost, every later report from any server reads the same; a run is reported lost only on positive evidence that no result can still arrive."
+tags = []
+acceptance_criteria = [
+  "A run's settled status is identical before and after the reporting server exits.",
+  "A run whose owner cannot be judged dead reads as still working, not lost.",
+]

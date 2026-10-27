@@ -11,7 +11,7 @@
 //
 // Refusal, never a mask: this module names the overlapping member and the
 // protected path and stops. It authors no confinement argument — jail policy is
-// the flake's (SPEC-001 REQ-009) — and writes no file.
+// the form's (SPEC-004) — and writes no file.
 import { evidenceStores } from './evidence.ts';
 import { canonicalPath, within } from './paths.ts';
 import type { Filesystem } from './profiles.ts';

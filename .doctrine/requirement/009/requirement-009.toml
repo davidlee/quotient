@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 9
+slug = "quotient-explains-itself-to-the-agent-using-it"
+title = "quotient explains itself to the agent using it"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Everything a calling agent needs to set up, delegate, read results and orchestrate many runs ships with the binary and reaches the agent through the server's own instructions, tool descriptions and a help command; no skill or prompt file is required. The operator can override any help section."
+tags = []
+acceptance_criteria = [
+  "An agent with only the MCP server configured can find setup, delegation and orchestration guidance from the server and `quotient help`.",
+  "Help shipped with a version describes that version.",
+  "An operator override of a help section replaces that section for both the agent and the human reader.",
+]

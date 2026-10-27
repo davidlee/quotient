@@ -94,7 +94,7 @@ test('a wrong-typed policy value refuses policy-invalid, naming the field', () =
 
 test('maxima that do not bound the run refuse policy-invalid: all four are required and positive', () => {
   // A delegate with no ceiling is unbounded spend: the wall clock bounds time, not
-  // money, so a spend ceiling may not be left out (design sec-1; REQ-004, DEC-057).
+  // money, so a spend ceiling may not be left out (design sec-1; SPEC-003).
   const full = { requests: 20, context_tokens: 100000, cost_usd: 1.5, wall_clock_s: 600 };
   const without = (field: string): Record<string, unknown> =>
     Object.fromEntries(Object.entries(full).filter(([key]) => key !== field));

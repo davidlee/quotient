@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 24
+slug = "one-termination-ladder-for-every-stop"
+title = "One termination ladder for every stop"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every stop of a running run passes one sequence \u2014 SIGTERM to the run's process group, a 2 s grace, SIGKILL to the group, reap, drain, audit \u2014 with the trigger's cause; the child leads its own process group so signals reach everything the delegate started and nothing else."
+tags = []
+acceptance_criteria = [
+  "Cancellation, EOF, a crossed ceiling, the wall clock, the switch and an evidence failure each stop the run through the same ladder and record their cause.",
+  "A child that ignores SIGTERM is killed after the grace.",
+  "No signal from a run's ladder reaches the server or another run.",
+]

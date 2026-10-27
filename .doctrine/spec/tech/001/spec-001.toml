@@ -1,0 +1,15 @@
+schema = "doctrine.spec.tech"
+version = 1
+
+id = 1
+slug = "system-context"
+title = "quotient system context"
+status = "draft"
+kind = "tech"
+tags = ["context"]
+responsibilities = [
+  "Name the system's actors, external systems and single container, and where its trust boundaries fall.",
+]
+
+category = "system"
+c4_level = "context"

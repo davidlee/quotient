@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 54
+slug = "shutdown-settles-every-run-and-replies-to-nothing"
+title = "Shutdown settles every run and replies to nothing"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "On stdin EOF, a failed input, SIGTERM or SIGINT the server stops reading, aborts every running run with cause eof, settles every queued run without launching, writes no further replies, and still writes each run's result.json."
+tags = []
+acceptance_criteria = [
+  "After EOF no child process of the server remains.",
+  "Each run aborted or dropped by shutdown has a result.json whose causes include eof, unless an earlier cause took precedence.",
+  "No reply is written after shutdown begins, including to requests already read.",
+]

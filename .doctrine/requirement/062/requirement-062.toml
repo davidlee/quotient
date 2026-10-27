@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 62
+slug = "a-form-runs-in-its-own-process-group-under-the-servers-ladder"
+title = "A form runs in its own process group under the server's ladder"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The server starts each form as the leader of a new process group and stops it only by signalling that group through the one termination ladder, so signals reach the form and everything it started and nothing else."
+tags = []
+acceptance_criteria = [
+  "A launched form is a process-group leader distinct from the server's group.",
+  "Cancellation, shutdown and limit breaches signal the form's group, never the server's.",
+]

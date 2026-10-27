@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 19
+slug = "only-the-wait-tool-is-marked-read-only"
+title = "Only the wait tool is marked read-only"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "pi_agent_wait declares readOnlyHint true and changes no observable state (acknowledgement, lanes, keys, runs); every other tool declares readOnlyHint false."
+tags = []
+acceptance_criteria = [
+  "tools/list shows readOnlyHint true for pi_agent_wait alone.",
+  "A wait leaves acknowledgement, lane order, keys and runs unchanged; its only possible record is an attempts-ledger line for a request-invalid refusal.",
+]

@@ -1,0 +1,29 @@
+schema = "doctrine.spec.tech"
+version = 1
+
+id = 6
+slug = "cli"
+title = "CLI"
+status = "draft"
+kind = "tech"
+tags = ["cli"]
+responsibilities = [
+  "Dispatch argv to one verb, or serve MCP on stdio when argv is empty.",
+  "Hold one exit-code convention: 0 done, 1 refused or not completed, 2 malformed invocation.",
+  "Keep stdout for the verb's product (the protocol alone when serving) and stderr for diagnostics.",
+  "Route SIGTERM and SIGINT into the server's one shutdown path.",
+  "Make `quotient help` print what a server started in the same place would serve.",
+]
+
+category = "cli"
+c4_level = "component"
+descends_from = "PRD-001"
+parent = "SPEC-002"
+
+[[source]]
+language = "typescript"
+identifier = "src/cli.ts"
+
+[[source]]
+language = "typescript"
+identifier = "src/reduce/cli.ts"

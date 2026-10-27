@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 49
+slug = "help-prints-what-the-server-would-serve"
+title = "help prints what the server would serve"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "`quotient help` lists section names with their aliases; `quotient help SECTION` prints that section as a server started in the same directory would serve it, warning on stderr, without failing, about conditions such a server would refuse on."
+tags = []
+acceptance_criteria = [
+  "`quotient help` lists every section, marking aliases (`refusals` for `result`).",
+  "A contract section prints byte-for-byte the shipped contract; an alias prints its target.",
+  "With a legacy launch-dir layer or a profile snapshot that does not load, the section still prints (exit 0) and stderr names the offending path.",
+]

@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 46
+slug = "every-run-names-the-configuration-it-ran-under"
+title = "Every run names the configuration it ran under"
+status = "pending"
+kind = "quality"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The profile and help snapshots each carry a sha256 digest over their winning sources' names, paths and bytes, recorded on every run's spawn audit record, so the configuration a run ran under is identifiable after the fact."
+tags = []
+acceptance_criteria = [
+  "A run's spawn record carries profile_digest and help_digest.",
+  "Changing any byte of a winning profile document or help override changes the corresponding digest after restart.",
+]

@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 3
+slug = "clients-with-and-without-blocking-tolerance-are-both-served"
+title = "Clients with and without blocking tolerance are both served"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "quotient serves clients that can wait on a long call, clients that abandon long calls, and clients that poll MCP tasks, without the operator configuring which kind a client is."
+tags = []
+acceptance_criteria = [
+  "A client that declares MCP tasks receives a task from the blocking tool and can poll it to its result.",
+  "A client without tasks can start and wait in calls each shorter than its tool-call timeout.",
+  "A legacy client keeps working unchanged regardless of how other clients of the same server speak.",
+]

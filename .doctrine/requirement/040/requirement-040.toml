@@ -1,0 +1,21 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 40
+slug = "profile-documents-are-validated-strictly"
+title = "Profile documents are validated strictly"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A profile document opens with a quotient-profile header holding exactly one key: value line per field from a closed set (filesystem, model, tools required; thinking optional); any deviation, or a base name outside the profile-name grammar, invalidates the document and the start-up, with the file and line named."
+tags = []
+acceptance_criteria = [
+  "An unknown header key, a duplicated key, an empty value or a missing required field fails start-up naming the file and line.",
+  "filesystem outside read/write, a model that is not one token or carries pi's :<level> suffix, a thinking level outside pi's vocabulary, or a duplicated or malformed tool name fails start-up.",
+  "A document whose base name fails ^[a-z][a-z0-9-]{0,31}$ fails start-up.",
+  "An invalid document in a shadowed layer fails start-up as one in the winning layer would.",
+]

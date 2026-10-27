@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 39
+slug = "the-profile-snapshot-is-read-once-and-frozen"
+title = "The profile snapshot is read once and frozen"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The profile layer is read and validated once, at server start-up, into an immutable snapshot used for the server's lifetime; edits on disk take effect only at the next start."
+tags = []
+acceptance_criteria = [
+  "Editing, adding or removing a profile document while the server runs changes no later call's profile.",
+  "A caller's profile string is used as a snapshot key and is never joined into a filesystem path.",
+]

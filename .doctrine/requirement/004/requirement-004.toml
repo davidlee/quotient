@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 4
+slug = "operator-holds-all-authority-over-what-a-delegate-may-do"
+title = "Operator holds all authority over what a delegate may do"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The operator alone decides, in configuration no delegate can write, which roots a run may work in, which profiles exist and what capability each has, the per-run limits, and what confines each capability."
+tags = []
+acceptance_criteria = [
+  "A run in a root outside the operator's allowlist is refused.",
+  "A profile whose declared capability differs from the operator's pin is refused.",
+  "No configuration that decides a run is reachable for writing from inside any confined run.",
+]

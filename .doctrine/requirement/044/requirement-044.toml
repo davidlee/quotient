@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 44
+slug = "help-sections-are-overridable-per-section-except-contracts"
+title = "Help sections are overridable per section, except contracts"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Each non-contract help section resolves from <xdgConfig>/quotient/help/<section>.md when present, else the built-in; contract sections (result, handle, wait, ack, policy, form) always print the shipped contract verbatim."
+tags = []
+acceptance_criteria = [
+  "A file at <xdgConfig>/quotient/help/orchestrate.md replaces the orchestrate section for both the CLI and the server.",
+  "A file at <xdgConfig>/quotient/help/result.md has no effect; the result section prints the shipped result contract.",
+  "An unreadable override file fails start-up, whether or not it would have been used.",
+]

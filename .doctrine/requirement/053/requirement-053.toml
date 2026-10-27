@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 53
+slug = "reduce-runs-the-reducer-on-a-file-or-stdin"
+title = "reduce runs the reducer on a file or stdin"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "`quotient reduce` reads a pi `--mode json` stream from FILE or stdin, writes transcript.md and status.json to the output directory (default: the file's directory, or the working directory for stdin), and prints one status line unless quiet."
+tags = []
+acceptance_criteria = [
+  "`quotient reduce FILE` writes transcript.md and status.json beside FILE and prints one status line on stdout.",
+  "`-v` sends the transcript to stdout and the status line to stderr; `-q` prints no status line.",
+  "Each declared `--alert` match is printed on stderr.",
+]

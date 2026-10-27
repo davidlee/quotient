@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 38
+slug = "profiles-and-help-come-from-the-operators-config-layer-only"
+title = "Profiles and help come from the operator's config layer only"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Profiles are read from <xdgConfig>/quotient/profiles/ and help overrides from <xdgConfig>/quotient/help/, and from nowhere else; a launch-directory .quotient/profiles or .quotient/help entry fails start-up with advice naming where its documents belong."
+tags = []
+acceptance_criteria = [
+  "A profile document placed only in the launch directory's .quotient/profiles is never loaded.",
+  "Any present launch-dir .quotient/profiles or .quotient/help entry fails start-up; a directory's advice names the XDG destination, any other entry is named for removal or replacement.",
+]

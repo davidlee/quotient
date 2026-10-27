@@ -1,0 +1,19 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 61
+slug = "the-child-environment-carries-no-server-configuration-or-evidence-path"
+title = "The child environment carries no server configuration or evidence path"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "The environment handed to a form is the server's minus every `QUOTIENT_*` variable and minus any variable whose value names the run directory or one of the run's evidence files."
+tags = []
+acceptance_criteria = [
+  "No `QUOTIENT_*` variable reaches a launched form.",
+  "A variable whose value names the run directory or an evidence file of the run is removed before launch.",
+]

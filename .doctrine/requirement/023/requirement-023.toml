@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 23
+slug = "cancel-marks-every-target-before-awaiting-any"
+title = "Cancel marks every target before awaiting any"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "pi_agent_cancel and tasks/cancel mark each held run before awaiting any ending, so no lane launches a marked run; the mark is intent, and the reported status is the committed outcome. A foreign run is reported, never cancelled."
+tags = []
+acceptance_criteria = [
+  "Cancelling a running run and the queued run behind it in one call never launches the queued run.",
+  "A run that completed before the ladder reached it reports completed.",
+  "A foreign target is reported foreign and not awaited.",
+]

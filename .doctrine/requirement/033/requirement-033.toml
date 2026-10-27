@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 33
+slug = "a-project-form-replaces-only-the-executable-of-a-confined-machine-slot"
+title = "A project form replaces only the executable of a confined machine slot"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "A usable project form must resolve to an executable regular file outside every roots entry, exposure path and the session home; it inherits the machine slot's extensions, cannot add any, and cannot substitute an unconfined slot."
+tags = []
+acceptance_criteria = [
+  "A project link resolving inside a roots entry refuses form-invalid.",
+  "A project link where the machine slot is unconfined refuses form-invalid.",
+  "A project form for a profile naming an mcp__* tool launches with the machine slot's builtin:mcp extension.",
+]

@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 67
+slug = "static-check-of-a-nix-form-family"
+title = "Static check of a Nix form family"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "`lib.checkFormFamily` reads a family's launcher text and refuses a family whose read-write binds are undeclared, which rebinds protected state elsewhere, whose masks disagree with the policy's `protect`, or whose bwrap line is not plain words; it reports what it could not see as residues."
+tags = []
+acceptance_criteria = [
+  "A family that adds an undeclared read-write bind fails the check.",
+  "A family that binds protected state at another path fails the check.",
+  "Runtime-delivered binds are printed as residues, not passed silently.",
+]

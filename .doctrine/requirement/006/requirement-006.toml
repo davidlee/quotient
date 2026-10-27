@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 6
+slug = "per-run-limits-the-caller-can-only-narrow"
+title = "Per-run limits the caller can only narrow"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Each run is bounded by operator maxima on requests, per-request context, cost and wall clock; a caller may ask for tighter limits for one run but never looser ones."
+tags = []
+acceptance_criteria = [
+  "A caller limit above an operator maximum is refused, not clamped.",
+  "A run that crosses a limit is stopped and settles with that limit as its cause.",
+  "The wall clock stops a run that has gone quiet.",
+]

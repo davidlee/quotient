@@ -1,0 +1,20 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 59
+slug = "revoke-addresses-a-stored-root-and-nothing-else"
+title = "revoke addresses a stored root and nothing else"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "quotient revoke removes the named capabilities (or all) for a root equal to a stored root after lexical normalisation, reading neither the policy nor the filesystem; an unknown root or capability exits non-zero listing the stored roots."
+tags = []
+acceptance_criteria = [
+  "revoke of a root whose directory no longer exists succeeds when an entry is stored for it.",
+  "revoke of a child root leaves a parent's approval untouched.",
+  "revoke of an unknown root exits 1 listing stored roots and creates no store.",
+]

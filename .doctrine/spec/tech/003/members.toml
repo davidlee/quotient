@@ -1,0 +1,70 @@
+[[member]]
+requirement = "REQ-025"
+label = "FR-001"
+order = 1
+
+[[member]]
+requirement = "REQ-026"
+label = "FR-002"
+order = 2
+
+[[member]]
+requirement = "REQ-027"
+label = "FR-003"
+order = 3
+
+[[member]]
+requirement = "REQ-028"
+label = "FR-004"
+order = 4
+
+[[member]]
+requirement = "REQ-029"
+label = "FR-005"
+order = 5
+
+[[member]]
+requirement = "REQ-030"
+label = "FR-006"
+order = 6
+
+[[member]]
+requirement = "REQ-031"
+label = "FR-007"
+order = 7
+
+[[member]]
+requirement = "REQ-032"
+label = "FR-008"
+order = 8
+
+[[member]]
+requirement = "REQ-033"
+label = "FR-009"
+order = 9
+
+[[member]]
+requirement = "REQ-034"
+label = "FR-010"
+order = 10
+
+[[member]]
+requirement = "REQ-035"
+label = "FR-011"
+order = 11
+
+[[member]]
+requirement = "REQ-059"
+label = "FR-012"
+order = 12
+
+[[member]]
+requirement = "REQ-060"
+label = "NF-001"
+order = 13
+# Members — the requirements this spec is woven from.
+# Seeded empty; `spec req add` appends rows edit-preservingly:
+#   [[member]]
+#   requirement = "REQ-001"   # canonical FK into .doctrine/requirement/NNN
+#   label = "FR-001"          # sticky membership label (FR- functional, NF- quality)
+#   order = 1                 # advisory render order

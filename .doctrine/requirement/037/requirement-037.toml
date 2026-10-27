@@ -1,0 +1,21 @@
+schema = "doctrine.requirement"
+version = 1
+
+id = 37
+slug = "locations-resolve-from-the-environment-with-a-fail-closed-fall-through"
+title = "Locations resolve from the environment with a fail-closed fall-through"
+status = "pending"
+kind = "functional"
+
+# description — the requirement statement (structured, queryable; `show` renders
+# it as the statement line — the storage rule forbids deriving it from prose).
+# Rationale and extended discussion stay in the sister `.md`. Add as:
+#   description = "…"
+description = "Every location (policy, approvals store, run directory, session home, profile and help layers) is resolved by one pure function of the environment; only an unset QUOTIENT_* variable falls through to its XDG default, and a set-but-empty or relative value makes the location unusable rather than defaulted."
+tags = []
+acceptance_criteria = [
+  "With QUOTIENT_POLICY unset, the policy path is <xdgConfig>/quotient/policy.json, where <xdgConfig> is an absolute XDG_CONFIG_HOME or else $HOME/.config.",
+  "A QUOTIENT_* variable set to an empty or relative value yields an unusable location, and a call refuses policy-unavailable naming the variable.",
+  "A relative XDG_* value is ignored, and HOME is used only when absolute.",
+  "The approvals store path is fixed under <xdgConfig>/quotient/ and no environment variable moves it.",
+]
