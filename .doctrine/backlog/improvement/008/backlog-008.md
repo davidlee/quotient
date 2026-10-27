@@ -66,3 +66,13 @@ case-insensitivity); concurrent runs with sibling sessions.
 Direction above is from a pasted external analysis (2026-10-26). Claims about
 agent-sandbox.nix internals have not been verified in this repo. G-numbers
 refer to `docs/contract/form-1.md`.
+
+## Scope addition: the operator's manual
+
+User, 2026-10-27: macOS needs the equivalent of what Linux has, not only the
+builder: a manual like `docs/nix-forms.md` (build a read/write family, wire it
+into the policy, check it), linked from the README quickstart and
+`quotient help setup` / `help/setup.md` step 3, so "ask your agent to set it
+up" works on macOS too. Decide whether macOS users without Nix get a path
+(e.g. a non-Nix helper that emits the forms), or whether Nix is a stated
+prerequisite for confinement on macOS.
