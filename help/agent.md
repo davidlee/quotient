@@ -17,8 +17,9 @@ means.
   unchanged gets the same refusal while what it names still holds:
   `session-busy` clears once the run holding the session settles, and
   `lane-predecessor-failed` and a refusal at launch depend on what ran before,
-  not on the request alone. `form-unapproved` and `form-invalid` need the operator: a project's
-  form is approved by hand with `quotient allow`, so no retry clears them.
+  not on the request alone. `form-unapproved` and `form-invalid` need the
+  operator: a project's form is approved by hand with `quotient allow`, so no
+  retry clears them.
 - Pass the returned `session` back to continue the same conversation.
 - Ask for batched reads and a capped answer: a delegate that reads one file per
   turn exhausts its request ceiling before it answers.
