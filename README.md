@@ -1,10 +1,10 @@
 # quotient - pi.dev subagents for claude and codex
 
-A stdio MCP server that delegates bounded pieces of work to
-[pi](https://github.com/earendil-works/pi), harness of kings. Its tools start
-delegate runs, wait for them, acknowledge them and cancel them. `pi_agent`
-starts a run and waits for it in one call; to a client that declares MCP
-tasks, it answers with a task instead.
+quotient lets Claude Code or Codex hand work to
+[pi](https://github.com/earendil-works/pi), harness of kings, running a model
+of your choice in a jail of your choice. It is a stdio MCP server: your agent
+starts pi runs, waits on them, and gets back a compact account of what each
+did.
 
 ![quotient](./quotient.jpg)
 
@@ -12,33 +12,78 @@ Essentially, use Pi subagents under Claude / Codex.
 
 You might want to do this for many reasons. Deepseek V4.1 Flash is a pretty good one.
 
-A broker like [LiteLLM](https://www.litellm.ai/) is recommended for credential
-management of pi models, but not required.
+## Why not just call pi?
 
-Each run is one pi process in a directory you allowlisted, under limits you
-set, confined by a *form*: an executable you choose that decides what the
-delegate can read and write. Each profile has a *capability*, `read` or
-`write`, and the policy names one form per capability. A run settles with a
-transcript reduced to its essentials, a status (request-context peak, usage,
-cost, counts) and a verdict: whether the run succeeded, and if not, why. Use
-it to hand recon, review or small edits to a cheaper model without handing it
-your machine, several at once if you like.
+Your agent can already run `pi -p` from a shell. quotient adds:
+
+1. **Confinement.** pi has none by default: a delegate can read and write
+   whatever you can. quotient runs every pi process inside a *form*, an
+   executable you choose that decides what the delegate can read and write,
+   chosen by the profile's capability (`read` or `write`).
+2. **Observability.** Called directly, pi tells you nothing until it is done
+   (`pi -p`), or everything, as a verbose `.jsonl` event stream. A quotient
+   run reports its state while it works, then settles with a transcript
+   reduced to its essentials, a status (request-context peak, usage, cost,
+   counts) and a verdict: whether it succeeded, and if not, why. The full
+   evidence stays on disk.
+3. **Process management.** Start runs, wait for any or all of them, queue them
+   in lanes that run in order, and cancel them. Run several at once, or chain
+   them.
+4. **Ease of use.** quotient explains itself to the agent using it: how to set
+   it up, how to brief a delegate and read its result, and how to orchestrate
+   many runs.
+5. **Configuration in one protected place.** The policy (which directories,
+   which profiles, what limits, which forms) and the profiles live in your
+   config directory, where no delegate can write. A project can bring its own
+   form, but nothing runs until you approve it by hash.
+6. **Many repositories, chosen per call.** The calling agent picks the
+   directory and the profile on each call, from those the policy allows. One
+   orchestrator can send a read-only reviewer into one repository and a
+   writer into another, each confined to suit the task.
 
 For a tour of confinement strategies, see [More Convenient Straitjackets](https://doctrine.engineering/articles/more-convenient-straitjackets/)
 
-## Install
+## No skills required
 
-quotient needs Node 22 or later, and `pi` installed where your forms can run it.
-pi is a prerequisite, not a dependency.
+quotient needs no skill, plugin or prompt file in your agent. Everything an
+agent needs comes from the tool itself: the server's instructions and tool
+descriptions cover the profiles, the limits, and how to read a result, and
+`quotient help` prints the rest, from setup to the orchestration guide. The
+help ships with the binary, so it always matches the version installed.
 
-```sh
-npm install -g @davlee/quotient
-# or
-nix profile install github:davidlee/quotient
-```
+## Quickstart
 
-`quotient --version` confirms the install. `quotient help` lists the built-in
-help sections; `quotient help <section>` prints one.
+You need Node 22 or later, and [pi](https://github.com/earendil-works/pi)
+installed. pi is a prerequisite, not a dependency.
+
+1. Install quotient:
+
+   ```sh
+   npm install -g @davlee/quotient
+   # or
+   nix profile install github:davidlee/quotient
+   ```
+
+2. Add it to your client (Claude Code shown; Codex is
+   [below](#add-it-to-your-client)):
+
+   ```sh
+   claude mcp add --scope user quotient -- quotient
+   ```
+
+3. Ask your agent to set it up:
+
+   > Run `quotient help setup` and set up quotient for me.
+
+   The agent writes the policy, copies the example profiles and points you at
+   the forms. On Linux with Nix, it can build a read and a write form from
+   [`docs/nix-forms.md`](docs/nix-forms.md). Restart the client afterwards.
+
+The sections below are the same setup done by hand, and the reference behind
+it. A broker like [LiteLLM](https://www.litellm.ai/) is recommended for
+credential management of pi models, but not required. `quotient --version`
+confirms the install; `quotient help` lists the help sections, and
+`quotient help <section>` prints one.
 
 ## Configure
 
@@ -319,9 +364,10 @@ probing the form, writing briefs, when to fan out and when to queue in a lane,
 continuing a run that stopped short, and the verification it must keep for
 itself.
 
-To make an agent follow that guide, write a short skill that points to it and
-adds only what belongs to your project or workflow. For Claude Code, put it in
-`~/.claude/skills/pi-orchestrate/SKILL.md`:
+The server's instructions point the agent to it, so no skill is needed. A
+skill earns its place only to add what belongs to your project or workflow;
+keep it short and point it at the guide rather than copying it. For Claude
+Code, in `~/.claude/skills/pi-orchestrate/SKILL.md`:
 
 ```markdown
 ---
