@@ -2,9 +2,9 @@
 
 A stdio MCP server that delegates bounded pieces of work to
 [pi](https://github.com/earendil-works/pi), harness of kings. Its tools start
-delegate runs, wait for them, acknowledge them and cancel them; `pi_agent` is
-the blocking form, start and wait in one call, and answers a task to a client
-that declares MCP tasks.
+delegate runs, wait for them, acknowledge them and cancel them. `pi_agent`
+starts a run and waits for it in one call; to a client that declares MCP
+tasks, it answers with a task instead.
 
 ![quotient](./quotient.jpg)
 
@@ -42,8 +42,9 @@ help sections; `quotient help <section>` prints one.
 
 ## Configure
 
-quotient refuses every run until it has a policy. Three things to put in
-place, all under `~/.config/quotient/` by default:
+quotient refuses every run until it has a policy. You write the policy and
+the profiles; `quotient allow` writes the approvals store. All three live under
+`~/.config/quotient/` by default:
 
 ```
 ~/.config/quotient/
@@ -200,12 +201,17 @@ tool_timeout_sec = 660     # policy maxima.wall_clock_s + 60
 Keep `tool_timeout_sec` if Codex will call the blocking `pi_agent`: Codex
 abandons a tool call after 60 seconds by default, which is shorter than most
 delegate runs. `pi_agent_wait` defaults to 45 seconds, which fits inside that
-default, so start and wait work without it.
-`codex mcp add quotient -- quotient` writes the entry without the timeout. `cwd` is the launch dir: it
+default, so start and wait work without it. `codex mcp add quotient --
+quotient` writes the entry without the timeout. `cwd` is the launch dir: it
 only defaults a run's `cwd`, and the policy must still allow it.
 
 `quotient help clients` prints both snippets with this install's absolute path
 and a timeout computed from your policy.
+
+Restart the client and call `pi_agent` with a `prompt` and a `profile`. The
+server reads profiles and help once, at start-up, so restart it after changing
+them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
+(`quotient help setup`) is the same walk-through, in the order to do it.
 
 The client owns the server's stdin: keep it open until the replies you need
 have been read. Closing it (EOF), like SIGTERM or SIGINT, ends the server. It
@@ -215,11 +221,6 @@ requests and closes stdin at once may get some or none of its replies. Each of
 those runs still records a result in its evidence directory: `incomplete` with
 cause `eof`, unless it had already ended another way. No run outlives the
 server.
-
-Restart the client and call `pi_agent` with a `prompt` and a `profile`. The
-server reads profiles and help once, at start-up, so restart it after changing
-them; it reads the policy on every call. [`help/setup.md`](help/setup.md)
-(`quotient help setup`) is the same walk-through, in the order to do it.
 
 ## Delegating from your agent
 
@@ -269,10 +270,11 @@ until ids is empty:
   comes back in a later wait. The first settled result is always whole.
 - A `key` makes a retried start answer the same run, for the life of the
   server; the same key with different arguments is refused.
-- A wait that names its runs needs no `ack`. A wait that names no runs answers
-  every run started with `pi_agent_start` that no one has acknowledged: use it,
-  with `ack` after each use, only to recover ids you have lost (a start whose
-  reply never arrived, a conversation restarted against the same server).
+- A wait that names its runs needs no `ack`. A wait that names no runs, or
+  names only `lanes`, answers every run started with `pi_agent_start` (in those
+  lanes) that no one has acknowledged: use it, with `ack` after each use, only
+  to recover ids you have lost (a start whose reply never arrived, a
+  conversation restarted against the same server).
   Selection and acknowledgement belong to the server, not to a caller, so
   callers sharing one server wait on their own ids.
 - With no runs named, `timeout_s: 0` and `status_only: true`, a wait lists
