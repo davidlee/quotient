@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · d0ae810
+fresh-as-of: 2026-10-27 · PHASE-10 in_progress (VH-1 probe pending) · f337403
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -19,6 +19,7 @@ fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · d0ae810
 - PHASE-06 done — waiting.ts + suite, shared run fixtures in test-rig (4e3fe68, b8f6950, e5c1b3b; delta e3fb817..e5c1b3b); Codex 3 medium (2 fixed, F1 accepted) + 1 low fixed (§ PHASE-06 execution)
 - PHASE-07 done — blocking pi_agent through the registry; call driver + reply gate; EOF at the trigger (3095a6f, 70e02a4; delta 5d8e37c..70e02a4); Codex 1 medium fixed (§ PHASE-07 execution)
 - PHASE-08 done — five tools, readers + argsDigest, start/wait/ack/cancel handlers, readmit, tool help sections, sleeper form (b1c9981; delta recorded); Codex 3 fixed + 1 contested (§ PHASE-08 execution)
+- PHASE-10 in progress — contracts handle/wait/ack + help sections, result-2, docs/design.md, README, help (737519c, f337403); gate 741; VA-1 + Codex 6 findings integrated (§ PHASE-10 execution); VH-1 pending
 - PHASE-09 done — protocol.ts (eras, server/discover, tasks/*), era routing, task-answering pi_agent, taskOf, modernLine (6bfb2f8, 6faf117; delta recorded); Codex 1 medium fixed (§ PHASE-09 execution)
 
 ### Learned
@@ -29,7 +30,9 @@ fresh-as-of: 2026-10-27 · PHASE-09 completed; PHASE-10 next · d0ae810
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: PHASE-10 (/phase-plan first)
+- next: VH-1 probe via user-scope MCP server `quotient-dev` (dist/ at f337403; Claude Code restart), record on IMP-011, then complete PHASE-10 → audit
+- D-15, D-16 + contract-agent notes — design text to amend at /reconcile (§ PHASE-10 execution)
+- cancel answer reports timed_out: true when a target is foreign/unreadable — documented; raise at /audit
 - D-12..D-14 — discoverResult(instructions, serverInfo); runCall `present`; legacy id-bearing notifications stay notifications; /reconcile amends sec-7 (§ PHASE-09 execution)
 - D-9..D-11 — HANDLERS shape, sec-5 refused-wait ledger line (Codex F1 contested), handle/wait/ack help sections to PHASE-10; /reconcile amends (§ PHASE-08 execution)
 - M4 (at-trigger closing) accepted at runs.test level; closingRefusal unreachable through serve (C13) (§ PHASE-08 execution)
@@ -585,3 +588,35 @@ notifications/* were dispatched before classifyEra, so one with an unknown
 version could cancel a call; now only messages without an id are
 notifications. Weak spot kept: the tasks/cancel-before-end case rests on a
 TERM-ignoring sleeper and a 1.5 s grace margin.
+
+## PHASE-10 execution (2026-10-27)
+
+Delegation (user, 2026-10-27): pi for mechanical edits, Anthropic subagents
+where adherence/judgement matters. Three parallel Opus agents on disjoint files
+(contracts; design.md + README; help + clientsSnippets); red tests and wiring
+in-session. Commits 737519c (docs), f337403 (review fixes). Gate 741/741 at both.
+
+Choices: C1 EOF obligation (keep stdin open; EOF cancels runs in flight) lives
+in help/setup.md and README, not agent.md (the model does not own stdin). C2
+help teaches named waits without ack; ack only for selector-less recovery.
+
+Divergences for /reconcile:
+- D-15: sec-3 says a disk-resolved run acks `not-settled` while foreign; sec-2
+  and runs.ts ackOne answer `unknown` for any id without a record. Amend sec-3.
+- D-16: sec-5 "The loops help teaches" acks used ids every pass; sec-8/sec-9
+  teach named waits need no ack. Amend sec-5's pseudocode.
+- Contracts follow code where design is silent or differs: first-whole budget
+  rule is first *readable* settled result; wait cap 900 s also with an
+  unreadable policy; status messages `queued in lane <lane>` (no predecessor),
+  bare `queued`, `owned by another quotient server` without pid; disk-resolved
+  session/lane null also on an unreadable admitted record; re-admission applies
+  to any queued run whatever started it, against start-up profiles; `lost` also
+  when the trail names no owner; created tasks / tasks/get carry the 7 Task
+  fields only.
+
+Reviews: VA-1 (independent Opus, 84 clause rows) 1 fail (README loop acked) +
+4 nits; Codex gpt-6.1-sol high: 3 major (unpublishable-loss exception; Task
+fields vs extras; no tasks wire definition) + 3 minor (start-up profiles;
+cancelled task has no result; session-busy transient). All verified, all
+integrated, none contested.
+
