@@ -11,7 +11,7 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Every tools/call answers an MCP tool result whose single text item is a versioned JSON document; a refusal or a failed run is never a JSON-RPC error. isError is true for a refusal from any tool, and for pi_agent whenever the result's state is not completed."
+description = "Every tools/call answered with an MCP tool result carries a single text item that is a versioned JSON document; a refusal or a failed run is never a JSON-RPC error. isError is true for a refusal from any tool, and for pi_agent whenever the result's state is not completed. A pi_agent request declaring the tasks extension is answered with a task instead, and a request the client cancelled, or that arrives after shutdown begins, gets no reply."
 tags = []
 acceptance_criteria = [
   "A refused call from each of the five tools answers a pi-agent-result/2 refusal with isError true.",

@@ -6,7 +6,8 @@
 
 quotient is one process, the `quotient` binary, sitting between an MCP client
 (the calling agent's harness) and pi delegate processes it launches inside
-operator-chosen forms. Product intent: PRD-001.
+operator-chosen forms. Product intent, and the terms every spec here uses
+(run, root, profile, capability, policy, form, session, lane): PRD-001 §1.
 
 ```
             operator
@@ -14,7 +15,7 @@ operator-chosen forms. Product intent: PRD-001.
                │ approves project forms (quotient allow)
                ▼
    ┌───────── operator config (XDG) ─────────┐
-   │ policy.json  approvals.json  profiles/  │   read-only to every delegate
+   │ policy.json  approvals.json  profiles/  │   not writable by a confined delegate
    │ help/                                   │
    └─────────────────────────────────────────┘
                │ read
@@ -22,9 +23,13 @@ MCP client ──stdio JSON-RPC──▶ quotient ──exec──▶ form ─�
 (calling agent)                   │          (confines)     (delegate)
                                   │ writes
                                   ▼
-                 run dir: evidence, result.json, attempts.jsonl   (unreachable from runs)
+                 run dir: evidence, result.json, attempts.jsonl   (unreachable from confined runs)
                  session home: pi sessions                         (one writable per run)
 ```
+
+"XDG" is the freedesktop base-directory convention: configuration under
+`$XDG_CONFIG_HOME` (default `~/.config`), state under `$XDG_STATE_HOME`
+(default `~/.local/state`).
 
 Actors:
 
@@ -59,11 +64,19 @@ and the command-line verbs (SPEC-006).
 
 ## Concerns
 
-- **Trust boundary.** Everything left of the form is trusted; the delegate and
-  everything it writes are not. The operator config, the run directory and
-  other sessions sit outside every delegate's writable view.
-- **Lifetime.** The client's stdin is the server's lifeline; nothing quotient
-  starts outlives it.
+- **Trust boundaries.** Four parties, trusted differently:
+  - the operator's configuration is the only source of authority;
+  - the calling agent's requests are validated input: a request can narrow
+    what the operator granted, never enlarge it;
+  - the server and the selected form are trusted to enforce that authority;
+  - the delegate, and everything it writes, is untrusted.
+
+  Under a form that meets its contract, the operator config, the run
+  directory and other sessions sit outside every delegate's writable view. An
+  unconfined form removes that boundary.
+- **Lifetime.** The client's stdin is the server's lifeline. An orderly
+  shutdown stops every run; if the server dies abruptly, a confined run dies
+  with it by the form's promise, an unconfined one does not.
 - **Shared state between servers.** Several quotient processes on one host may
   share the run directory and session home; coordination between them is
   through the filesystem only.

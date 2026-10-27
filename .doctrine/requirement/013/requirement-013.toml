@@ -11,9 +11,10 @@ kind = "quality"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Once a run's status has been reported as settled or lost, every later report from any server reads the same; a run is reported lost only on positive evidence that no result can still arrive."
+description = "Once a run's terminal status (settled or lost) is published on disk, every later report from any server reads the same; a run is reported lost only on positive evidence that no result can still arrive. One exception: when neither the result nor the loss record can be written, the owning server reports the run lost while other servers read it as still working until the owner is confirmed dead."
 tags = []
 acceptance_criteria = [
   "A run's settled status is identical before and after the reporting server exits.",
   "A run whose owner cannot be judged dead reads as still working, not lost.",
+  "A run whose result and loss record both fail to write reads lost from its owner and still working from another server until the owner is confirmed dead.",
 ]

@@ -11,7 +11,7 @@ kind = "quality"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Every stop of a running run passes one sequence \u2014 SIGTERM to the run's process group, a 2 s grace, SIGKILL to the group, reap, drain, audit \u2014 with the trigger's cause; the child leads its own process group so signals reach everything the delegate started and nothing else."
+description = "Every stop of a running run passes one sequence \u2014 SIGTERM to the run's process group, a 2 s grace, SIGKILL to the group, reap, drain, audit \u2014 with the trigger's cause; the child leads its own process group so signals reach every process that stays in that group and nothing outside it. Keeping the delegate in the group is the form's obligation (SPEC-004)."
 tags = []
 acceptance_criteria = [
   "Cancellation, EOF, a crossed ceiling, the wall clock, the switch and an evidence failure each stop the run through the same ladder and record their cause.",

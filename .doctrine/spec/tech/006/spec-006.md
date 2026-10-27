@@ -29,8 +29,8 @@ on its row; this spec cites it rather than restating it.
 - Keep stdout for the verb's product and stderr for diagnostics; when serving,
   stdout is the protocol channel alone.
 - Translate process signals into the server's one shutdown path.
-- Make `quotient help` print what a server started in the same place would
-  tell the calling agent.
+- Make `quotient help` print what a healthy server started in the same place
+  would tell the calling agent.
 
 ## Contracts
 
@@ -42,7 +42,14 @@ One convention across verbs:
 |---|---|
 | 0 | the verb did its job (for bare `quotient`: the server shut down) |
 | 1 | the verb ran but could not do its job for a reason the operator can act on; or, for `reduce`, the reduced run did not complete |
-| 2 | the invocation was malformed: an unknown verb, flag, section or argument shape. Usage goes to stderr |
+| 2 | the invocation was malformed: an unknown verb, flag or section, or a bad argument shape for `reduce`, `allow` or `revoke`. Usage goes to stderr |
+
+Two exceptions, both shipped behaviour:
+
+- `reduce` also exits 2, without usage, when its input cannot be read or the
+  reducer throws: it cannot tell a missing file from a mistyped one.
+- `help` and `--version` ignore arguments after the ones they use, so
+  `quotient --version extra` prints the version and exits 0.
 
 ### Verbs
 
@@ -85,8 +92,9 @@ action, the operator's way out of a stuck shutdown.
 ### Environment the verbs read
 
 The verbs resolve locations through the same resolver as the server (SPEC-005):
-`allow` and `revoke` reach the approvals store and the policy, `help` reaches
-the help and profile layers and the policy. `help clients` names the binary by
+`allow` reads the policy and the approvals store; `revoke` reads and updates
+the approvals store only, independent of the policy and of whether the root
+still exists; `help` reaches the help and profile layers and the policy. `help clients` names the binary by
 `QUOTIENT_LAUNCHER` when it is an absolute path (a wrapper's own path), else by
 the path the script was run as, not its symlink target.
 
@@ -119,8 +127,9 @@ the path the script was run as, not its symlink target.
 - **Bare means serve.** An MCP client launches the binary with no arguments;
   any verb is an operator act. There is no `serve` verb (`quotient serve` is
   unknown, exit 2).
-- **Exit 2 is reserved for a malformed invocation**, so a script can tell "I
-  asked wrongly" from "the system said no" (1).
+- **Exit 2 means "you asked wrongly"**, so a script can tell it from "the
+  system said no" (1). `reduce` is the exception: unreadable input and a
+  reducer error also exit 2 (see Exit codes).
 - **Signals join the EOF shutdown path** rather than a separate one, so a
   client's timeout cannot orphan a run's process group.
 - **Verbs never prompt.** Approval is confirmed by the digest the operator

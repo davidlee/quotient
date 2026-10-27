@@ -4,12 +4,12 @@ version = 1
 id = 3
 slug = "confinement-policy"
 title = "Confinement policy"
-status = "draft"
+status = "active"
 kind = "tech"
 tags = ["policy", "admission", "approvals"]
 responsibilities = [
-  "Read, validate and apply the operator policy on every call, refusing anything absent, unknown or unreadable.",
-  "Judge each call through one fixed admission order, first failure wins, and hand the decided grant to the server.",
+  "Read, validate and apply the operator policy on every call that would start a run, refusing anything absent, unknown or unreadable.",
+  "Judge each new run through one fixed admission order, first failure wins, and hand the decided grant to the server.",
   "Re-admit a queued run at launch against current authority: refuse or narrow, never widen or move.",
   "Keep the child's view off every protected store further than that store allows.",
   "Select each call's form from the machine slot, the governing approval and the project link, with no fallback once governed.",

@@ -5,9 +5,33 @@
 ## Overview
 
 The operator's authority over runs, as the server applies it: the policy
-document, the fixed admission sequence that judges every call against it, the
-child-view check, project-form selection and the approvals store that records
-which project form may run.
+document, the fixed admission sequence that judges every new run against it,
+the child-view check, project-form selection and the approvals store that
+records which project form may run.
+
+Admission applies to the two calls that start a run, `pi_agent` and
+`pi_agent_start`, and again when a queued run launches. Wait, ack and cancel
+start nothing and are not admitted: they validate only their own arguments,
+so runs on disk stay reachable when the policy is off or unreadable.
+
+Terms this spec adds to PRD-001 §1:
+
+- **Machine slot**: the policy's `forms.read` or `forms.write` entry, the
+  form the operator chose for a capability, with any extensions it grants.
+- **Capability pin**: the capability the policy assigns to each allowed
+  profile name; the profile document must declare the same.
+- **Exposure**: paths the policy says a form makes writable beyond the root
+  and session directory (for example a tool cache).
+- **Child view**: for the admission check, the paths a delegate may write
+  or must be able to read — its root, its active session directory and the
+  exposure paths — compared against the protected stores. The form may
+  allow further reads and adds a private temp directory; neither is part of
+  the check.
+- **Protected store**: a file or directory a delegate must not reach, or must
+  not write: the run evidence, other sessions, the policy, the approvals
+  store, and the profile and help directories.
+- **Approvals store**: `approvals.json`, the operator's record of which
+  project forms may run, by real path and content digest.
 
 A component of the MCP server container (SPEC-002), realising PRD-001's
 operator-authority, confinement-selection, per-run-limit and fail-closed
@@ -18,13 +42,17 @@ guarantee is SPEC-004's; profiles and their snapshot are SPEC-005's; the
 command-line shape of `allow` and `revoke` is SPEC-006's.
 
 ```
-call ──► request shape ──► 1 policy ─ 2 switch ─ 3 profile ─ 4 root ─ 5 form
-                                                                       │
-     refusal (first failure) ◄─── 8 child view ─ 7 session ─ 6 ceilings/tools
-                                        │
-                                        ▼
-                         admitted: root, capability, form identity,
-                         clamped ceilings, tools, session  ──► SPEC-002 registry
+start call ──► start-up ok? ──► request shape ──► key replay? ──► answer the held run
+ (SPEC-002)    (SPEC-005)                          (pi_agent_start only)
+                                   │ new run
+                                   ▼
+            1 policy ─ 2 switch ─ 3 profile ─ 4 root ─ 5 form
+                                                          │
+ refusal (first failure) ◄── ledger probe ─ 8 child view ─ 7 session ─ 6 ceilings/tools
+                                   │
+                                   ▼
+                    admitted: root, capability, form identity,
+                    clamped ceilings, tools, session  ──► SPEC-002 registry
 
 queued run at launch ──► steps 1-6 and 8 again (session kept,
                          ceilings narrowed, form re-selected) ──► launch or refuse
@@ -32,10 +60,11 @@ queued run at launch ──► steps 1-6 and 8 again (session kept,
 
 ## Responsibilities
 
-- Read, validate and apply the operator policy on every call, with no default
-  for anything absent and no tolerance for anything unknown.
-- Judge each call through one fixed admission order, first failure wins, and
-  hand an admitted call's decided grant to SPEC-002.
+- Read, validate and apply the operator policy on every call that would
+  start a run, with no default for anything absent and no tolerance for
+  anything unknown.
+- Judge each new run through one fixed admission order, first failure wins,
+  and hand an admitted call's decided grant to SPEC-002.
 - Re-admit a queued run at launch against the policy and approvals then
   current: refuse or narrow, never widen, never move.
 - Keep the child's view off every protected store further than that store
@@ -75,7 +104,12 @@ Interface promises to SPEC-002:
 - **The switch is re-readable on its own.** `enabled` is checked at admission
   and, by SPEC-002's gate, about once a second for running runs; an absent,
   unreadable or malformed policy reads as off.
-- **Every refusal is recorded once**, in the attempts ledger, as it is decided.
+- **Every refusal is recorded once**, in the attempts ledger, as it is
+  decided. If the ledger cannot take the line, the refusal is still the
+  answer and the failure is reported on stderr. Because of that, the last
+  admission check probes that the ledger is writable and refuses
+  `audit-unavailable` if not: a server that could not record a refusal must
+  not start a run it could not audit.
 
 ## Concerns
 

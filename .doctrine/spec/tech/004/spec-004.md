@@ -33,8 +33,10 @@ The contract is **backend-agnostic**. Guarantees are properties of the child's
 view and lifetime, never mechanisms. Bubblewrap, a macOS Seatbelt profile,
 Landlock or a hand-written launcher are all candidate backends; each conforms
 by meeting `form-1`, not by resembling another. The Nix family builder
-(§Backends) is one conformant backend that quotient ships guidance and checks
-for, and has no special standing in the contract.
+(§Backends) is the one backend quotient ships guidance and checks for. It has
+no special standing in the contract, and a family it builds conforms only as
+far as the operator's own additions to it keep the builder's safeguards
+intact.
 
 ## Responsibilities
 
@@ -66,7 +68,8 @@ and exits with pi's status.
 **Lifetime.** The server runs the form as leader of its own process group and
 stops it through SPEC-002's one termination ladder by signalling that group
 (SIGTERM, 2 s grace, SIGKILL). quotient therefore relies on the form and
-everything it starts staying in that group. `form-1` states the group
+everything it starts staying in that group; a process that leaves it is not
+stopped by cancellation or shutdown. `form-1` states the group
 ownership as the server's behaviour; it does not yet state, as a guarantee,
 that a form must not move the delegate out of the group (see Open items).
 
@@ -124,7 +127,9 @@ published alongside.
 
 - H1 — The guarantee set G1–G10, stated as properties, is implementable on
   macOS with Seatbelt plus a supervisor for G7, without changing `form-1`'s
-  invocation or guarantees. Unverified; IMP-008 is where it is tested.
+  invocation or guarantees. Unverified; IMP-008 is where it is tested, and
+  its open gates are listed under Open items: G4's meaning, process-group
+  retention, G7 supervision, and the server's own procfs dependency.
 - H2 — A single write-denial sample (G6 on the run's own `audit.jsonl`) is a
   useful smoke test for any backend, because a backend that fails it fails the
   property quotient most depends on. It is not taken as conformance.
@@ -156,16 +161,22 @@ A backend is conformant when it meets `form-1`. None is privileged.
 **Nix family builder (Linux, today).** `lib.mkFormFamily` in the quotient
 flake (`nix/form-family.nix`, manual `docs/nix-forms.md`) builds a `read` and a
 `write` form plus a comparison `baseline` over bubblewrap via jail.nix, from
-the operator's own nixpkgs, jail.nix and pi. It adds builder-level guarantees
-beyond `form-1` (a cleared environment, its own namespaces, a state mask over
-the quotient state directory and `protect` paths, mount ordering so no operator
-option covers the root or session bind) and documents the operator's residual
-responsibilities. Evidence for it is stronger than for an arbitrary form:
+the operator's own nixpkgs, jail.nix and pi. It adds safeguards beyond
+`form-1`: a cleared environment, its own namespaces, a mask over the quotient
+state directory and `protect` paths, and ordering so that no option the
+builder checks covers the root or session bind.
+
+Those safeguards hold for what the builder can see. Options the operator adds
+at runtime (binds delivered from a file descriptor or appended by
+`add-runtime` code) are expanded after the root and session binds, can cover
+them, and are not checked (`docs/nix-forms.md` §6). A built family therefore
+meets `form-1` on the builder's side; the operator's runtime additions are
+theirs to keep within it. The evidence:
 
 | check | what it shows | limit |
 |---|---|---|
 | `lib.checkFormFamily` (`nix/check-family.nix`, `nix/check.sh`) | the launchers' bwrap text meets the contract: no undeclared read-write bind, protected state not rebound, the root and session binds last | text only; runtime binds and variable expansions are residues, not checked |
-| `scripts/form-probe` | G1–G9 behaviourally, over a probe family whose pi is a probe script | the probe family, on the host that runs it; not G10 (which holds by construction: launchers live in the Nix store) |
+| `scripts/form-probe` | G1–G9 behaviourally, over a probe family whose pi is a probe script | the probe family, on the host that runs it. Not G10: the launcher's own bytes are immutable in the Nix store, but G10 also covers runtime inputs the operator adds, which nothing checks |
 | `scripts/hostile-audit` | one G6 case with the real server, form and model | one store, one model, once |
 
 The builder is Linux-only (bubblewrap); it fails at evaluation elsewhere.
@@ -195,6 +206,10 @@ cannot read bwrap text), and the write-denial probe applies to any backend.
 - **Checks per backend.** `checkFormFamily` is bwrap-specific. A Seatbelt
   backend needs its own static check, or the contract's evidence story
   relies on probes alone for it.
-- **G6 wording "policy, profile and help layers".** "Layers" predates the
-  removal of the project layer; it now means one XDG configuration directory.
-  Editorial.
+- **Server portability.** Not a form question, but it gates IMP-008: session
+  ownership reads the server's own start time from `/proc/<pid>/stat`, and
+  refuses to start a run when it cannot. A host without Linux procfs (macOS)
+  refuses every new run whatever form it has.
+- **"Layers" in `form-1`'s summary diagram.** The diagram under Guarantees
+  says "policy, profile and help layers"; "layers" predates the removal of
+  the project layer, and the G6 row already says "directory". Editorial.

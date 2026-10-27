@@ -84,3 +84,68 @@ REQ-009` / `REQ-004` collided with the new ids.
 
 Remaining: user review of the drafts; move specs from `draft` when accepted.
 Requirements are `pending` (coverage not recorded).
+
+## Progress 2026-10-27 — GPT review integrated
+
+Review: Codex (strong tier), all seven specs in one pass, for readability
+cold and correctness. No RV ledger: no review facet fits a spec. 20 findings
+(2 high, 12 medium, 6 low). Each was checked against the cited contract or
+code and all 20 observations held. Integrated, with two prescriptions
+adjusted: one lifecycle diagram plus a paragraph instead of two diagrams; the
+CLI verbs table kept, with its exceptions listed beside it.
+
+Main corrections:
+
+- Confinement, evidence and lifetime guarantees are now conditional on a
+  conformant form. Orderly shutdown is split from abrupt death, and
+  process-group reach depends on the form keeping its processes in the group
+  (ISS-004).
+- The owner-lost / other-server-foreign exception is stated (PRD REQ-013,
+  SPEC-002 REQ-055).
+- Admission is scoped to new runs, after the start-up check, request shape
+  and key replay, and ends with the ledger probe (`audit-unavailable`).
+- SPEC-002 corrections: the era classifier is ordered, task and suppressed
+  replies are exempt from the envelope rule, the evidence-sink table is keyed
+  by publication, lanes keep cancelled runs as predecessors, and key-digest
+  normalisation is enumerated.
+- Builder conformance depends on the operator's runtime additions. The
+  portability gates for IMP-008 now include the server's `/proc` dependency.
+- Help equality holds only after a healthy start-up. The CLI exit-code
+  exceptions are stated, and `revoke` is independent of the policy.
+- Readability: a Terms section in PRD-001 §1, terms each spec adds defined
+  up front, and the profile header/body split explained with an example.
+
+Verification round on the same Codex thread: 17 resolved, 4 partly resolved
+and 4 new defects (wrong spawn-audit row, REQ-015 taking in task responses,
+REQ-043 help-load failure, child-view definition). All were verified and
+fixed, along with the remaining X-1 statements. `spec validate` is clean. No
+shipped text was touched.
+
+Follow-up, not done: the policy contract's "How a call is admitted" also says
+"every call", where it means calls that start a run. That is shipped text,
+outside CHR-001's spec scope.
+
+Remaining: user acceptance to move specs out of `draft`.
+
+## Progress 2026-10-27 — promoted and rendered
+
+User (2026-10-27): "yes, agreed, promote from draft". All seven specs moved
+from `draft` to `active` by editing `status` in each spec's TOML. There is no
+CLI verb for it, and `doctrine validate` is clean.
+
+User asked, in the same message, for a justfile recipe that writes the full
+specs to disk using `doctrine show`, and for README links to them. Done:
+
+- `just specs` renders every listed spec to `specs/<id>.md`, lowercase
+  (`specs/spec-002.md`), and clears the old renders first. The metadata
+  header is wrapped in a code block.
+- `specs/` sits outside the drift test's shipped-text set (docs, examples,
+  help, README, flake.nix, nix) and outside the package's `files`, so the
+  uppercase ids the renders contain are allowed there. `pack-check` passes.
+- The README's Documentation section now links the renders, not the
+  `.doctrine/` prose files.
+
+Caveat: the renders are committed artefacts and go stale when a spec
+changes. Re-run `just specs` after spec edits. Not yet gated: a check that
+renders to a temp dir and diffs against `specs/` would catch staleness, but it
+needs `doctrine` on the gate host.

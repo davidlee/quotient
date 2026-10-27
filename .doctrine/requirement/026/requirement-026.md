@@ -1,4 +1,4 @@
-# REQ-026: The policy is read on every call and nothing in it is defaulted or ignored
+# REQ-026: The policy is read on every admitting call and nothing in it is defaulted or ignored
 
 ## Statement
 

@@ -11,11 +11,29 @@ things that share one idea of the operator's configuration location:
 - **Locations** — one pure resolver from the environment to every path quotient
   reads or writes (`src/config.ts`).
 - **Profiles** — the operator's named delegate definitions, read once at
-  start-up into a frozen snapshot (`src/server/profiles.ts`).
+  start-up into a frozen snapshot (`src/server/profiles.ts`). A profile is a
+  markdown file: a header in an HTML comment carries its configuration, and
+  everything after it is notes for humans that quotient does not read today
+  (whether it should is IMP-012, Open items):
+
+  ```
+  <!-- quotient-profile
+  filesystem: read
+  model: provider/model-name
+  thinking: low
+  tools: read, grep, find, ls
+  -->
+  Notes for the operator: what this delegate is for.
+  ```
 - **The help corpus** — one sectioned source of guidance for the human
   (`quotient help`) and the model (the server's instructions and tool
   descriptions), with a per-section operator override (`src/help/help.ts`,
   `help/*.md`).
+
+A **snapshot** is the set of documents loaded at start-up and held unchanged
+for the server's life. **Start-up refused** means a check at start-up failed:
+the server still runs, but refuses to start runs (see *Failed start-up is not
+an exit*, below).
 
 It does not own: the policy file's contents and the admission checks over a
 profile (the capability pin, the root allowlist, tools narrowing) — SPEC-003;

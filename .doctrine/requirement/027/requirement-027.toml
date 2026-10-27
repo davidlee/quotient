@@ -11,7 +11,7 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "A policy whose mode is not per-call, or that carries a field belonging only to the static posture, refuses posture-unsupported for every call; it is never read as the nearest posture served."
+description = "A policy whose mode is not per-call, or that carries a field belonging only to the static posture, refuses posture-unsupported for every call that would start a run; it is never read as the nearest posture served."
 tags = []
 acceptance_criteria = [
   "mode \"static\" refuses posture-unsupported.",

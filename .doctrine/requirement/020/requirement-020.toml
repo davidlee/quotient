@@ -11,10 +11,11 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "pi_agent_start with a key the server holds answers the original run's handle when the normalised request digest is equal, and refuses request-invalid when it differs; a key is recorded only when its start publishes a run."
+description = "pi_agent_start with a key the server holds answers the original run's handle when the request digest is equal, and refuses request-invalid when it differs; a key is recorded only when its start publishes a run. The digest is taken over the request as written, normalised as the run-handle contract's The key section defines (object keys sorted, cwd resolved lexically against the launch directory, an omitted needs_success read as false, empty ceilings read as none, tools as a sorted set, key left out); it does not expand policy or profile defaults or resolve symlinks."
 tags = []
 acceptance_criteria = [
   "A start retried with the same key and arguments answers the same taskId and admits nothing.",
   "The same key with different arguments is refused request-invalid.",
   "A refused keyed start records no key, so its retry is admitted afresh.",
+  "Two starts differing only in key order, an omitted versus false needs_success, or tool order and duplicates are equal; an omitted tools list and an explicit one are not.",
 ]

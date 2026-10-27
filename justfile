@@ -32,3 +32,18 @@ hostile-audit:
 pack-check:
     npm pack --dry-run
     scripts/pack-check
+
+# Render every spec as `doctrine show` assembles it (prose and requirements) to
+# specs/<id>.md, for readers without doctrine. The metadata header before the
+# title becomes a code block so it renders line by line.
+specs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ids=$(doctrine spec list --color never --columns id | grep -oE '^(PRD|SPEC)-[0-9]+')
+    mkdir -p specs
+    rm -f specs/*.md
+    for id in $ids; do
+      doctrine show "$id" --color never \
+        | awk 'NR == 1 { print "```text" } !body && /^# / { print "```\n"; body = 1 } { print }' \
+        > "specs/${id,,}.md"
+    done

@@ -15,23 +15,48 @@ several delegations.
 quotient is a stdio MCP server that closes that gap. The calling agent starts
 pi runs, waits on them, and reads back a compact account of each. The
 operator — the human who installs and configures quotient — decides, in
-configuration no delegate can write, where delegates may work, which delegate
+configuration no confined delegate can write, where delegates may work, which delegate
 profiles exist, how much each run may spend, and what confines it.
 
 Desired end state: an agent delegates routinely and cheaply, the operator
 trusts that no delegate can exceed what was granted or rewrite the record of
 what it did, and neither needs a skill, plugin or bespoke prompt to get there.
 
-Two actors recur throughout:
+Three actors recur throughout:
 
 - **Calling agent** (the orchestrator): chooses the task, profile, root and
   narrower limits per call; reads results; keeps judgement and verification.
 - **Operator**: writes the policy and profiles, approves project forms,
   chooses the forms. Holds all authority; the calling agent holds none it was
   not granted.
+- **Delegate**: the pi process a run starts. It is untrusted: it may try to
+  widen its own powers, choose what confines it, or edit its own record.
 
-The **delegate** is the pi process a run starts. It is untrusted: it may try to
-widen its own powers, choose what confines it, or edit its own record.
+### Terms
+
+These terms are used, undefined, by every spec beneath this one.
+
+- **MCP** (Model Context Protocol): the JSON-RPC protocol an agent's harness
+  uses to call tools. quotient speaks it over stdio.
+- **pi**: the coding-agent program a run executes. quotient launches it; it
+  does not ship it.
+- **Run**: one task given to one pi process, from admission to its result.
+- **Root**: the directory a run works in (the call's `cwd`). The operator
+  allowlists the roots runs may use.
+- **Profile**: an operator-written file naming a delegate's model, thinking
+  level and tools, and the filesystem **capability** it needs: `read` (the
+  root is read-only) or `write`.
+- **Policy**: the operator's one configuration file. It allowlists roots and
+  profiles, pins each profile's capability, sets per-run limits, and names the
+  form for each capability.
+- **Form**: an executable that confines one pi process, for example a sandbox
+  launcher. The policy names a **machine form** per capability; a project may
+  supply its own **project form**, which runs only once the operator has
+  **approved** that exact file.
+- **Session**: pi's conversation state, kept so a later run can continue it.
+- **Lane**: a named queue in which runs execute one at a time, in start order.
+- **Evidence**: the files a run leaves behind — its event stream, audit trail
+  and result.
 
 ## 2. Scope
 
@@ -71,7 +96,7 @@ Boundaries:
 ## 3. Principles
 
 - **The delegate is untrusted.** Every input that decides a run lives where no
-  delegate can write it, and the run's evidence is out of its reach.
+  confined delegate can write it, and the run's evidence is out of its reach.
 - **The operator's word is never downgraded.** A configuration quotient does
   not fully understand refuses; it is never read as the nearest thing quotient
   does understand.
@@ -81,8 +106,8 @@ Boundaries:
   what the operator granted, never widen it.
 - **Approval is selection.** A project's own form runs only as the exact
   identity the operator recorded; there is no fallback to something else.
-- **State lives on disk, not in memory.** A reported status reads the same
-  from any server, before and after any server exits.
+- **State lives on disk, not in memory.** A published terminal status reads
+  the same from any server, before and after any server exits.
 - **Say what is not guaranteed.** Every limit of the guarantees is stated where
   an operator will read it, not left for them to discover.
 - **The tool explains itself.** Guidance ships with the binary and reaches the
@@ -104,19 +129,27 @@ Constraints:
   (a jail, a platform sandbox, or a hand-written launcher).
 - Configuration that decides a run is read from the operator's configuration
   location only, never from the project tree a delegate works in.
-- Every document quotient emits or reads is a versioned, shipped contract.
+- Every machine interface a client or operator tool depends on — the
+  documents tool calls answer with, the policy, the approvals store and the
+  form invocation — is a versioned, shipped contract. Profiles follow a documented grammar without a
+  version; help, transcripts, diagnostics and the evidence logs are not
+  versioned interfaces.
 - Shipped text (docs, help, examples, README) is self-contained: it cites no
   internal planning identifiers.
 
 Invariants:
 
-- Nothing a delegate writes can raise any run's powers.
+- Under a form that meets the form contract, nothing a delegate writes can
+  raise any run's powers or alter any run's evidence. An unconfined form gives
+  this up (§6).
 - A run admitted again at launch can be refused or narrowed, never widened,
   and keeps the root, session and capability it was admitted with.
 - A root governed by an operator approval runs exactly the approved form
   identity or refuses.
-- Once a run is reported settled, its status never changes.
-- No run outlives the server that started it.
+- Once a run's terminal status is published on disk, it never changes.
+- No run outlives an orderly shutdown of the server that started it. If the
+  server dies abruptly, a confined run dies with it by the form's promise; an
+  unconfined run does not.
 - Every way a running run stops goes through one termination path and one
   audit record.
 
@@ -163,7 +196,8 @@ task at once and polls it instead of blocking.
 **Delegate several (non-blocking).** The agent starts each run and gets a
 handle at once; a `key` makes a retried start answer the same run. It waits on
 named handles for any or all to settle, within a timeout, receiving results
-within a byte budget; results that do not fit come back on a later wait. A run
+within a byte budget. A wait changes nothing, so to collect results that did
+not fit, the agent drops the ids it has consumed and waits again. A run
 given a lane waits for the run started before it in that lane to settle;
 `needs_success` refuses it if that predecessor did not complete, and the
 refusal cascades. Queued runs are admitted again when they launch.
@@ -185,7 +219,7 @@ to change the request, retry later, or tell the operator.
 
 **Operator setup.** The operator writes the policy (roots, profiles and their
 capabilities, limits, forms), installs profiles, and approves any project
-form by hash. Without a policy every call refuses. The policy and approvals
+form by hash. Without a policy every call that would start a run refuses. The policy and approvals
 apply from the next call; profile and help changes apply at the next server
 start.
 
@@ -195,7 +229,10 @@ further. Each run still records its outcome.
 
 **Recovery across servers.** Any server sharing the run directory answers for
 a run another server, or an earlier process, started: settled from its result,
-lost only on positive evidence, otherwise still working.
+lost only on positive evidence, otherwise still working. One exception: when
+the run directory itself becomes unwritable, the owning server reports the run
+lost while other servers read it as still working until the owner is confirmed
+dead.
 
 Non-guarantees (stated, not hidden):
 
@@ -210,7 +247,11 @@ Non-guarantees (stated, not hidden):
 - Waits that name no runs are per server, not per caller.
 - A run owned by a server whose death cannot be judged reads as working
   until its result lands.
-- An unconfined form gives up every confinement guarantee.
+- An unconfined form gives up every confinement guarantee, including that
+  the run dies with the server.
+- Stopping a run signals the process group the form started in. A form that
+  moves processes out of that group escapes cancellation and shutdown; the
+  form contract does not yet forbid it (ISS-004).
 
 ## 7. Verification
 

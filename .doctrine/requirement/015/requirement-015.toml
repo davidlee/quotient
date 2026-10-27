@@ -11,9 +11,9 @@ kind = "quality"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Every document quotient emits or reads has a versioned, shipped contract; a change that would break a reader takes a new version, and the shipped contracts are checked mechanically against the implementation."
+description = "Every machine interface a client or operator tool depends on (the documents tool calls answer with, the policy, the approvals store and the form invocation) has a versioned, shipped contract; a change that would break a reader takes a new version, and the shipped contracts are checked mechanically against the implementation. Profiles, help text, transcripts and evidence logs are outside this requirement."
 tags = []
 acceptance_criteria = [
-  "Each emitted and consumed document names its schema version.",
+  "Each quotient document (result, run handle, wait answer, ack answer), the policy and the approvals store carry a schema field naming their version; MCP task responses and protocol envelopes carry none, and the form invocation is versioned by its contract's name (form-1).",
   "Contract text and implementation are checked against each other on every release gate.",
 ]

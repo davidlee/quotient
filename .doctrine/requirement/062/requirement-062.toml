@@ -11,7 +11,7 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "The server starts each form as the leader of a new process group and stops it only by signalling that group through the one termination ladder, so signals reach the form and everything it started and nothing else."
+description = "The server starts each form as the leader of a new process group and stops it only by signalling that group through the one termination ladder, so signals reach every process that stays in the group and nothing outside it. form-1 does not yet require a form to keep its processes in the group (ISS-004)."
 tags = []
 acceptance_criteria = [
   "A launched form is a process-group leader distinct from the server's group.",

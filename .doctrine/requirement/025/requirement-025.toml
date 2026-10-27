@@ -11,10 +11,12 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Every call is checked request shape, then policy, switch, profile, root, form, ceilings and tools, session, child view, in that order; the first failing check is the refusal, recorded once in the attempts ledger, and later checks do not run."
+description = "Every call that would start a new run (pi_agent, or pi_agent_start without a held key) on a server whose start-up succeeded is checked request shape, then policy, switch, profile, root, form, ceilings and tools, session, child view, then that the attempts ledger is writable, in that order; the first failing check is the refusal, recorded in the attempts ledger as it is decided, and later checks do not run."
 tags = []
 acceptance_criteria = [
   "A call failing two checks is refused with the earlier check's reason.",
-  "Each refusal decided by admission appears once in the attempts ledger.",
+  "Each refusal decided by admission appears once in the attempts ledger when the ledger is writable; when it is not, the refusal is still answered and the failure is reported on stderr.",
+  "An unwritable attempts ledger refuses audit-unavailable after the child-view check, and nothing launches.",
+  "pi_agent_wait, pi_agent_ack and pi_agent_cancel are not admitted: they answer for runs on disk while the policy is disabled or unreadable.",
   "The order of refusal reasons in the result contract's Refusals table matches the code's order.",
 ]

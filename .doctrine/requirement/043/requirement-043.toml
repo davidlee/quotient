@@ -11,9 +11,9 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Help is one sectioned corpus: the same section text is what `quotient help <section>` prints, what an MCP client receives as the server's instructions (agent) and as each tool's description (tool, tool-start, tool-wait, tool-ack, tool-cancel)."
+description = "Help is one sectioned corpus: on a server whose start-up succeeded, the same section text, from the same sources and renderer, is what `quotient help <section>` prints and what an MCP client receives as the server's instructions (agent) and as each tool's description (tool, tool-start, tool-wait, tool-ack, tool-cancel). Two deliberate differences: after a failed start-up the server's instructions say so instead (REQ-042), while `quotient help` prints the section and warns on stderr when the legacy-layer check or the profile load failed, and prints nothing and exits 1 when the help load failed; and the CLI ends its output with a newline when the section text lacks one."
 tags = []
 acceptance_criteria = [
-  "The server's instructions equal the agent section as `quotient help agent` renders it in the same environment.",
+  "On a healthy start-up, the server's instructions equal the agent section as `quotient help agent` renders it from the same snapshots and render inputs, ignoring a final newline the CLI adds.",
   "Each tool's description equals its help section's text.",
 ]

@@ -516,23 +516,23 @@ protected stores, project forms),
 The specifications, for contributors, record the durable intent behind these
 documents: what quotient must do, what it deliberately leaves open, and which
 code and contracts govern each part. They live in the repository, not the
-package; the contracts above stay normative. Each file is the narrative; its
-requirements are separate records beside it.
+package; the contracts above stay normative. Each file is a whole spec, its
+requirements included, rendered by `just specs` from the records under
+`.doctrine/`.
 
-- [Product: delegation under operator authority](.doctrine/spec/product/001/spec-001.md):
-  why quotient exists, its actors, requirements, and stated non-guarantees.
-- [System context](.doctrine/spec/tech/001/spec-001.md): the actors, external
-  systems and trust boundaries around the one process.
-- [MCP server](.doctrine/spec/tech/002/spec-002.md): protocol eras, tools, the
-  run lifecycle, lanes, wait, cancel, tasks, evidence and accounting.
-- [Confinement policy](.doctrine/spec/tech/003/spec-003.md): the policy,
-  admission order, the child's view, form selection and approvals.
-- [Forms contract](.doctrine/spec/tech/004/spec-004.md): what a form must
-  guarantee, how that is evidenced, and the Nix builder as one backend.
-- [Config and profiles](.doctrine/spec/tech/005/spec-005.md): where
-  configuration lives, the profile document, and the help corpus.
-- [CLI](.doctrine/spec/tech/006/spec-006.md): the binary's verbs, streams and
-  exit codes.
+- [Product: delegation under operator authority](specs/prd-001.md): why
+  quotient exists, its actors, requirements, and stated non-guarantees.
+- [System context](specs/spec-001.md): the actors, external systems and trust
+  boundaries around the one process.
+- [MCP server](specs/spec-002.md): protocol eras, tools, the run lifecycle,
+  lanes, wait, cancel, tasks, evidence and accounting.
+- [Confinement policy](specs/spec-003.md): the policy, admission order, the
+  child's view, form selection and approvals.
+- [Forms contract](specs/spec-004.md): what a form must guarantee, how that is
+  evidenced, and the Nix builder as one backend.
+- [Config and profiles](specs/spec-005.md): where configuration lives, the
+  profile document, and the help corpus.
+- [CLI](specs/spec-006.md): the binary's verbs, streams and exit codes.
 
 `quotient reduce` is the reducer on its own: it turns a `pi --mode json` event
 stream into the same transcript and status.

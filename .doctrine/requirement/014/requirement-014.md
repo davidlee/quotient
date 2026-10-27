@@ -1,4 +1,4 @@
-# REQ-014: No run outlives the server
+# REQ-014: No run outlives the server's shutdown
 
 ## Statement
 

@@ -29,6 +29,17 @@ configuration lives or what a profile is (SPEC-005), or the CLI verbs
 Posture: retrospective. Everything described here is shipped unless marked
 *planned*.
 
+Terms this spec adds to PRD-001 §1:
+
+- **Era**: which revision of MCP a request speaks. Each request is judged on
+  its own, so one server can serve old and new clients at once.
+- **Registry**: the server's in-memory index of the runs it started.
+- **Termination ladder**: the one sequence that stops a running run (signal,
+  grace, kill, audit).
+- **Gate**: the check that stops a run when it crosses a limit.
+- **Foreign**: a run started by another server, or an earlier process, that
+  may still be running.
+
 ## Responsibilities
 
 - Serve MCP over LF-framed JSON-RPC on stdio, classifying each request's
@@ -48,18 +59,25 @@ Posture: retrospective. Everything described here is shipped unless marked
 
 ### Wire and eras
 
-A request carrying `io.modelcontextprotocol/protocolVersion` in its
-`params._meta` is modern (2026-07-28): stateless, no handshake, every result
-carries `resultType`, and it may reach `server/discover` and `tasks/*`. A
-request without it is legacy (2025-06-18 `initialize` era), served as before.
-An unsupported version is `-32022` naming the supported one; malformed
-`_meta` is `-32602`. There is no process-wide era (DEC-055, DEC-063).
+Each request's era is read from its `params._meta`, in this order:
 
-A `tools/call` always answers a tool result carrying a document; a verdict
-about a delegate is never a JSON-RPC error. `isError` is true only for a
-refused call — and, for `pi_agent`, whenever the result's state is not
-`completed` (DEC-052, DEC-058). A request the client cancels gets no reply in
-either era (DEC-064).
+1. No `_meta` object, or no `io.modelcontextprotocol/protocolVersion` key in
+   it: **legacy** (the 2025-06-18 `initialize` era), served as before.
+2. A version that is not a string: `-32602`.
+3. A string other than `2026-07-28`: `-32022`, naming the supported version.
+4. Client capabilities in `_meta` that are not an object: `-32602`.
+5. Otherwise **modern** (2026-07-28): stateless, no handshake, every result
+   carries `resultType`, and it may reach `server/discover` and `tasks/*`.
+
+There is no process-wide era (DEC-055, DEC-063).
+
+A `tools/call` that is answered with a tool result carries one versioned
+document; a verdict about a delegate is never a JSON-RPC error. `isError` is
+true only for a refused call — and, for `pi_agent`, whenever the result's
+state is not `completed` (DEC-052, DEC-058). Two requests are answered
+otherwise: a `pi_agent` request declaring the tasks extension is answered with
+a task, and a request the client cancels, or that arrives once shutdown has
+begun, gets no reply in either era (DEC-064).
 
 The server's own instructions (legacy `initialize`, modern `server/discover`)
 and each tool's description are help sections, resolved through SPEC-005.
@@ -81,19 +99,25 @@ refusal, told apart by `schema`.
 
 ### Run lifecycle
 
+The lifecycle of a run, as the server that started it holds it:
+
 ```mermaid
 stateDiagram-v2
-  [*] --> refused: admission fails (no run published)
   [*] --> queued: admitted, lane busy
-  [*] --> running: admitted, unlaned or lane free
-  queued --> running: head of lane, re-admitted
-  queued --> settled: cancelled / dropped at EOF / refused at launch / predecessor failed
-  running --> settled: result.json written
+  [*] --> running: admitted, no lane or lane free
+  queued --> running: reaches the head of its lane, re-admitted
+  queued --> settled: cancelled, dropped at shutdown, refused at launch, or predecessor failed
+  running --> settled: pi exits or is stopped
+  queued --> lost: result.json cannot be written
   running --> lost: result.json cannot be written
   settled --> [*]
   lost --> [*]
-  note right of settled: foreign = held by another live (or unjudgeable) server
 ```
+
+A call refused at admission publishes no run and has no state. `settled`
+means a `result.json` exists; the result inside it may be completed, failed,
+incomplete, cancelled or refused. A server reading a run it does not hold
+sees `settled`, `lost` or `foreign` instead (Views, below).
 
 - **Publication line.** The `admitted` audit record, written before the call
   answers, publishes the run: from then its directory is never deleted and
@@ -103,10 +127,12 @@ stateDiagram-v2
   run's evidence-directory name (its handle and task id). It holds state and
   causes, never a result (DEC-049).
 - **Lanes.** Per-server FIFO queues, created by naming them. One run executes
-  per lane; a cancelled run is skipped; `needs_success` refuses
-  `lane-predecessor-failed` when the predecessor did not complete, and the
-  refusal cascades. A queued run is re-admitted at launch: it may be refused
-  or narrowed, never widened or moved (DEC-050).
+  per lane. A run's predecessor is the run started before it in the lane.
+  `needs_success` refuses `lane-predecessor-failed` when the predecessor did
+  not complete, and the refusal cascades. A cancelled queued run never
+  launches but stays its successor's predecessor, so a `needs_success`
+  successor of a cancelled run refuses. A queued run is re-admitted at launch:
+  it may be refused or narrowed, never widened or moved (DEC-050).
 - **Sessions.** Owned from start until settled by one `O_EXCL` lock file
   shared across servers on one session home; bound to the first root and
   capability; stale owners reclaimed by atomic replacement under a claim,
@@ -168,13 +194,22 @@ first cause.
 
 ### Evidence
 
-Two sinks, kept apart: `attempts.jsonl` for attempts that spawned nothing
-(refused calls, runs refused at launch), and one directory per admitted run
-holding `events.jsonl`, `stderr.log`, `transcript.md`, `status.json`,
-`audit.jsonl` and `result.json`. The audit opens with `admitted`, then `spawn`
-before launch, then any `abort` and the `exit`; a run that never launched
-records `refused`, `cancelled` or `dropped`; `lost` records that `result.json`
-could not be written. `result.json` is written to a temp file and renamed.
+Two sinks: `attempts.jsonl`, one ledger of refusals, and one directory per
+published run holding `events.jsonl`, `stderr.log`, `transcript.md`,
+`status.json`, `audit.jsonl` and `result.json`. Which an ending reaches
+depends on whether the run was published:
+
+| ending | attempts ledger | run directory |
+|---|---|---|
+| refused at admission (no run published) | yes | none exists |
+| refused at launch, or `lane-predecessor-failed` | yes | `refused` audit record and a refused `result.json` |
+| `spawn` record unwritable (`audit-failed`, nothing launched) | yes | a refused `result.json`; no `refused` audit record, since the audit is what failed |
+| queued run cancelled, or dropped at shutdown | no | `cancelled` / `dropped` record and a `result.json` |
+| launched run | no | `admitted`, `spawn`, any `abort`, `exit`, `result.json` |
+
+`lost` records that `result.json` could not be written. `result.json` is
+written to a temp file and renamed. A refusal the ledger cannot take is still
+answered; the failure is reported on stderr.
 
 ## Contracts
 
@@ -199,8 +234,14 @@ meaning. Defaults and caps may change without a version.
   unreachable from inside a run; the server relies on the form for that and
   checks the child's view before launch (SPEC-003).
 - **Durability over memory.** Status is derived from disk so it reads the same
-  after the server ends. Cost: a dead owner on another host or pid namespace
-  leaves its runs reading `foreign` indefinitely (RSK-003).
+  after the server ends. Costs: a dead owner on another host or pid namespace
+  leaves its runs reading `foreign` indefinitely (RSK-003); and when the run
+  directory itself becomes unwritable, so that neither `result.json` nor the
+  `lost` record lands, the owner reports `lost` while other servers read
+  `foreign` until the owner is confirmed dead.
+- **Process-group escape.** The ladder signals the form's process group. A
+  form that moves processes out of it escapes cancellation and shutdown;
+  `form-1` does not yet forbid that (SPEC-004, ISS-004).
 - **Client patience.** A blocking `pi_agent` is bounded by the client's
   tool-call timeout (Codex 60 s by default; Claude Code's stdio idle timeout,
   30 min, RSK-002). Start + wait exists so no single call need outlast either.

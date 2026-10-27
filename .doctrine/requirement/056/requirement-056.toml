@@ -16,5 +16,5 @@ tags = []
 acceptance_criteria = [
   "An unwritable admitted record refuses audit-failed with no handle.",
   "An unwritable spawn record launches nothing and settles the run as an audit-failed refusal in its directory.",
-  "Attempts that spawned nothing are appended to attempts.jsonl, never to a run directory.",
+  "A refusal before publication is appended to attempts.jsonl and creates no run directory; a refusal after publication is appended to attempts.jsonl and also settles the run as a refused result in its directory.",
 ]

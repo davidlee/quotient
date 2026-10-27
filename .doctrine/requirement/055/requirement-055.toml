@@ -11,7 +11,7 @@ kind = "quality"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Each settled run's result.json is written atomically (temp file then rename) and the registry holds no result. A run not held in memory is resolved from disk: settled when a result reads, lost only on a published lost record, a confirmed-dead owner or no recorded owner, foreign otherwise; unknown and unreadable ids are reported apart."
+description = "Each settled run's result.json is written atomically (temp file then rename) and the registry holds no result. A run not held in memory is resolved from disk: settled when a result reads, lost only on a published lost record, a confirmed-dead owner or no recorded owner, foreign otherwise; unknown and unreadable ids are reported apart. When neither result.json nor the lost record can be written, the owner reports lost while other servers read foreign until the owner is confirmed dead."
 tags = []
 acceptance_criteria = [
   "A reader never observes a partial result.json.",

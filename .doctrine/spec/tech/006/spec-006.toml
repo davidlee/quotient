@@ -4,7 +4,7 @@ version = 1
 id = 6
 slug = "cli"
 title = "CLI"
-status = "draft"
+status = "active"
 kind = "tech"
 tags = ["cli"]
 responsibilities = [
@@ -12,7 +12,7 @@ responsibilities = [
   "Hold one exit-code convention: 0 done, 1 refused or not completed, 2 malformed invocation.",
   "Keep stdout for the verb's product (the protocol alone when serving) and stderr for diagnostics.",
   "Route SIGTERM and SIGINT into the server's one shutdown path.",
-  "Make `quotient help` print what a server started in the same place would serve.",
+  "Make `quotient help` print what a healthy server started in the same place would serve.",
 ]
 
 category = "cli"

@@ -11,10 +11,10 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Each admitted run keeps an evidence directory with its event stream, audit trail and settled result, outside any delegate's reach; any server sharing the run directory can answer for a run another server or an earlier process started."
+description = "Each admitted run keeps an evidence directory with its event stream, audit trail and settled result, outside the reach of any delegate confined by a form that meets the form contract; any server sharing the run directory can answer for a run another server or an earlier process started."
 tags = []
 acceptance_criteria = [
   "A settled run's result is readable from its evidence directory after the server that ran it has exited.",
   "Attempts that spawned nothing are recorded with what was asked and why it was refused.",
-  "A delegate cannot alter its own run's evidence.",
+  "A delegate confined by a form that meets the form contract cannot alter its own run's evidence.",
 ]

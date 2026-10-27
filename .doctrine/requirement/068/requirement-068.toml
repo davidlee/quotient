@@ -11,7 +11,7 @@ kind = "quality"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Every guarantee in the form contract is a property of the child's view or lifetime that a non-Linux backend (for example a macOS sandbox profile or a hand-written launcher) can meet without a contract change; mechanism-specific detail lives only in a backend's own documentation."
+description = "Every guarantee in the form contract is stated as a property of the child's view or lifetime, never as a mechanism, so a non-Linux backend (for example a macOS sandbox profile or a hand-written launcher) is assessed against the properties alone; mechanism-specific detail lives only in a backend's own documentation. Whether a given backend can meet them is assessed per backend, not assumed."
 tags = []
 acceptance_criteria = [
   "The form contract names no Linux-only mechanism as a requirement.",

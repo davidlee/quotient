@@ -11,7 +11,7 @@ kind = "quality"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Every verb exits 0 when it did its job, 1 when it ran but could not (or, for reduce, the run did not complete), and 2 for a malformed invocation with usage on stderr; an unknown verb exits 2 with empty stdout."
+description = "Every verb exits 0 when it did its job, 1 when it ran but could not (or, for reduce, the run did not complete), and 2 for a malformed invocation with usage on stderr; an unknown verb exits 2 with empty stdout. reduce also exits 2, without usage, for unreadable input or a reducer error; help and --version ignore trailing arguments."
 tags = []
 acceptance_criteria = [
   "An unknown verb (including `serve` and `-x`) prints the top-level usage on stderr, nothing on stdout, and exits 2.",

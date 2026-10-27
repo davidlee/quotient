@@ -11,7 +11,7 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "`quotient help` lists section names with their aliases; `quotient help SECTION` prints that section as a server started in the same directory would serve it, warning on stderr, without failing, about conditions such a server would refuse on."
+description = "`quotient help` lists section names with their aliases; `quotient help SECTION` prints that section as a server started in the same directory would serve it after a healthy start-up, warning on stderr, without failing, about conditions such a server would refuse on."
 tags = []
 acceptance_criteria = [
   "`quotient help` lists every section, marking aliases (`refusals` for `result`).",

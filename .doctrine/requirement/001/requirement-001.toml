@@ -16,5 +16,5 @@ tags = []
 acceptance_criteria = [
   "A run started with a prompt and an allowed profile settles with a result carrying transcript, status and verdict.",
   "The verdict distinguishes success from every way a run can stop short, and names the cause.",
-  "The account is bounded in size by a transcript budget the operator sets and the caller may only lower.",
+  "The transcript is cut to a byte budget the operator sets and the caller may only lower; the final answer is always kept whole, so a long answer can exceed the budget, and a budget of zero disables cutting.",
 ]

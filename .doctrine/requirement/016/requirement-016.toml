@@ -11,10 +11,12 @@ kind = "functional"
 # it as the statement line — the storage rule forbids deriving it from prose).
 # Rationale and extended discussion stay in the sister `.md`. Add as:
 #   description = "…"
-description = "Each request's protocol era is classified from its own params._meta: a declared 2026-07-28 version is served in the modern era, an absent version in the legacy initialize era, an unsupported version is error -32022 naming the supported one, and malformed _meta is -32602. No era state is kept per process."
+description = "Each request's protocol era is classified from its own params._meta, in order: no _meta object or no protocolVersion key is the legacy initialize era; a version that is not a string is -32602; a string other than 2026-07-28 is -32022 naming the supported one; client capabilities that are not an object are -32602; otherwise the request is modern. No era state is kept per process."
 tags = []
 acceptance_criteria = [
   "A legacy request and a modern request on the same server are each answered in their own era.",
   "A request naming an unsupported protocol version is answered -32022 with the supported version in its data.",
   "Every modern-era result carries resultType.",
+  "A request whose _meta is null or not an object is served as legacy.",
+  "A request declaring 2026-07-28 without an object of client capabilities is answered -32602.",
 ]
