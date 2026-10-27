@@ -76,3 +76,28 @@ behavioural identity; one commit for five phases (F-4).
 ### Governance/spec (REV)
 - None. No spec or contract is contradicted (F-2 checked SPEC-002, SPEC-003,
   docs/contract pi-agent-result-2 step 7, JSON-RPC 2.0 id rules).
+
+## Reconciliation Outcome
+
+User agreed the edits in-session ("agreed").
+
+### Direct edits applied
+- slice-005.md Scope: "No behaviour change" restated as no change on inputs
+  the system produces; out-of-contract divergences allowed when listed in
+  notes.md and differential-reviewed (F-2).
+- design.md sec-2 D4: same rule appended (F-2).
+- Selector registry (F-3): added design-target `src/*.ts`; removed
+  `src/server/test-rig.ts` (subsumed by `src/server/**`) and, by the same
+  rule, `src/json.ts` (subsumed by `src/*.ts`, surfaced once the first two
+  landed). `slice conformance 5`: 37 conformant, 0 undelivered; the 16
+  undeclared are .doctrine records (F-4).
+
+### REVs completed
+- None; the brief had no governance/spec items.
+
+### Withdrawn / tolerated
+- F-4: tolerated — single shared phase delta including knowledge paths;
+  rationale in the finding disposition.
+- F-1: fixed in the audit (plan.toml header).
+
+Reconcile pass complete — handoff to /close.

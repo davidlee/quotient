@@ -43,6 +43,10 @@ long branching functions                       28 complexity / depth / length
   file's lint count above `lint-baseline.tsv`. Each phase diff is checked for
   new `as`, non-null `!`, `any`, `eslint-disable`; each rewritten truthiness
   test is reviewed for `0` / `""` semantics under `strict-boolean-expressions`.
+  Behaviour is unchanged on inputs the system produces. A change on
+  out-of-contract input is allowed only when it is stricter or no longer
+  crashes, is listed in `notes.md`, and is confirmed by a side-by-side review
+  against the previous commit.
 - **D5 — token economy.** The orchestrator writes the shared helpers (D1)
   first; cheap pi workers (`mcp__quotient__pi_agent`, `implement` profile) fix
   one file cluster per run against them; the orchestrator keeps verification

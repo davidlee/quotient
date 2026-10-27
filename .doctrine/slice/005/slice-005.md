@@ -41,7 +41,10 @@ Hotspots: `src/reduce/reduce.ts` 124, `src/server/gate.test.ts` 56,
   `eslint-disable-next-line`, each with a reason. Rule changes in the config
   only with a stated rationale (rule low-value for this codebase), and recorded
   in the slice notes.
-- No behaviour change. Every phase ends with `just gate` green and no file's
+- No behaviour change on inputs the system produces. Inputs outside the
+  contract may be handled more strictly, or without crashing; each such change
+  is listed in notes.md and checked by a side-by-side review against the
+  previous commit. Every phase ends with `just gate` green and no file's
   lint count above its starting count (ratchet against a per-file baseline).
 - Token economy: per-file mechanical fixes are delegated to cheap pi workers
   (`mcp__quotient__pi_agent`); the orchestrator keeps verification (gate,

@@ -23,14 +23,6 @@ selector = "src/**"
 intent = "scope-relevant"
 
 [[selector]]
-selector = "src/json.ts"
-intent = "design-target"
-
-[[selector]]
-selector = "src/server/test-rig.ts"
-intent = "design-target"
-
-[[selector]]
 selector = "src/**/*.test.ts"
 intent = "design-target"
 
@@ -44,6 +36,10 @@ intent = "design-target"
 
 [[selector]]
 selector = "src/help/**"
+intent = "design-target"
+
+[[selector]]
+selector = "src/*.ts"
 intent = "design-target"
 
 [[relation]]
