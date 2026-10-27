@@ -170,6 +170,26 @@ intent = "design-target"
 selector = "src/server/childview.test.ts"
 intent = "design-target"
 
+[[selector]]
+selector = "src/reduce/reduce.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/reduce/reduce.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/reduce/cli.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/profiles.test.ts"
+intent = "design-target"
+
+[[selector]]
+selector = "src/server/result.test.ts"
+intent = "design-target"
+
 [[relation]]
 label = "references"
 role = "originates_from"

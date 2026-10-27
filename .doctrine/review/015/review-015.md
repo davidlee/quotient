@@ -114,6 +114,13 @@ commits left unattributed (F-2).
 - **design.md sec-6 step 5 (F-9):** a cancel answer reports `timed_out:
   true` exactly when a target is foreign or unreadable.
 
+- **design.md sec-3 / sec-7 (F-11, raised at reconcile):** an `admitted`
+  owner that does not parse reads `foreign`; `callTool` survives as the
+  tools/call dispatcher; `admitAndStart(context, admission, request, origin,
+  callId)`; task methods' error arm is `RpcError`. Mirrors of F-5/F-7 found
+  at the same time: sec-9 "foreign indefinitely" bullet (unreadable widened,
+  F-5); sec-8 `pi-agent-result-2.md` re-admission sentence (F-7).
+
 ### Governance/spec (REV)
 
 - **DEC-067 (F-4):** amend the identity tuple and rule for `timens`. A
@@ -126,3 +133,48 @@ commits left unattributed (F-2).
 
 No plan.toml item: D-8 and the D-1 plan text are recorded history in
 notes.md; criteria ids stay immutable.
+
+## Reconciliation Outcome
+
+User assent for the bundle (design.md, selectors, DEC-067/068, code
+comments): "sure", 2026-10-27.
+
+### Direct edits applied
+- **Selector registry (F-1):** design-target added for src/reduce/reduce.ts,
+  src/reduce/reduce.test.ts, src/reduce/cli.ts, src/server/profiles.test.ts,
+  src/server/result.test.ts. src/json.ts added then removed: its only commit
+  (ceb2ce3) is outside every recorded delta (F-2, tolerated), so the
+  selector read undelivered; sec-9 names the file. Conformance after: 0
+  undelivered, 48 conformant, 2 undeclared (doctrine bookkeeping, F-3).
+- **design.md (F-1, F-4..F-9, F-11):** sec-2 status messages, Task-only
+  fields, `unreadable` scope; sec-3 owner identity with timens, flowchart
+  (stat failure / unreadable audit → unreadable; unparseable owner →
+  foreign), ack of disk-resolved runs, `lost` evidence; sec-5 refused-wait
+  attempts line, 900 s cap, first readable result whole, loop without ack,
+  awaitTargets signature; sec-6 step 5 cancel `timed_out`; sec-7 type blocks
+  (AdmissionContext.here, runs.ts AckEntry/matchKey and closing refusals,
+  views `here`, server Context/HANDLERS/admitting/runCall/present, callTool as
+  dispatcher, admitAndStart parameters, discoverResult serverInfo, RpcError,
+  era routing of id-bearing notifications — the code keeps only legacy
+  `notifications/initialized` and `notifications/cancelled` as notifications;
+  any other id-bearing `notifications/*` is -32601); sec-8 re-admission;
+  sec-9 code impact, test bullets, and five new risk bullets plus the
+  session-lock extension. Each amended passage carries "(Amended 2026-10-27,
+  reconcile RV-015 F-n: …)". All six mermaid blocks render.
+- **Code comments:** session.ts, views.ts, waiting.ts cite DEC-068 /
+  design sec-7 instead of the notes' divergence labels D-1/D-4/D-5.
+
+### Knowledge records amended (no REV: no spec or ADR governs this yet)
+- **DEC-067 (F-4):** identity tuple and rule gain the time namespace;
+  consequences name the start-up identity read.
+- **DEC-068 (F-5):** `unreadable` covers an unreadable audit with result
+  absent and a directory stat failing other than absence.
+
+### Tolerated
+- F-2, F-3, F-10 — rationale in their dispositions.
+
+### Not written
+- D-8 and the D-1 plan text: plan criteria are immutable; notes.md records
+  them.
+
+Reconcile pass complete — handoff to /close.

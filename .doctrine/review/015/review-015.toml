@@ -19,6 +19,13 @@ note = """
 Conformance audit of SL-004 at b174831 (code 6dc49d7) against design.md (rev 79), DEC-067/068, the plan's VT criteria and design sec-9 risks: slice conformance (7 undeclared, 0 undelivered, 43 conformant), just gate 741/741 + pack-check 4/4, slice verify-vt all PASS, tsc clean, eslint at or under baselines, every divergence in notes.md (D-1..D-16, contract-follows-code, sec-5/7 drift, accepted limits), phase-sheet risks, the research advisory, and the cancel timed_out question (user: keep, document). No code defect; 7 design-wrong findings carried in the Reconciliation Brief, 3 tolerated with rationale.
 """
 
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Second conclusion after F-11 (raised during reconcile inspection): same audit basis as the first pass, plus the stale sec-3/sec-7 shapes found while landing the brief. All 11 findings terminal; Reconciliation Outcome recorded.
+"""
+
 [target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
 ref   = "SL-004"
 
@@ -337,6 +344,39 @@ role = "responder"
 disposition = "tolerated"
 response = """
 research.md is pre-design evidence and was not consulted after the scope reopened; the tasks binding rests on EVD-002..004. Restamping would claim a refresh that did not happen, so the baseline is left drifted on purpose.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-11"
+status = "verified"
+severity = "minor"
+title = "Expected sec-3/sec-7 to name shipped shapes; observed malformed-owner → foreign unshown, callTool kept as dispatcher, admitAndStart/TaskAnswer shapes differ"
+detail = """
+Found while landing the brief (reconcile inspection, handed back to the ledger rather than written silently):
+- views.ts:255-258: an `admitted` owner that does not parse (parseRunOwner → null; PHASE-05 Codex F2) reads `foreign` — "never a dead one". sec-3's flowchart sends every named owner to ownerLiveness; the rule is unstated.
+- server.ts:331: `callTool(params, call, context)` survives as the tools/call dispatcher (readToolName → HANDLERS, start-up refusal of an unreadable name). sec-7 says "`callTool` is gone".
+- server.ts:174: `admitAndStart(context, admission, request, origin, callId)`; sec-7 says `admitAndStart(request, origin, call)`.
+- protocol.ts:92: task methods answer `{ result: object } | { error: RpcError }`; sec-7 types the error arm `object`.
+"""
+disposition = "design-wrong"
+response = """
+Code is the assented, test-pinned shape; design prose lags. Reconciliation Brief (added): sec-3 flowchart/owner bullet — an unparseable owner reads foreign; sec-7 server.ts — callTool is the dispatcher, admitAndStart's real parameters; sec-7 protocol.ts — the error arm is RpcError. Direct edit.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Code is the assented, test-pinned shape; design prose lags. Reconciliation Brief (added): sec-3 flowchart/owner bullet — an unparseable owner reads foreign; sec-7 server.ts — callTool is the dispatcher, admitAndStart's real parameters; sec-7 protocol.ts — the error arm is RpcError. Direct edit.
 """
 
 [[finding.turn]]

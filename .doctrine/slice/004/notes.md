@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · audit (RV-015 findings terminal; brief written) · b174831
+fresh-as-of: 2026-10-27 · reconcile done (RV-015 Reconciliation Outcome) · HEAD
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -22,7 +22,8 @@ fresh-as-of: 2026-10-27 · audit (RV-015 findings terminal; brief written) · b1
 - PHASE-10 done — contracts handle/wait/ack + help sections, result-2, docs/design.md, README, help (737519c..6dc49d7; delta recorded); gate 741; VA-1 + Codex 6 findings integrated; VH-1 probe: write runs overlap ~19.9 s (76bd49c, on IMP-011) (§ PHASE-10 execution)
 - PHASE-09 done — protocol.ts (eras, server/discover, tasks/*), era routing, task-answering pi_agent, taskOf, modernLine (6bfb2f8, 6faf117; delta recorded); Codex 1 medium fixed (§ PHASE-09 execution)
 
-- audit RV-015 — 10 findings (7 design-wrong, 3 tolerated); gate 741, verify-vt all pass at b174831; user: cancel timed_out kept, documented (F-9)
+- audit RV-015 — 11 findings (8 design-wrong, 3 tolerated); gate 741, verify-vt all pass at b174831; user: cancel timed_out kept, documented (F-9)
+- reconcile — design.md amended per RV-015 brief; DEC-067, DEC-068 amended; selectors +5; code comments cite DECs
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -32,7 +33,8 @@ fresh-as-of: 2026-10-27 · audit (RV-015 findings terminal; brief written) · b1
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: /reconcile from RV-015 § Reconciliation Brief (F-1 selectors + sec-9; F-4 DEC-067 timens; F-5 DEC-068 unreadable; F-6..F-9 design sec-2/3/5/6/7/9) → /close
+- next: /close
+- CHR-001 — author the first specs (forms contract, MCP server, config/profiles, CLI, confinement policy), then README; next session (user, 2026-10-27)
 - at /close: resolve IMP-011 (VH-1 evidence on it), IMP-004 (satisfied by PHASE-03); remove user-scope MCP server `quotient-dev` (`claude mcp remove quotient-dev -s user`)
 - RV-015 tolerated: F-2 ceb2ce3/4459ed8 outside phase deltas; F-3 doctrine paths in deltas; F-10 research baseline left drifted (no false restamp)
 - IDE-006 — drain-on-EOF deferred (user, 2026-10-27)

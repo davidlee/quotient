@@ -12,7 +12,7 @@
 // Nothing here maps a quotient state to a Task status: entries are `runDocument`s
 // (documents.ts) with the result arm hung off them, and the one state→status table
 // stays `taskStatus`'s. Every resolution — live record, disk evidence, `unreadable`
-// or no evidence at all — comes in through one `resolve` closure (D-4, D-5), so this
+// or no evidence at all — comes in through one `resolve` closure (design sec-7), so this
 // module never reads a run directory itself.
 import { runDocument, WAIT_SCHEMA, type WaitDocument, type WaitEntry } from './documents.ts';
 import type { Maxima } from './policy.ts';
@@ -132,7 +132,7 @@ function targetFor(registry: Registry, run: string, resolution: Resolution): Tar
 // ── The condition (C6, C7) ────────────────────────────────────────────────
 
 /** What a resolution says a target's view is: the view arm, `unreadable`, or null for
- *  an id no evidence names (D-5). */
+ *  an id no evidence names. */
 function viewOfResolution(resolution: Resolution): RunView | 'unreadable' | null {
   if (resolution === null || resolution === 'unreadable') {
     return resolution;

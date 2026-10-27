@@ -2,7 +2,7 @@
 // as a view, or a handle no registry holds, resolved from its evidence directory.
 //
 // `viewOf` copies a record into the view every caller reads; `viewFromDisk` walks
-// sec-3's flowchart (with D-5: a failed read of the directory or the audit reads
+// sec-3's flowchart (DEC-068: a failed read of the directory or the audit reads
 // `unreadable`) — the result first, then a published `lost` record,
 // then the `admitted` record's owner and its liveness — so a run that has read
 // `completed` never then reads `working`, and a run is called `lost` only on
@@ -223,7 +223,7 @@ function textOf(value: unknown): string | null {
 }
 
 /** The directory's modification time — the oldest stamp a view can use — or why
- *  there is none (D-5): `absent` when no directory is there, so the run names no
+ *  there is none (DEC-068): `absent` when no directory is there, so the run names no
  *  evidence; `unreadable` for any other failure, which is no evidence of absence. */
 function directoryMtime(dir: string): { at: string } | 'absent' | 'unreadable' {
   try {
@@ -236,14 +236,14 @@ function directoryMtime(dir: string): { at: string } | 'absent' | 'unreadable' {
 
 /**
  * The result was absent: the owner decides (design sec-3). An audit that cannot be
- * read is a failed observation and reads `unreadable` (D-5); one with no `admitted`
+ * read is a failed observation and reads `unreadable` (DEC-068); one with no `admitted`
  * record and a torn line names no owner but is no evidence that none was recorded,
  * so it reads `foreign`; a whole trail with no `admitted` record, or one whose
  * record names no owner, reads `lost`.
  */
 function ownerResolution(read: DiskRead): Resolution {
   const { admitted, readable, torn } = read.trail;
-  // A failed read of the audit could hide a published `lost` record (D-5).
+  // A failed read of the audit could hide a published `lost` record (DEC-068).
   if (!readable) {
     return 'unreadable';
   }

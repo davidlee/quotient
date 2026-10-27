@@ -228,7 +228,7 @@ export function observeLiveness(procDir: string, pid: number, starttime: string)
 /**
  * Where a pid and its start time mean something (design sec-3, DEC-067): the
  * boot, the pid namespace, the time namespace and the host. Each is null when it
- * cannot be read. `timens` is SL-004 divergence D-1 (notes.md), pending reconcile.
+ * cannot be read.
  */
 export type HostIdentity = { boot: string | null; pidns: string | null; timens: string | null; host: string | null };
 
