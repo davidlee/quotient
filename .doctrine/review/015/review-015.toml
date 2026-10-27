@@ -1,0 +1,347 @@
+id    = 15
+slug  = "reconciliation-review-of-sl-004"
+title = "reconciliation review of SL-004"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "reconciliation"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Conformance audit of SL-004 at b174831 (code 6dc49d7) against design.md (rev 79), DEC-067/068, the plan's VT criteria and design sec-9 risks: slice conformance (7 undeclared, 0 undelivered, 43 conformant), just gate 741/741 + pack-check 4/4, slice verify-vt all PASS, tsc clean, eslint at or under baselines, every divergence in notes.md (D-1..D-16, contract-follows-code, sec-5/7 drift, accepted limits), phase-sheet risks, the research advisory, and the cancel timed_out question (user: keep, document). No code defect; 7 design-wrong findings carried in the Reconciliation Brief, 3 tolerated with rationale.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-004"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "minor"
+title = "Expected every edited source path declared and sec-9's 'unchanged' list true; observed reduce/, profiles.test, result.test undeclared and sec-9 wrong"
+detail = """
+Expected: `slice conformance 4` shows no undeclared source path; design sec-9 Code impact accurately lists what changed.
+Observed: undeclared src/reduce/reduce.ts, src/reduce/reduce.test.ts, src/reduce/cli.ts, src/server/profiles.test.ts, src/server/result.test.ts.
+- reduce.ts gained EMPTY_STATUS (PHASE-04 C1, 175442c) and the exported DEFAULT_BUDGET_BYTES (PHASE-08 Codex F2, b1c9981), which cli.ts now imports.
+- profiles.test.ts: regression-net rewrite for the `admitted` first record (3095a6f); result.test.ts: PHASE-01 cases (f9944c6).
+- sec-9 says "The reducer changes only by the non-object guard" and "policy.ts ... approvals.ts ... are not changed"; ceb2ce3 (isRecord into new src/json.ts, user request) touched policy.ts, approvals.ts, reduce.ts.
+reduce.ts is in sec-9's table but carries no design-target selector.
+"""
+disposition = "design-wrong"
+response = """
+The code is right; the selector registry and sec-9 are stale. Reconciliation Brief: `doctrine slice selector add 4` design-target for src/reduce/reduce.ts, src/reduce/reduce.test.ts, src/reduce/cli.ts, src/server/profiles.test.ts, src/server/result.test.ts, src/json.ts (load-bearing for conformance); design sec-9 Code impact table rows for reduce.ts (EMPTY_STATUS, DEFAULT_BUDGET_BYTES), cli.ts, src/json.ts (isRecord), and the "not changed" sentence drops policy.ts and approvals.ts (isRecord import only) — the §6/sec-9 prose is the mirror.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+The code is right; the selector registry and sec-9 are stale. Reconciliation Brief: `doctrine slice selector add 4` design-target for src/reduce/reduce.ts, src/reduce/reduce.test.ts, src/reduce/cli.ts, src/server/profiles.test.ts, src/server/result.test.ts, src/json.ts (load-bearing for conformance); design sec-9 Code impact table rows for reduce.ts (EMPTY_STATUS, DEFAULT_BUDGET_BYTES), cli.ts, src/json.ts (isRecord), and the "not changed" sentence drops policy.ts and approvals.ts (isRecord import only) — the §6/sec-9 prose is the mirror.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "minor"
+title = "Expected every slice commit inside a recorded phase delta; observed ceb2ce3 and 4459ed8 outside any range, invisible to conformance"
+detail = """
+Expected: the source-delta registry covers every code commit of the slice, so conformance reads a complete picture.
+Observed: ceb2ce3 (isRecord consolidation: src/json.ts, approvals.ts, policy.ts, ...) and 4459ed8 (D-1 timens: session.ts, session.test.ts, test-rig.ts) landed between phases (notes.md § Harvest Produced: "outside phase range"; § Divergences D-1). Conformance cannot see src/json.ts, approvals.ts or policy.ts at all; its "conformant" count is partial for those commits.
+"""
+disposition = "tolerated"
+response = """
+Both commits are deliberate, user-directed, gate-green and named in notes.md (§ Harvest Produced; § Divergences D-1). Attaching them to a phase with `slice record-delta` would misattribute work to a phase that did not plan it. Accepted gap: conformance under-reports those files; F-1's brief item records them in sec-9, and their test coverage is pinned by the PHASE-05 and later suites (gate 741/741).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = """
+Both commits are deliberate, user-directed, gate-green and named in notes.md (§ Harvest Produced; § Divergences D-1). Attaching them to a phase with `slice record-delta` would misattribute work to a phase that did not plan it. Accepted gap: conformance under-reports those files; F-1's brief item records them in sec-9, and their test coverage is pinned by the PHASE-05 and later suites (gate 741/741).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "nit"
+title = "Expected conformance undeclared list to hold source paths only; observed doctrine bookkeeping (notes.md, backlog-011) inside phase deltas"
+detail = """
+Observed: .doctrine/slice/004/notes.md and .doctrine/backlog/improvement/011/backlog-011.md are undeclared because doctrine commits (e.g. 76bd49c, fe1f349) fall inside recorded phase ranges (PHASE-10: 737519c^..6dc49d7).
+"""
+disposition = "tolerated"
+response = """
+Process noise: doctrine bookkeeping commits within a phase's range are expected in a hand-committed slice; they are not source scope. No selector added — declaring notes.md a design target would misstate the design.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = """
+Process noise: doctrine bookkeeping commits within a phase's range are expected in a hand-committed slice; they are not source scope. No selector added — declaring notes.md a design target would misstate the design.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "major"
+title = "Expected DEC-067 and design to state the run owner's identity; observed code adds timens (D-1) unrecorded in canon"
+detail = """
+Expected: DEC-067's identity tuple (pid, start time, boot id, pid namespace, hostname) and rule match the code.
+Observed: HostIdentity gains `timens` (readlink <procDir>/self/ns/time, null when unreadable); ownerLiveness: timens joins the any-null → unknown check; differing timens (same host and boot) → unknown; different boot stays stale. 4459ed8; user directed "amend the design in reconcile" (notes.md § Divergences D-1).
+Canon still to amend: DEC-067 choice text; design sec-3 Start step 4 and the ownerLiveness bullet; sec-7 session.ts paragraph; sec-9 fakeProc / session.test.ts / views.test.ts bullets. Plan PHASE-02 objective/EX text also names the old tuple (plan criteria immutable — not a reconcile surface).
+"""
+disposition = "design-wrong"
+response = """
+Code follows the user's direction (D-1). Reconciliation Brief: DEC-067 amended (identity gains timens; differing timens with same host and boot → unknown) via /knowledge with the user's 2026-10-26 instruction as basis; design sec-3 Start step 4 + ownerLiveness bullet, sec-7 session.ts paragraph, sec-9 fakeProc / session.test / views.test bullets by direct edit. Plan PHASE-02 text left as recorded history (immutable criteria).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Code follows the user's direction (D-1). Reconciliation Brief: DEC-067 amended (identity gains timens; differing timens with same host and boot → unknown) via /knowledge with the user's 2026-10-26 instruction as basis; design sec-3 Start step 4 + ownerLiveness bullet, sec-7 session.ts paragraph, sec-9 fakeProc / session.test / views.test bullets by direct edit. Plan PHASE-02 text left as recorded history (immutable criteria).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-5"
+status = "verified"
+severity = "major"
+title = "Expected DEC-068 and sec-3 flowchart to route failed reads; observed audit/dir read failures read unreadable, not foreign/unknown (D-5)"
+detail = """
+Expected: sec-3 flowchart: "result absent, audit unreadable" → foreign; any directory stat failure → unknown. DEC-068: unreadable = result.json exists but cannot be read / does not validate.
+Observed (PHASE-05 Codex F1/F3, user assent 2026-10-27): result absent + audit unreadable → unreadable; directory stat failing other than absence → unreadable; a file at the run's path → unknown; torn audit with no admitted record → foreign. Rationale: a published lost run must not read working after failed (terminal status changed), and an EIO must not count as done.
+Canon to amend: DEC-068 (unreadable widens to the audit and the directory); sec-3 flowchart + "lost requires positive evidence" bullet; sec-7 views.ts prose; sec-9 views.test bullet.
+"""
+disposition = "design-wrong"
+response = """
+Code is the stricter, assented reading (D-5). Reconciliation Brief: DEC-068 amended (unreadable covers an unreadable audit with result absent, and a directory stat failing other than absence) via /knowledge; design sec-3 flowchart + "lost requires positive evidence" bullet, sec-7 views.ts prose, sec-9 views.test bullet by direct edit.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Code is the stricter, assented reading (D-5). Reconciliation Brief: DEC-068 amended (unreadable covers an unreadable audit with result absent, and a directory stat failing other than absence) via /knowledge; design sec-3 flowchart + "lost requires positive evidence" bullet, sec-7 views.ts prose, sec-9 views.test bullet by direct edit.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-6"
+status = "verified"
+severity = "minor"
+title = "Expected sec-5/sec-7 signatures and module shapes to match code; observed nine recorded drifts (D-2..D-4, D-6, D-7, D-9, D-12, D-13, awaitTargets)"
+detail = """
+All recorded in notes.md § Divergences and § PHASE-0N execution, each assented or agent-chosen and test-pinned:
+- D-2 AdmissionContext gains `here: HostIdentity`.
+- D-3 runs.ts: exported matchKey(found, argsDigest); start() on a closing registry refuses server-error and releases the session; a launch after closing() is dropped (`dropped` record, eof); AckEntry lives in runs.ts.
+- D-4 viewFromDisk / resolveRun take `here` after procDir (and waiting.ts resolve closures bind it).
+- D-6 Context.admission is `AdmissionContext | StartupFailure`; Context also gains `here` read at start-up whatever the verdict (PHASE-08 C5).
+- D-7 runCall handler is `(signal) => Answer`.
+- D-9 HANDLERS are `(args, call, context)` with an `admitting(handler)` wrapper for pi_agent / pi_agent_start.
+- D-12 discoverResult(instructions, serverInfo) (protocol.ts stays pure).
+- D-13 modern decoration is a `present` step on runCall inside the one reply gate, not a call to modernResult per result.
+- sec-5's inline awaitTargets(...): Promise<boolean> vs sec-7's Promise<void> with reread/pollMs; code follows sec-7.
+D-8 (EX-6 names auditKinds(runDir, run); code keeps auditKinds(layout)) touches plan criteria only — not a reconcile surface.
+"""
+disposition = "design-wrong"
+response = """
+Each drift is test-pinned and recorded with its reason. Reconciliation Brief: design sec-7 type blocks and prose (admission.ts, runs.ts, views.ts, waiting.ts, server.ts Context / runCall / HANDLERS, protocol.ts discoverResult) and sec-5 awaitTargets aligned to sec-7, by direct edit. D-8 excluded (plan criterion).
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Each drift is test-pinned and recorded with its reason. Reconciliation Brief: design sec-7 type blocks and prose (admission.ts, runs.ts, views.ts, waiting.ts, server.ts Context / runCall / HANDLERS, protocol.ts discoverResult) and sec-5 awaitTargets aligned to sec-7, by direct edit. D-8 excluded (plan criterion).
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-7"
+status = "verified"
+severity = "minor"
+title = "Expected sec-2/3/5/7 behaviour prose to match shipped contracts; observed D-10, D-14..D-16 and contract-follows-code items"
+detail = """
+- D-10 sec-5 "changes no state anyone can observe": a refused wait still appends its attempts line (every refusal recorded where decided). PHASE-08 Codex F1 contested on this ground.
+- D-14 design silent: a legacy message named notifications/* carrying an id stays a notification (no reply; cancelled still cancels); a modern one is -32601.
+- D-15 sec-3: a disk-resolved run acks not-settled while foreign; sec-2 and runs.ts ackOne answer unknown for any id without a record.
+- D-16 sec-5 "The loops help teaches" acks used ids every pass; sec-8/sec-9 and help teach named waits need no ack.
+- Contracts follow code where design is silent or differs (PHASE-10, notes.md): first-whole budget rule is the first *readable* settled result; wait cap 900 s also under an unreadable policy; status messages `queued in lane <lane>`, bare `queued`, `owned by another quotient server` without pid; disk-resolved session/lane null also on an unreadable admitted record; re-admission applies to any queued run whatever started it, against start-up profiles; `lost` also when the trail names no owner; created tasks and tasks/get carry the 7 Task fields only; on a start-up-refused server every call but wait/ack/cancel by name (malformed params and unknown names included) answers profile-invalid before its request is read (PHASE-08 C4).
+"""
+disposition = "design-wrong"
+response = """
+Contracts (pi-agent-wait-1, pi-agent-ack-1, pi-run-handle-1, help) already state shipped behaviour; design prose lags. Reconciliation Brief: sec-5 D-10 sentence and loop pseudocode (D-16); sec-3 ack of a disk-resolved run (D-15); sec-7 era routing for id-bearing notifications/* (D-14); sec-2/3/4/5 for the contract-follows-code items, by direct edit.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+Contracts (pi-agent-wait-1, pi-agent-ack-1, pi-run-handle-1, help) already state shipped behaviour; design prose lags. Reconciliation Brief: sec-5 D-10 sentence and loop pseudocode (D-16); sec-3 ack of a disk-resolved run (D-15); sec-7 era routing for id-bearing notifications/* (D-14); sec-2/3/4/5 for the contract-follows-code items, by direct edit.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-8"
+status = "verified"
+severity = "minor"
+title = "Expected sec-9 Risks to list every limit accepted in execution; observed five accepted limits missing"
+detail = """
+Accepted during execution, absent from sec-9 "Risks and explicit limits":
+1. PHASE-02 Codex F1 (on RSK-003): equal hostnames do not prove one machine — two hosts named alike sharing a run dir, or an nspawn container with its own boot_id, read a live owner stale → false lost. User: record, don't chase.
+2. PHASE-06 Codex F1: each wait leaves a reaction on a live record's `settled` promise until the run settles; bounded by the run's lifetime.
+3. PHASE-07: a client that writes and closes stdin at once may get some or none of its replies; EOF cancels runs in flight (drain-on-EOF deferred, IDE-006).
+4. M4 (at-trigger closing) is pinned only at runs.test level; closingRefusal is unreachable through serve (PHASE-08).
+5. PHASE-09 weak spot: the tasks/cancel-before-end case rests on a TERM-ignoring sleeper and a 1.5 s grace margin.
+Also: the "Session locks keep today's liveness rule" bullet should name timens (D-1's F2 applies to locks too) and the PHASE-05 F2 change (a non-positive-pid lock now reads as an unreadable record, fail-closed).
+The existing bullets were checked against shipped behaviour and still hold.
+"""
+disposition = "design-wrong"
+response = """
+All five are consciously accepted limits; the risk register must name them. Reconciliation Brief: design sec-9 Risks gains the five bullets and the session-lock bullet is extended (timens; non-positive pid fail-closed), by direct edit. RSK-003 already carries item 1.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+All five are consciously accepted limits; the risk register must name them. Reconciliation Brief: design sec-9 Risks gains the five bullets and the session-lock bullet is extended (timens; non-positive pid fail-closed), by direct edit. RSK-003 already carries item 1.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-9"
+status = "verified"
+severity = "minor"
+title = "Expected design sec-6 to state the cancel answer's timed_out; observed code + contract answer timed_out: true over a foreign/unreadable target, design silent"
+detail = """
+Code: server.ts cancelRuns builds waitEnvelope(until: 'all') over re-resolved targets, so timed_out is true exactly when a target is foreign or unreadable. pi-agent-wait-1.md § cancel documents it. Design sec-6 step 5 says foreign/unreadable are "not awaited" but not what timed_out reports. User, 2026-10-27 (this audit): "Keep, document".
+"""
+disposition = "design-wrong"
+response = """
+User chose to keep the shipped behaviour: timed_out keeps one meaning across wait documents (until does not hold over the reported states). Reconciliation Brief: design sec-6 step 5 states that a cancel answer reports timed_out: true exactly when a target is foreign or unreadable.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+User chose to keep the shipped behaviour: timed_out keeps one meaning across wait documents (until does not hold over the reported states). Reconciliation Brief: design sec-6 step 5 states that a cancel answer reports timed_out: true exactly when a target is foreign or unreadable.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-10"
+status = "verified"
+severity = "nit"
+title = "Expected the research baseline current or consciously left; observed drift (design, plan added; slice-004.md changed)"
+detail = """
+`doctrine slice research 4`: changed slice-004.md; added design.md, plan.md, plan.toml. The research artefact predates design; the reopened tasks scope was evidenced by EVD-002..004 rather than research.md.
+"""
+disposition = "tolerated"
+response = """
+research.md is pre-design evidence and was not consulted after the scope reopened; the tasks binding rests on EVD-002..004. Restamping would claim a refresh that did not happen, so the baseline is left drifted on purpose.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = """
+research.md is pre-design evidence and was not consulted after the scope reopened; the tasks binding rests on EVD-002..004. Restamping would claim a refresh that did not happen, so the baseline is left drifted on purpose.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.

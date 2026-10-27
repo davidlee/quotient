@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · PHASE-10 completed; all phases done; /audit next · 6dc49d7
+fresh-as-of: 2026-10-27 · audit (RV-015 findings terminal; brief written) · b174831
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -22,6 +22,8 @@ fresh-as-of: 2026-10-27 · PHASE-10 completed; all phases done; /audit next · 6
 - PHASE-10 done — contracts handle/wait/ack + help sections, result-2, docs/design.md, README, help (737519c..6dc49d7; delta recorded); gate 741; VA-1 + Codex 6 findings integrated; VH-1 probe: write runs overlap ~19.9 s (76bd49c, on IMP-011) (§ PHASE-10 execution)
 - PHASE-09 done — protocol.ts (eras, server/discover, tasks/*), era routing, task-answering pi_agent, taskOf, modernLine (6bfb2f8, 6faf117; delta recorded); Codex 1 medium fixed (§ PHASE-09 execution)
 
+- audit RV-015 — 10 findings (7 design-wrong, 3 tolerated); gate 741, verify-vt all pass at b174831; user: cancel timed_out kept, documented (F-9)
+
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
 - mem.fact.quotient.client-concurrency-readonlyhint — clients overlap calls only with readOnlyHint
@@ -30,26 +32,13 @@ fresh-as-of: 2026-10-27 · PHASE-10 completed; all phases done; /audit next · 6
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: `doctrine slice status 4 audit` → /audit → /reconcile → /close; IMP-011 resolve at close (probe evidence on it)
-- user-scope MCP server `quotient-dev` (repo dist/) registered for the probe; remove when done: `claude mcp remove quotient-dev -s user`
-- D-15, D-16 + contract-agent notes — design text to amend at /reconcile (§ PHASE-10 execution)
-- cancel answer reports timed_out: true when a target is foreign/unreadable — documented; raise at /audit
-- D-12..D-14 — discoverResult(instructions, serverInfo); runCall `present`; legacy id-bearing notifications stay notifications; /reconcile amends sec-7 (§ PHASE-09 execution)
-- D-9..D-11 — HANDLERS shape, sec-5 refused-wait ledger line (Codex F1 contested), handle/wait/ack help sections to PHASE-10; /reconcile amends (§ PHASE-08 execution)
-- M4 (at-trigger closing) accepted at runs.test level; closingRefusal unreachable through serve (C13) (§ PHASE-08 execution)
-- IDE-006 — drain-on-EOF deferred (user, 2026-10-27); PHASE-10 docs must say: keep stdin open until replies are read; closing it cancels runs in flight
-- D-6 — Context.admission is `AdmissionContext | StartupFailure`; D-7 — runCall handler is `(signal) => Answer`; D-8 — EX-6's auditKinds(runDir, run) kept as auditKinds(layout) (C5); /reconcile amends (§ PHASE-07 execution)
-- PHASE-06 drift — sec-5 `awaitTargets` returns Promise<boolean> vs sec-7 Promise<void>; code follows sec-7; /reconcile amends sec-5 (§ PHASE-06 execution)
-- PHASE-06 F1 — wait reactions retained on live `settled` until settle; accepted (bounded); /reconcile: add to sec-9 Risks
-- D-4 — `here` on viewFromDisk/resolveRun; D-5 — failed audit/dir read → `unreadable`; /reconcile amends (§ Divergences)
-- D-2 — `here` on AdmissionContext; /reconcile amends sec-7 (§ Divergences)
-- D-3 — matchKey in runs.ts; start refuses while closing; /reconcile amends sec-7 (§ Divergences)
-- PHASE-02 Codex F1 — recorded on RSK-003 (user: record, don't chase); /reconcile: add to design sec-9 Risks
-- DIVERGENCE (F2, timens) — implementation adds a 4th identity component; /reconcile amends DEC-067 + design (§ Divergences)
-- IMP-004 — satisfied by PHASE-03 (Step<T>, recording at the boundary); resolve at close
+- next: /reconcile from RV-015 § Reconciliation Brief (F-1 selectors + sec-9; F-4 DEC-067 timens; F-5 DEC-068 unreadable; F-6..F-9 design sec-2/3/5/6/7/9) → /close
+- at /close: resolve IMP-011 (VH-1 evidence on it), IMP-004 (satisfied by PHASE-03); remove user-scope MCP server `quotient-dev` (`claude mcp remove quotient-dev -s user`)
+- RV-015 tolerated: F-2 ceb2ce3/4459ed8 outside phase deltas; F-3 doctrine paths in deltas; F-10 research baseline left drifted (no false restamp)
+- IDE-006 — drain-on-EOF deferred (user, 2026-10-27)
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
-- RSK-003 — session locks judge liveness by pid+starttime across pid namespaces
+- RSK-003 — session locks judge liveness by pid+starttime across pid namespaces; carries PHASE-02 Codex F1
 - DEC-045, DEC-048..050, DEC-053..070 — the governing decisions (design sec-1 table)
 
 ## Plan baselines (2026-10-26, at eb622b6)
