@@ -5,10 +5,10 @@ id = 4
 slug = "extract-admission-steps-from-calltool-into-a-step-pipeline"
 title = "Extract admission steps from callTool into a step pipeline"
 kind = "improvement"
-status = "open"
-resolution = ""                 # seeded empty so `backlog edit` sets it in place
+status = "resolved"
+resolution = "fixed"
 created = "2026-10-24"
-updated = "2026-10-24"
+updated = "2026-10-27"
 tags = []
 
 # outbound-only. Cross-kind structural edges (e.g. references with a role

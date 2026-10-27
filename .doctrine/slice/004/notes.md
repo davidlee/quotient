@@ -6,7 +6,7 @@ disposable phase sheet (`.doctrine/state/.../phase-NN.md`) that must survive
 
 ## Harvest
 <!-- single-copy: updated in place each harvest; ids only, never restated content -->
-fresh-as-of: 2026-10-27 · reconcile done (RV-015 Reconciliation Outcome) · HEAD
+fresh-as-of: 2026-10-27 · close · 6d34d2b
 
 ### Produced
 - design locked rev 79 (run dr-01a17694); plan 10 phases (38b2b07, 66c493b, 529846e) — history in git
@@ -23,7 +23,8 @@ fresh-as-of: 2026-10-27 · reconcile done (RV-015 Reconciliation Outcome) · HEA
 - PHASE-09 done — protocol.ts (eras, server/discover, tasks/*), era routing, task-answering pi_agent, taskOf, modernLine (6bfb2f8, 6faf117; delta recorded); Codex 1 medium fixed (§ PHASE-09 execution)
 
 - audit RV-015 — 11 findings (8 design-wrong, 3 tolerated); gate 741, verify-vt all pass at b174831; user: cancel timed_out kept, documented (F-9)
-- reconcile — design.md amended per RV-015 brief; DEC-067, DEC-068 amended; selectors +5; code comments cite DECs
+- reconcile — design.md amended per RV-015 brief; DEC-067, DEC-068 amended; selectors +5; code comments cite DECs (6d34d2b)
+- close — gate 741 + pack-check 4/4 at 6d34d2b; IMP-011, IMP-004 resolved; quotient-dev MCP server removed; worker briefs moved out of phases/ (rollup 10/10)
 
 ### Learned
 - mem.fact.doctrine.verify-vt-needs-record-delta — hand-committed phases need `slice record-delta` before verify-vt attributes them (f955e40)
@@ -33,15 +34,13 @@ fresh-as-of: 2026-10-27 · reconcile done (RV-015 Reconciliation Outcome) · HEA
 - EVD-001..004 — scheduling probe; Claude Code and Codex limits; 2026-07-28 + tasks wire format
 
 ### Open
-- next: /close
 - CHR-001 — author the first specs (forms contract, MCP server, config/profiles, CLI, confinement policy), then README; next session (user, 2026-10-27)
-- at /close: resolve IMP-011 (VH-1 evidence on it), IMP-004 (satisfied by PHASE-03); remove user-scope MCP server `quotient-dev` (`claude mcp remove quotient-dev -s user`)
-- RV-015 tolerated: F-2 ceb2ce3/4459ed8 outside phase deltas; F-3 doctrine paths in deltas; F-10 research baseline left drifted (no false restamp)
-- IDE-006 — drain-on-EOF deferred (user, 2026-10-27)
+- IDE-004, IDE-005, IDE-006 — deferred server ideas (delivered-run listing, runs-in-flight bound, drain on EOF)
 - inq-19 (deferred) — recovering a lost CreateTaskResult; revisit with a non-stdio transport
 - RSK-002 — 30-min stdio idle abort of long blocking pi_agent
-- RSK-003 — session locks judge liveness by pid+starttime across pid namespaces; carries PHASE-02 Codex F1
+- RSK-003 — liveness across pid namespaces and equal hostnames
 - DEC-045, DEC-048..050, DEC-053..070 — the governing decisions (design sec-1 table)
+- memory harvest consciously rejected at close: the between-phase-commit conformance gap is covered by mem.fact.doctrine.verify-vt-needs-record-delta and recorded on RV-015 F-2
 
 ## Plan baselines (2026-10-26, at eb622b6)
 

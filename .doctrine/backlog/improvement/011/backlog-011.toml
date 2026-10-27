@@ -5,10 +5,10 @@ id = 11
 slug = "concurrent-runs-split-pi-agent-into-start-and-wait"
 title = "Concurrent runs: split pi_agent into start and wait"
 kind = "improvement"
-status = "open"
-resolution = ""                 # seeded empty so `backlog edit` sets it in place
+status = "resolved"
+resolution = "fixed"
 created = "2026-10-26"
-updated = "2026-10-26"
+updated = "2026-10-27"
 tags = ["area:contract", "area:server", "concurrency"]
 
 # outbound-only. Cross-kind structural edges (e.g. references with a role
