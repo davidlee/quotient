@@ -37,7 +37,7 @@
             pname = "quotient";
             inherit (packageJson) version;
             src = ./.;
-            npmDepsHash = "sha256-ELCsYEL6pTKXaCMCKhGokLWh4QxVWdZLdMPcQv+hzpU=";
+            npmDepsHash = "sha256-tlTyRMIn9LGekczh9IqvFVqr+dKIv4gdZFpq16485wk=";
             nodejs = pkgs.nodejs_22;
             npmBuildScript = "build";
             # The bin is a wrapper over dist/cli.js, so `process.argv[1]` names a
