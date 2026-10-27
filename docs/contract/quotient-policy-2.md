@@ -55,7 +55,7 @@ or a form object, refuses `policy-invalid`: nothing is silently dropped.
 |---|---|---|---|---|
 | `schema` | the string `"quotient-policy/2"` | yes, checked first | the schema this document is written against | `policy-invalid` |
 | `mode` | string | yes | `per-call` is the only posture this version serves | `posture-unsupported` for another string, else `policy-invalid` |
-| `enabled` | boolean | yes | the operator switch: `false` refuses every call and stops runs in flight | `policy-invalid`; `false` refuses `disabled` |
+| `enabled` | boolean | yes | the operator switch: `false` refuses every call that would start a run and stops runs in flight | `policy-invalid`; `false` refuses `disabled` |
 | `roots` | array of absolute path strings | yes | the directories a call may run in; a call's `cwd` must be one of them or inside one, compared by path component | `policy-invalid` |
 | `maxima` | object | yes | per-run bounds; all four units required | `policy-invalid` |
 | `maxima.requests` | positive number | yes | provider requests per run | `policy-invalid` |
@@ -154,10 +154,14 @@ Placeholder paths; replace them with this host's.
 
 ## How a call is admitted
 
-Each call is checked in this order, and the first failure wins. Every refusal
-is a tool result naming its reason (`pi-agent-result-2.md`, Refusals).
+A call that would start a run (`pi_agent`, or `pi_agent_start` with a key the
+server does not hold) is checked in this order, and the first failure wins.
+Every refusal is a tool result naming its reason (`pi-agent-result-2.md`,
+Refusals). `pi_agent_wait`, `pi_agent_ack` and `pi_agent_cancel` start nothing
+and are not admitted, so runs on disk stay reachable while the policy is off
+or unreadable.
 
-1. **Policy:** read and validated on every call (`policy-unavailable`,
+1. **Policy:** read and validated on every such call (`policy-unavailable`,
    `policy-invalid`, `posture-unsupported`).
 2. **Switch:** `enabled` (`disabled`).
 3. **Profile:** the name must be in the start-up snapshot (`profile-unknown`)
@@ -282,8 +286,8 @@ resolves to and the command that would record it; `quotient allow <root>
 <capability>=<realpath>@<sha256>` records it only if the link still resolves to
 that path with that digest. There is no prompt: the digest is the confirmation,
 and an unconfined orchestrator able to run `quotient allow` is trusted as the
-operator. Every call reads the store, so an approval applies to the next call
-and nothing waits for a restart. `quotient-approvals-1.md` is the store, its
+operator. Every call that would start a run reads the store, so an approval
+applies to the next such call and nothing waits for a restart. `quotient-approvals-1.md` is the store, its
 format and the two verbs.
 
 ## The unconfined form
@@ -306,7 +310,8 @@ Declare it only where the delegate is trusted as much as the server's user.
 
 What the server enforces:
 
-- **Read on every call.** An edit applies to the next call. A run in flight
+- **Read on every call that would start a run.** An edit applies to the next
+  such call. A run in flight
   keeps the maxima it was admitted with.
 - **`enabled` is re-read at every gate tick**, about once a second.
   `enabled: false` stops a run in flight with cause `switch`, and so does an
