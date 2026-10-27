@@ -31,3 +31,21 @@ absorbs), then `/spec-product` / `/spec-tech` per spec. Candidate sources:
 
 User, 2026-10-27: after the specs, update the project `README.md` in the same
 pass — bring it in line with the specs and point readers to them.
+
+## Update 2026-10-27 (supersedes "Then: README" ordering)
+
+User reordered: README first, then release, then specs. Done: README pass and
+rewrite (da76a4e, 0048179 — why-over-pi, no-skills, quickstart), release bump
+0.6.0 (3ab16b5). Remaining README work: a short second pass after the specs
+land, linking them from the Documentation section.
+
+Open items the specs must accommodate rather than foreclose:
+
+- IMP-012 — profile body reaching the delegate as instructions (config /
+  profiles spec must not fix "prose is not parsed" as durable intent).
+- IMP-013 — refusals point to the help section that fixes them (MCP server /
+  result contract).
+- IDE-007 — in-flight observability (MCP server; run document fields).
+- IMP-008 — macOS Seatbelt forms + manual (confinement policy / forms
+  contract must stay backend-agnostic).
+- IDE-005 — no bound on runs in flight (stated non-guarantee).
