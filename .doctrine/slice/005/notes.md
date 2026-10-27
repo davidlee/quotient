@@ -115,3 +115,14 @@ claim is not evidence; a differential review against HEAD is, and found the
 one regression the tests missed.
 
 Observed: pi_agent calls from this client run serially (~2 min each).
+
+## Audit (RV-017, 2026-10-27)
+
+- Committed as one commit b2c183b; all five phases record the same delta
+  a902e77..b2c183b, which includes the .doctrine records. Lesson: commit per
+  phase, code before knowledge records, when `slice conformance` attribution
+  matters.
+- plan.toml had lost PHASE-01's `[[phase]]` header (it sat inside a comment),
+  which is why `slice phases` skipped PHASE-01. Restored in the audit.
+- pack-check checks committed HEAD by design; re-run the gate after
+  committing to pack-check the new code.

@@ -1,0 +1,155 @@
+id    = 17
+slug  = "reconciliation-review-of-sl-005"
+title = "reconciliation review of SL-005"
+# no status — a review's status is DERIVED from its findings, so
+# it is never stored (the storage rule forbids derived data in authored files).
+
+[review]
+facet     = "reconciliation"     # scope|design|plan|phase-plan|implementation|code-review|reconciliation
+raiser    = "raiser"
+responder = "responder"
+rounds_base = 0
+contests_base = 0
+concluded = true
+
+[[review.turn]]
+act = "conclude"
+role = "raiser"
+note = """
+Conformance audit of SL-005 against design.md sec-2 D1–D5, plan.toml EX/VT, SPEC-002/003 and docs/contract. Evidence: `just lint` 0; `just gate` (lint first) green at b2c183b, 748/748 tests, pack-check against b2c183b; D4 added-line scan (one justified disable, no new any or non-null); notes.md divergences checked against contracts; `slice conformance 5` over a902e77..b2c183b. Four findings: F-1 fixed in audit, F-2 and F-3 to reconcile (per-slice), F-4 tolerated.
+"""
+
+[target]                   # the outbound `reviews` edge: RV-NNN ──reviews──▶ <ref>
+ref   = "SL-005"
+
+[[finding]]
+id = "F-1"
+status = "verified"
+severity = "minor"
+title = "plan.toml declares five phases; PHASE-01's [[phase]] header was lost, so slice phases saw four"
+detail = """
+Expected: plan.toml carries one `[[phase]]` table per phase, so `doctrine slice phases 5` materialises tracking for PHASE-01..05.
+Observed: line 20 read `# One [[phase]]` — the table header was swallowed into a comment, leaving PHASE-01's id/name/criteria as top-level keys. `slice phases 5` materialised PHASE-02..05 only; PHASE-01 tracking was hand-made (notes.md PHASE-01) and the audit's first `slice phases` run reported it `orphan (plan phase gone)`.
+Ids and criteria text unaffected; structural repair only.
+"""
+disposition = "fix-now"
+response = """
+Fixed in the audit: plan.toml line 20 restored to a comment plus a `[[phase]]` header; ids and criteria text unchanged. `doctrine slice phases 5` now reports `materialised PHASE-01` (sheet only; the hand-made tracking, status completed, was kept) and no orphan.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "fix-now"
+response = """
+Fixed in the audit: plan.toml line 20 restored to a comment plus a `[[phase]]` header; ids and criteria text unchanged. `doctrine slice phases 5` now reports `materialised PHASE-01` (sheet only; the hand-made tracking, status completed, was kept) and no orphan.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-2"
+status = "verified"
+severity = "minor"
+title = "Design pins no behaviour change; implementation accepts deliberate divergences on out-of-contract inputs"
+detail = """
+Expected (slice-005.md Scope "No behaviour change"; design.md sec-2 D4 "no regressions"): behaviour identical.
+Observed (notes.md PHASE-03, PHASE-04; diff a902e77..b2c183b): deliberate divergences, each on inputs the system never produces and each stricter or total where the old code cast or threw:
+- server.ts: a JSON-RPC request whose id is bool/object/array is answered with id null (JSON-RPC 2.0-correct) instead of echoing it.
+- reduce.ts: streams with non-array `content` or non-string `text` blocks reduce (block skipped) instead of throwing; options `alerts` read before `budgetBytes`.
+- session.ts `bindingOf`: a hand-edited binding with non-string `session`/`bound` is refused `session-busy` (consistent with docs/contract pi-agent-result-2 step 7: an owner whose liveness cannot be known).
+- root.ts `packageVersion` throws naming the file when package.json lacks a version string; help.ts `requiredText` throws on an impossible null.
+- policy.ts `maxima` built in canonical key order; spawn.ts `crossingOf` reads own properties only.
+One unintended regression (policy check order → `policy-invalid` became `posture-unsupported`) was caught by the differential review and fixed red/green with a pinning test in policy.test.ts.
+Checked against specs SPEC-002/003 and docs/contract: no documented contract is contradicted. The defect is the design's absolute wording, which the delivered work does not meet.
+"""
+disposition = "design-wrong"
+response = """
+The divergences are the right outcome: each is confined to inputs the system never produces and is stricter or total where the code previously cast or crashed; none contradicts SPEC-002/003 or docs/contract. The design's absolute "no behaviour change" is what is wrong. Reconcile: design.md sec-2 D4 and slice-005.md Scope state the rule actually applied — no behaviour change on inputs the system produces; out-of-contract inputs may become stricter or total, each listed in notes.md and differential-reviewed. See Reconciliation Brief.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+The divergences are the right outcome: each is confined to inputs the system never produces and is stricter or total where the code previously cast or crashed; none contradicts SPEC-002/003 or docs/contract. The design's absolute "no behaviour change" is what is wrong. Reconcile: design.md sec-2 D4 and slice-005.md Scope state the rule actually applied — no behaviour change on inputs the system produces; out-of-contract inputs may become stricter or total, each listed in notes.md and differential-reviewed. See Reconciliation Brief.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-3"
+status = "verified"
+severity = "minor"
+title = "Conformance: src/cli.ts, src/errors.ts, src/root.ts undeclared; src/server/test-rig.ts reported undelivered"
+detail = """
+Expected: every edited source path matches a design-target selector, and every design-target selector matches an edit.
+Observed (`doctrine slice conformance 5`, registry a902e77..b2c183b): undeclared src/cli.ts, src/errors.ts (new), src/root.ts — top-level src files that no design-target selector covers (src/json.ts is listed alone; scope-relevant src/** does not count). The slice scope names `src/**/*.ts`, so these are in scope; the selector set under-declares it.
+Undelivered src/server/test-rig.ts: the file was edited (+138/-? lines in the diff) but each path is attributed to one selector, and src/server/** claims it first — the narrower selector is redundant, not undelivered.
+"""
+disposition = "design-wrong"
+response = """
+The selector registry under-declares the scope and carries a redundant selector. Reconcile via the registry: `doctrine slice selector add` design-target `src/*.ts` (covers cli.ts, errors.ts, root.ts, json.ts) and `doctrine slice selector rm` the redundant `src/server/test-rig.ts` (subsumed by `src/server/**`). See Reconciliation Brief.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "design-wrong"
+response = """
+The selector registry under-declares the scope and carries a redundant selector. Reconcile via the registry: `doctrine slice selector add` design-target `src/*.ts` (covers cli.ts, errors.ts, root.ts, json.ts) and `doctrine slice selector rm` the redundant `src/server/test-rig.ts` (subsumed by `src/server/**`). See Reconciliation Brief.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+[[finding]]
+id = "F-4"
+status = "verified"
+severity = "nit"
+title = "Phase deltas are one shared range and include .doctrine knowledge paths"
+detail = """
+Expected: one source delta per phase, code only (record-delta: "cumulative code tip (pre-knowledge-record)").
+Observed: phases were not committed separately; the implementation landed as one commit b2c183b, which also carries the slice's .doctrine records (design, notes, plan, review 016, IMP-002). All five phases record --start a902e77 --end b2c183b, so conformance lists the 16 .doctrine paths as undeclared and cannot attribute paths to phases.
+"""
+disposition = "tolerated"
+response = """
+Rationale: phases ran in one working tree against one start commit without intermediate commits, so per-phase ranges do not exist and cannot be reconstructed truthfully; the .doctrine paths are knowledge records, not source, and are visibly so in the conformance output. Rewriting history to split the commit buys nothing for a closed burn-down. Lesson harvested to notes.md: commit per phase, code before knowledge, when conformance attribution matters.
+"""
+
+[[finding.turn]]
+act = "raise"
+role = "raiser"
+
+[[finding.turn]]
+act = "dispose"
+role = "responder"
+disposition = "tolerated"
+response = """
+Rationale: phases ran in one working tree against one start commit without intermediate commits, so per-phase ranges do not exist and cannot be reconstructed truthfully; the .doctrine paths are knowledge records, not source, and are visibly so in the conformance output. Rewriting history to split the commit buys nothing for a closed burn-down. Lesson harvested to notes.md: commit per phase, code before knowledge, when conformance attribution matters.
+"""
+
+[[finding.turn]]
+act = "verify"
+role = "raiser"
+
+# Findings are append-only `[[finding]]` tables, added by `review raise`.
+# Empty here at creation — a fresh review is Active, awaiting the raiser.
