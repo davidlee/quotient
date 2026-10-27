@@ -29,7 +29,7 @@ import {
   type Env,
 } from '../server/test-rig.ts';
 import { TOOLS } from '../server/tools.ts';
-import { HELP_SECTIONS, clientsSnippets, loadHelp, maximaTable, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type RenderContext } from './help.ts';
+import { HELP_SECTIONS, clientsSnippets, loadHelp, maximaTable, policyView, profileTable, sectionName, sectionText, type HelpSnapshot, type Section, type RenderContext } from './help.ts';
 
 /** Two empty override layers, higher first: the loader still takes a list, though
  *  production supplies only the XDG one. */
@@ -109,6 +109,9 @@ test('help: every section resolves; refusals is an alias of result; an unknown n
     'tool-cancel',
     'orchestrate',
     'result',
+    'handle',
+    'wait',
+    'ack',
     'policy',
     'form',
     'profiles',
@@ -132,16 +135,37 @@ test('help: with no override each section is its built-in source', () => {
   assert.match(sectionText(snapshot, 'reduce', CONTEXT), /usage: quotient reduce/);
 });
 
+/** The contract sections and the documents each prints verbatim (design sec-8). */
+const CONTRACTS: readonly (readonly [Section, string])[] = [
+  ['result', 'docs/contract/pi-agent-result-2.md'],
+  ['handle', 'docs/contract/pi-run-handle-1.md'],
+  ['wait', 'docs/contract/pi-agent-wait-1.md'],
+  ['ack', 'docs/contract/pi-agent-ack-1.md'],
+  ['policy', 'docs/contract/quotient-policy-2.md'],
+  ['form', 'docs/contract/form-1.md'],
+];
+
 test('help: contract sections print docs/contract verbatim and ignore an override', () => {
   const { over, under, all } = layers();
-  for (const section of ['result', 'policy', 'form']) {
+  for (const [section] of CONTRACTS) {
     write(over, section, 'higher override\n');
     write(under, section, 'lower override\n');
   }
   const snapshot = loaded(all);
-  assert.equal(sectionText(snapshot, 'result', CONTEXT), builtin('docs/contract/pi-agent-result-2.md'));
-  assert.equal(sectionText(snapshot, 'policy', CONTEXT), builtin('docs/contract/quotient-policy-2.md'));
-  assert.equal(sectionText(snapshot, 'form', CONTEXT), builtin('docs/contract/form-1.md'));
+  for (const [section, path] of CONTRACTS) {
+    assert.equal(sectionName(section), section);
+    assert.equal(sectionText(snapshot, section, CONTEXT), builtin(path), section);
+  }
+});
+
+test('help: the setup section names every contract section as one that cannot be overridden', () => {
+  const paragraph = /^Every section except[\s\S]*?(?=\n\s*\n)/m.exec(builtin('help/setup.md'));
+  assert.ok(paragraph !== null, 'the Overriding help paragraph');
+  for (const [section] of CONTRACTS) {assert.ok(paragraph[0].includes(`\`${section}\``), section);}
+});
+
+test('help: the setup section says closing stdin cancels runs in flight', () => {
+  assert.match(builtin('help/setup.md'), /stdin/);
 });
 
 test('help: a file override wins for agent, the higher layer over the lower; an absent override falls through', () => {
@@ -301,6 +325,12 @@ test('clients: both snippets carry the absolute bin path; tool_timeout_sec is wa
   assert.match(text, /^tool_timeout_sec = 360 /m);
 });
 
+test('clients: the Codex note says a wait fits its default timeout and which tools a writes-mode client prompts for', () => {
+  const text = clientsSnippets({ ...CONTEXT, policy: { ok: true, profiles: {}, maxima: MAXIMA } });
+  assert.match(text, /45 s/, 'a wait\'s default timeout');
+  for (const tool of ['pi_agent_start', 'pi_agent_ack', 'pi_agent_cancel', 'pi_agent_wait']) {assert.ok(text.includes(tool), tool);}
+});
+
 test('clients: with no readable policy tool_timeout_sec is a placeholder that says why', () => {
   const text = clientsSnippets({ ...CONTEXT, policy: { ok: false, detail: '/p/policy.json could not be read (ENOENT)' } });
   assert.match(text, /^tool_timeout_sec = \d+ +# placeholder: no readable policy/m);
@@ -320,6 +350,9 @@ const SHIPPED_PROSE = [
   'docs/contract/quotient-policy-2.md',
   'docs/contract/form-1.md',
   'docs/contract/pi-agent-result-2.md',
+  'docs/contract/pi-run-handle-1.md',
+  'docs/contract/pi-agent-wait-1.md',
+  'docs/contract/pi-agent-ack-1.md',
   'docs/contract/quotient-approvals-1.md',
 ];
 

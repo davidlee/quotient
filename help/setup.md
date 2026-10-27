@@ -33,11 +33,21 @@ Installation ships examples; it does not copy profiles into user configuration.
 4. **Add the server to your client.** `quotient help clients` prints the
    snippets for Claude Code (`.mcp.json`) and Codex (`config.toml`) with this
    install's paths. For Codex, keep the `tool_timeout_sec` the snippet sets:
-   the default of 60 seconds is shorter than most delegate runs.
+   the default of 60 seconds is shorter than most blocking `pi_agent` runs.
+   `pi_agent_wait` defaults to 45 seconds, which fits inside that default. A
+   client that prompts for every tool not marked read-only (Codex's `writes`
+   approval mode) prompts for `pi_agent`, `pi_agent_start`, `pi_agent_ack` and
+   `pi_agent_cancel`, never for `pi_agent_wait`.
 5. **Restart the client,** and call `pi_agent` with a `prompt` and a `profile`.
 
 Profiles and help are read once, when the server starts: restart it after
 changing them. The policy and the approvals store are read on every call.
+
+The client owns the server's stdin: keep it open until the replies you need
+have been read. Closing it (EOF), like SIGTERM or SIGINT, ends the server: it
+cancels every run in flight, drops every queued run, and answers nothing more.
+Each of those runs still records a result in its evidence directory:
+`incomplete` with cause `eof`, unless it had already ended another way.
 
 ## Project forms
 
@@ -73,10 +83,14 @@ lists exactly what it gives up.
 
 ## Overriding help
 
-Every section except `result`, `policy` and `form` can be replaced by a file
-named `<section>.md` in `$XDG_CONFIG_HOME/quotient/help/`. That directory is
-the only one read; an earlier version's `<launch dir>/.quotient/help/`
-fails start-up, telling a directory to move its documents and anything else to
-remove or replace it. `agent` is what an MCP client
-receives as the server's instructions, and `tool` is the `pi_agent` tool's
-description. `orchestrate` is read on demand, by a caller driving many runs.
+Every section except `result`, `handle`, `wait`, `ack`, `policy` and `form`
+can be replaced by a file named `<section>.md` in
+`$XDG_CONFIG_HOME/quotient/help/`; those six are contracts, printed verbatim.
+That directory is the only one read; an earlier version's
+`<launch dir>/.quotient/help/` fails start-up, telling a directory to move its
+documents and anything else to remove or replace it.
+
+`agent` is what an MCP client receives as the server's instructions, `tool` is
+the `pi_agent` tool's description, and `tool-start`, `tool-wait`, `tool-ack`
+and `tool-cancel` are the other four tools'. `orchestrate` is read on demand,
+by a caller driving many runs.

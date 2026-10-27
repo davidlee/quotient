@@ -1,18 +1,38 @@
 # `pi-agent-result/2`
 
 The document every `pi_agent` call answers with. Normative: a change that
-breaks it mints `pi-agent-result/2`, and this contract stays alongside.
+breaks it mints `pi-agent-result/3`, and this contract stays alongside.
+
+The same document is also the answer inside a completed MCP task, the `result`
+of each settled entry of a `pi-agent-wait/1` answer
+(`docs/contract/pi-agent-wait-1.md`), the content of every settled run's
+`result.json`, and the refusal every quotient tool answers.
 
 ## The envelope
 
-A `tools/call` of `pi_agent` always answers with an MCP tool result: one `text`
+A `tools/call` of `pi_agent` answers with an MCP tool result: one `text`
 content item whose text is this JSON document. `isError` is `false` exactly
-when `state` is `completed`.
+when `state` is `completed`. Two requests answer otherwise:
+
+- A request that declares the MCP tasks extension is answered with a task, not
+  this document; once the task has settled, `tasks/get` carries the tool result
+  above (`docs/contract/pi-run-handle-1.md` says how its status reads). A
+  refusal at admission is not a task: it answers this document's refusal, as a
+  blocking call does.
+- A request the client cancelled (`notifications/cancelled`) gets no reply at
+  all, from the moment the server reads the cancellation; a reply already
+  written stands.
 
 - **A refusal is a successful MCP call that ran nothing.** It is a tool result
   with `state: "refused"`, never a JSON-RPC error. The same holds for a run that
   failed: the protocol layer reports only protocol faults (an unknown method, an
   unparsable line), never a verdict about a delegate.
+- **A refusal leaves no evidence directory, with one exception.** A run refused
+  after it was published — at launch, or `audit-failed` when its `spawn` record
+  could not be written — still ran no delegate, but it has an evidence
+  directory: its run document's `artifacts.dir` names it, and its `result.json`
+  holds the refusal. The refusal's own `session` and `artifacts` are still
+  `null`.
 - **One verdict.** `state` judges the call; `status.state` judges the stream
   alone. They differ only when the deciding cause arose outside the stream (a
   timeout, a cancellation, a ceiling, a failed audit), and `causes` names it.
@@ -27,8 +47,36 @@ when `state` is `completed`.
   and cost accounting permits success. Context-measurement completeness is
   independent and is not a success condition. Exit 0 alone is never success.
 - When the client goes away (stdin EOF, or the server receives SIGTERM or
-  SIGINT), every in-flight run is aborted with cause `eof`, and no result is
-  written: there is nobody to read it.
+  SIGINT), every running run is aborted with cause `eof`, and every queued run
+  is dropped: settled without launching, state `incomplete` with cause `eof`.
+  No reply is written, since there is nobody to read it; each run's document is
+  still written to its `result.json`, where a cause found earlier keeps
+  precedence.
+
+## Where the document is found
+
+- **Every settled run writes this document to `result.json`** in its evidence
+  directory, atomically: a reader sees no file or a whole one. That holds
+  whichever tool started the run and however it ended, so the outcome survives
+  the server and the call. The one exception is a run whose `result.json`
+  could not be written: it is `lost`, and no document exists. A run is
+  published only once it passed admission: a refusal at admission writes no
+  `result.json`.
+- **A run started by `pi_agent_start` can settle as a refusal.** A run queued in
+  a lane — whichever tool started it — is re-admitted against the policy,
+  profiles and approvals as they read when it launches; a refusal there, or
+  `lane-predecessor-failed`, settles it as this document's refusal arm without
+  launching. So a refusal is not only something `pi_agent_start` answers at
+  once: it can be what the run's wait entry later carries.
+- **A client-cancelled blocking call gets no reply.** Its run is stopped through
+  the termination ladder, and its document is found in the run's `result.json`.
+  It reads `cancelled` when the cancellation was the first cause; an earlier
+  cause (a timeout, an audit failure) keeps precedence.
+- **Every tool's refusal is this document.** `pi_agent_start`,
+  `pi_agent_wait`, `pi_agent_ack` and `pi_agent_cancel` answer a refused call
+  with this document's refusal arm (`isError: true`), and their own documents
+  otherwise (`pi-run-handle/1`, `pi-agent-wait/1`, `pi-agent-ack/1`). A client
+  tells them apart by `schema`.
 
 ## Fields
 
@@ -77,7 +125,7 @@ key listed is always present; `nullable` says whether its value may be `null`.
 | `status.transcript.records` | number | no | JSON objects read from the stream |
 | `status.transcript.malformed` | number | no | lines that were not a JSON object |
 | `status.transcript.elided` | number | no | transcript entries cut by the budget |
-| `artifacts` | object | yes | where this run's evidence lives; `null` for a refusal |
+| `artifacts` | object | yes | where this run's evidence lives; `null` for a refusal, including one after publication, whose directory its run document names instead |
 | `artifacts.dir` | string | no | the run directory |
 | `artifacts.events` | string | no | the raw event stream, `events.jsonl` |
 | `artifacts.transcript` | string | no | the full reduced transcript, `transcript.md` |
@@ -153,7 +201,7 @@ question; this contract and fixture tests do not establish that behavior.
 | `failed` | the model errored or aborted, the child exited nonzero, or the launch failed |
 | `incomplete` | the run ended without an answer: it stopped to use a tool, deferred, or the stream ended or was cut off before settling |
 | `timeout` | the wall-clock backstop stopped the run |
-| `cancelled` | a cancellation notification, or the operator switch, stopped the run |
+| `cancelled` | a cancellation stopped the run, or settled it before it launched — by `notifications/cancelled` naming a blocking call, `pi_agent_cancel` or `tasks/cancel` — or the operator switch stopped it |
 | `ceiling_exceeded` | a request-count, context-token or cost ceiling was crossed |
 | `accounting_unknown` | an ordinary request had missing or invalid cost, so the cost ceiling could not be enforced |
 | `audit_failed` | an evidence append failed on a run that had started |
@@ -172,11 +220,11 @@ reasons are pi's tokens, verbatim (`toolUse`, never `tool_use`).
 | `aborted` | `failed` | the last assistant message stopped for `aborted` |
 | `toolUse` | `incomplete` | the last assistant message stopped to use a tool: paid for, not an answer |
 | `deferred` | `incomplete` | the last assistant message deferred: paid for, not an answer |
-| `eof` | `incomplete` | the stream ended with no answer-bearing message or without settling; or the client went away and the run was aborted |
+| `eof` | `incomplete` | the stream ended with no answer-bearing message or without settling; or the client went away and the run was aborted, or dropped from its lane before it launched |
 | `exit` | `failed` | the child exited nonzero, or never exited |
 | `spawn` | `failed` | the launch form could not be executed: nothing ran |
 | `timeout` | `timeout` | the wall-clock backstop aborted the run |
-| `cancelled` | `cancelled` | a cancellation notification aborted the run |
+| `cancelled` | `cancelled` | a cancellation aborted the run, or settled a queued run without a process: `notifications/cancelled` naming a blocking call, `pi_agent_cancel`, or `tasks/cancel` |
 | `switch` | `cancelled` | the policy's `enabled` was off, or unreadable, at a gate tick |
 | `ceiling` | `ceiling_exceeded` | the gate measured a request-count, context-token or cost crossing |
 | `accounting` | `accounting_unknown` | an ordinary response or compaction result had missing or invalid cost |
@@ -188,6 +236,14 @@ reasons are pi's tokens, verbatim (`toolUse`, never `tool_use`).
 A refusal names the first check that failed, in validation order: checks run
 in the order below, and the first failure wins. The request shape is checked
 before step 1.
+
+A run queued in a lane is admitted when it is started and again when it
+launches, against the policy, profiles and approvals as they read then: steps 1
+to 8 run again (the session is not re-acquired, since the run has held it since
+it started, and step 6 narrows the ceilings to the current maxima rather than
+refusing), and the first failure settles the run as that refusal without
+launching. `lane-predecessor-failed` is decided when a laned run is placed or
+reaches the head of its lane, before re-admission.
 
 | reason | raised at | meaning |
 |---|---|---|
@@ -214,7 +270,7 @@ before step 1.
 | `session-busy` | step 7 | another live call, or an owner whose liveness cannot be known, holds the session |
 | `view-overlaps-protected` | step 8 | the child could write to a store it must not |
 | `audit-unavailable` | before the run | the attempts ledger cannot be appended to, so nothing is launched |
-| `audit-failed` | before the run | the run's first audit record cannot be written, so nothing is launched |
+| `audit-failed` | before the run | the run's first audit record, or its `spawn` record, cannot be written, so nothing is launched |
 | `lane-predecessor-failed` | at launch | a laned run with `needs_success` whose predecessor in the lane did not complete, so it is not launched |
 | `server-error` | any step | the server failed before a run was established |
 

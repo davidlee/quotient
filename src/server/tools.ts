@@ -111,7 +111,7 @@ export const TOOLS = {
     schema(
       {
         runs: { ...RUN_IDS, description: 'The runs to wait on.' },
-        lanes: { type: 'array', items: { type: 'string' }, description: 'Wait on every run in these lanes.' },
+        lanes: { type: 'array', items: { type: 'string' }, description: 'Wait on the unacknowledged pi_agent_start runs in these lanes.' },
         until: { type: 'string', enum: ['all', 'any'], description: 'Answer when all, or any, of the runs settle. Default all.' },
         timeout_s: { type: 'number', description: 'Seconds to wait before answering with what is settled; 0 answers now.' },
         status_only: { type: 'boolean', description: 'Answer with each run\'s status and no result. Default false.' },

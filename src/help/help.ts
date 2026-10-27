@@ -32,6 +32,9 @@ export const HELP_SECTIONS = [
   'tool-cancel',
   'orchestrate',
   'result',
+  'handle',
+  'wait',
+  'ack',
   'policy',
   'form',
   'profiles',
@@ -57,6 +60,9 @@ const SOURCES: Readonly<Record<Section, Source>> = {
   'tool-cancel': { kind: 'file', path: 'help/tool-cancel.md' },
   orchestrate: { kind: 'file', path: 'help/orchestrate.md' },
   result: { kind: 'contract', path: 'docs/contract/pi-agent-result-2.md' },
+  handle: { kind: 'contract', path: 'docs/contract/pi-run-handle-1.md' },
+  wait: { kind: 'contract', path: 'docs/contract/pi-agent-wait-1.md' },
+  ack: { kind: 'contract', path: 'docs/contract/pi-agent-ack-1.md' },
   policy: { kind: 'contract', path: 'docs/contract/quotient-policy-2.md' },
   form: { kind: 'contract', path: 'docs/contract/form-1.md' },
   profiles: { kind: 'file', path: 'help/profiles.md' },
@@ -247,7 +253,7 @@ ${JSON.stringify({ mcpServers: { quotient: { command: context.bin } } }, null, 2
 \`\`\`
 
 Codex (\`~/.codex/config.toml\`). Its default tool timeout is 60 s, which a
-delegate run outlasts, so the timeout is part of the setup:
+blocking \`pi_agent\` run outlasts, so the timeout is part of the setup:
 
 \`\`\`toml
 [mcp_servers.quotient]
@@ -258,6 +264,11 @@ ${timeout}
 
 \`cwd\` is the launch dir: it only defaults a call's \`cwd\`, which the policy
 must still allow. Profiles and help are read from \`$XDG_CONFIG_HOME\` alone.
+
+\`pi_agent_wait\` defaults to 45 s, which fits inside Codex's default. In
+Codex's \`writes\` approval mode, which prompts for every tool not marked
+read-only, it prompts for \`pi_agent\`, \`pi_agent_start\`, \`pi_agent_ack\` and
+\`pi_agent_cancel\`, never for \`pi_agent_wait\`.
 `;
 }
 

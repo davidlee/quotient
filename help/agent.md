@@ -14,9 +14,10 @@ means.
   and `transcript` to see how the run ended.
 - A `refused` state means nothing ran; `refusal.reason` says why, and
   `refusal.detail` names what failed, for the operator. Retrying a refusal
-  unchanged gets the same refusal. `form-unapproved` and `form-invalid` need
-  the operator: a project's form is approved by hand with `quotient allow`, so
-  no retry clears them.
+  unchanged gets the same refusal, except `lane-predecessor-failed` and a
+  refusal at launch: those depend on what ran before, not on the request
+  alone. `form-unapproved` and `form-invalid` need the operator: a project's
+  form is approved by hand with `quotient allow`, so no retry clears them.
 - Pass the returned `session` back to continue the same conversation.
 - Ask for batched reads and a capped answer: a delegate that reads one file per
   turn exhausts its request ceiling before it answers.
@@ -24,6 +25,25 @@ means.
 - `final: true` and `status.accounting: "known"` do not mean every request had
   a measured context footprint. Check `status.context.requests_unmeasured` and
   `status.context.peak_tokens`; a context gap leaves the peak as a lower bound.
+
+**Running several at once**
+
+- Start each run with `pi_agent_start` and a `key`: it answers a handle at
+  once, and a start retried with the same `key` and arguments answers the same
+  run rather than a second one.
+- Collect with `pi_agent_wait`, naming your ids in `runs`, with
+  `until: "any"`, in a loop. Keep `timeout_s` below your client's tool-call
+  timeout (the default is 45 s); a wait that times out is simply repeated.
+- Drop each id once its result is used, or once it is `lost` or listed in
+  `unknown`. A wait by name needs no `pi_agent_ack`.
+- Only to recover ids you lost (a start whose answer never arrived, a
+  restarted conversation): a wait with no `runs` or `lanes` reports every
+  `pi_agent_start` run no one has acknowledged; `pi_agent_ack` each one you
+  have used, so it leaves that list.
+- For steps that must run in order, give them one `lane`; add
+  `needs_success: true` to refuse a step whose predecessor did not complete.
+- A client that declares MCP tasks needs none of this: `pi_agent` answers it
+  a task, which it polls.
 
 `quotient help orchestrate` is the guide for driving many runs: briefs,
 recovering a run that stopped short, and the verification that stays yours.

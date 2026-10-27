@@ -50,6 +50,24 @@ the round trips.
 - Say what runs concurrently. Parallel runs in one tree must touch disjoint
   files, and still contend for shared build locks and caches.
 
+## Concurrency and lanes
+
+- Fan out work whose parts do not depend on each other: recon over separate
+  areas, reviews of one diff against different criteria. Start each part and
+  collect them as the agent section's "Running several at once" describes.
+- Queue steps in a lane when they must run in order and you have nothing to
+  decide between them. Use `needs_success` only for such mechanical chains
+  (generate, then build, then test), where a failed step makes the rest
+  pointless.
+- When a step's result needs your judgement before the next one starts —
+  findings to adjudicate, a draft to check — do not queue the next step ahead
+  of it: a queued run carries a brief written before you knew what the step
+  before it found. Start the next step once you have read the result.
+- A lane cannot continue one `session`: the second start finds the session
+  owned and is refused. Start a continuation after the run before it settles.
+- Lanes order runs; they do not keep writers apart. Keeping concurrent writers
+  in one tree on disjoint files stays your job.
+
 ## When a run stops short
 
 A run that ends with `final: false` (a ceiling, a timeout): continue its
