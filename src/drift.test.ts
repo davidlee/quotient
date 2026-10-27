@@ -41,12 +41,12 @@ import {
 } from './server/policy.ts';
 import { FILESYSTEMS } from './server/profiles.ts';
 import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD, workspace } from './server/test-rig.ts';
+import { messageOf } from './errors.ts';
 
 const repo = (path: string): string => new URL(`../${path}`, import.meta.url).pathname;
 const read = (path: string): string => readFileSync(repo(path), 'utf8');
 
 /** The message of a thrown value, without a type assertion. */
-const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const RESULT_CONTRACT = 'docs/contract/pi-agent-result-2.md';
 const POLICY_CONTRACT = 'docs/contract/quotient-policy-2.md';
@@ -271,7 +271,7 @@ function inadmissibleBlocks(text: string, label: string): string[] {
     try {
       parsed = JSON.parse(block);
     } catch (error) {
-      return [`${label} json block ${String(index + 1)} is not JSON: ${errorMessage(error)}`];
+      return [`${label} json block ${String(index + 1)} is not JSON: ${messageOf(error)}`];
     }
     const loaded = readPolicy(workspace(parsed).policyPath);
     return loaded.ok ? [] : [`${label} json block ${String(index + 1)}: ${loaded.reason}: ${loaded.detail}`];
@@ -311,7 +311,7 @@ function embeddedPolicyViolations(text: string, label: string): { found: number;
     try {
       parsed = JSON.parse(block);
     } catch (error) {
-      return { found: policies.length, violations: [`${label} has invalid JSON: ${errorMessage(error)}`] };
+      return { found: policies.length, violations: [`${label} has invalid JSON: ${messageOf(error)}`] };
     }
     if (typeof parsed === 'object' && parsed !== null && 'schema' in parsed && String(parsed.schema).startsWith('quotient-policy/')) {
       policies.push(parsed);

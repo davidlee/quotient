@@ -113,7 +113,7 @@ test('help clients names the bin by the path it was run as, not its symlink targ
 
 test('help clients names QUOTIENT_LAUNCHER, a wrapper\'s own path, over the script it runs', () => {
   const { env, dir } = workspace(validPolicy());
-  const run = (launcher: string) =>
+  const run = (launcher: string): string | undefined =>
     codexCommand(quotient(['help', 'clients'], '', { env: { ...env, PATH: process.env.PATH, QUOTIENT_LAUNCHER: launcher }, cwd: dir }).stdout);
   assert.equal(run('/opt/quotient/bin/quotient'), JSON.stringify('/opt/quotient/bin/quotient'));
   assert.equal(run('relative/quotient'), JSON.stringify(CLI), 'a relative launcher is ignored');

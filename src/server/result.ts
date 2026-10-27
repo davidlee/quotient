@@ -8,7 +8,7 @@
 // evidence: the reducer supplies the stream-side facts, the spawn supplies the
 // child's, and `resultFor` is the ONLY place a verdict is derived (EX-8).
 import type { Reduced } from '../reduce/reduce.ts';
-import { isRecord } from '../json.ts';
+import { isRecord, isMember } from '../json.ts';
 
 export const RESULT_SCHEMA = 'pi-agent-result/2';
 
@@ -57,6 +57,9 @@ export const TERMINATIONS = [
   'refused',
 ] as const;
 export type Termination = (typeof TERMINATIONS)[number];
+
+/** Whether VALUE is a termination/cause token. */
+const isTermination = (value: unknown): value is Termination => isMember(TERMINATIONS, value);
 
 /**
  * DEC-093's table: one cause, one state. `causes[0]` is the reported cause and its
@@ -141,11 +144,10 @@ export type AgentResult = {
 export type LatchCause = Exclude<Termination, 'stop' | 'length' | 'refused'>;
 
 /** The runtime half of `LatchCause`. A type does not survive a cast, so `resultFor`
- *  drops any cause the latch could not have recorded. */
+ *  drops any cause the latch could not have recorded: the three the vocabulary holds
+ *  are not discoveries, so they are never latchable. */
 function isLatchCause(cause: unknown): cause is LatchCause {
-  return (
-    (TERMINATIONS as readonly string[]).includes(cause as string) && cause !== 'stop' && cause !== 'length' && cause !== 'refused'
-  );
+  return isTermination(cause) && cause !== 'stop' && cause !== 'length' && cause !== 'refused';
 }
 
 export type Latch = {
@@ -218,31 +220,37 @@ export type ResultInput = {
  * known cost accounting. Context measurement gaps are disclosed but do not
  * independently change completion. Exit 0 alone is never evidence of success — json mode exits 0
  * on a model error — and a valid answer with a nonzero exit is `failed`.
+ *
+ * It answers the cause, not a boolean: the answering reason when the predicate
+ * held and null otherwise, so `completed` has exactly one door and no cast.
  */
-function succeeded(reduced: Reduced, outcome: RunFacts): boolean {
+function answeringCause(reduced: Reduced, outcome: RunFacts): 'stop' | 'length' | null {
   const reason = reduced.terminalReason;
-  return (
-    (reason === 'stop' || reason === 'length') &&
-    reduced.settled &&
-    outcome.exitCode === 0 &&
-    reduced.accounting === 'known'
-  );
+  if (reason !== 'stop' && reason !== 'length') {return null;}
+  if (!reduced.settled || outcome.exitCode !== 0 || reduced.accounting !== 'known') {return null;}
+  return reason;
+}
+
+/** The cause a stream's own failing reason names, or `eof`: a reason pi adds later, a
+ *  `pending` message and a stream that ended without a terminal message all leave
+ *  the same verdict, because none of them answered. */
+function streamCause(reason: string | null): Termination {
+  if (reason === 'error' || reason === 'aborted' || reason === 'toolUse' || reason === 'deferred') {return reason;}
+  return 'eof';
 }
 
 /**
  * The cause when the latch is empty: what the stream and the child already say.
  * `spawn` first, because nothing ran; `exit` covers `null` and nonzero alike;
- * then accounting; then the stream's terminal reason; then `eof` — which is also
- * what a `pending` message, a reason pi adds later, and an unsettled stream leave.
+ * then accounting; then the stream's terminal reason.
  */
 function derivedCause(reduced: Reduced, outcome: RunFacts): Termination {
   if (outcome.spawnFailed) {return 'spawn';}
-  if (succeeded(reduced, outcome)) {return reduced.terminalReason as Termination;}
+  const answering = answeringCause(reduced, outcome);
+  if (answering !== null) {return answering;}
   if (outcome.exitCode !== 0) {return 'exit';}
   if (reduced.accounting !== 'known') {return 'accounting';}
-  const reason = reduced.terminalReason;
-  if (reason === 'error' || reason === 'aborted' || reason === 'toolUse' || reason === 'deferred') {return reason;}
-  return 'eof';
+  return streamCause(reduced.terminalReason);
 }
 
 /**
@@ -256,7 +264,7 @@ function derivedCause(reduced: Reduced, outcome: RunFacts): Termination {
  *
  * The invariant: a latched list can never produce `completed`. The filter is the
  * runtime half of `LatchCause` (a type does not survive a cast), so an answering
- * reason handed in as a cause is dropped and the stream decides; `succeeded()`
+ * reason handed in as a cause is dropped and the stream decides; `answeringCause()`
  * inside `derivedCause` is the only door to `completed` and to `final: true`.
  */
 export function resultFor(input: ResultInput): AgentResult {
@@ -351,9 +359,103 @@ export function failedResult(
 
 // ── Conformance ────────────────────────────────────────────────────────────
 
-export type Validation = { ok: true } | { ok: false; detail: string };
+/** A refused check: the reason it decided for, the arm every step of the check
+ *  shares. */
+type Refusal = { ok: false; detail: string };
 
-const invalid = (detail: string): Validation => ({ ok: false, detail });
+export type Validation = { ok: true } | Refusal;
+
+const invalid = (detail: string): Refusal => ({ ok: false, detail });
+
+/** The vocabulary half of the check: both enum fields, and DEC-093's table over
+ *  them, so the two fields cannot tell different stories. */
+type Vocabulary = { ok: true; state: ResultState; termination: Termination } | Refusal;
+
+/** The causes list: non-empty, every member a cause token, and its head the
+ *  reported termination. */
+function validateCauses(doc: Record<string, unknown>, termination: Termination): Validation {
+  const causes: unknown = doc.causes;
+  if (!Array.isArray(causes) || causes.length === 0) {return invalid('causes must be a non-empty list');}
+  const list: readonly unknown[] = causes;
+  for (const cause of list) {
+    if (!isTermination(cause)) {return invalid(`a cause is not a cause token: ${String(cause)}`);}
+  }
+  if (list[0] !== termination) {return invalid('causes[0] must be the reported termination');}
+  return { ok: true };
+}
+
+/** Both enum fields, then the table: `causes[0]` is the termination and the state
+ *  is that cause's row. */
+function validateVocabulary(doc: Record<string, unknown>): Vocabulary {
+  const state = doc.state;
+  if (!isMember(RESULT_STATES, state)) {return invalid(`state is not a member of the state enum: ${String(state)}`);}
+  const termination = doc.termination;
+  if (!isTermination(termination)) {return invalid(`termination is not a cause token: ${String(termination)}`);}
+  const causes = validateCauses(doc, termination);
+  if (!causes.ok) {return causes;}
+  if (CAUSE_STATE[termination] !== state) {return invalid(`state ${state} is not the row of cause ${termination}`);}
+  return { ok: true, state, termination };
+}
+
+/** The fields every arm carries. */
+function validateFields(doc: Record<string, unknown>): Validation {
+  if (typeof doc.final !== 'boolean') {return invalid('final must be a boolean');}
+  if (typeof doc.truncated !== 'boolean') {return invalid('truncated must be a boolean');}
+  if (typeof doc.transcript !== 'string') {return invalid('transcript must be a string');}
+  if (doc.result !== null && typeof doc.result !== 'string') {return invalid('result must be a string or null');}
+  return { ok: true };
+}
+
+/** The fields a refusal leaves null: nothing ran, so nothing names a run. */
+const REFUSAL_NULLS = [
+  ['session', 'a refusal minted no session'],
+  ['status', 'a refusal has no status: nothing ran'],
+  ['artifacts', 'a refusal has no artifacts: nothing ran'],
+  ['result', 'a refusal carries no result'],
+] as const;
+
+/** Every field of REFUSAL_NULLS, in that order. */
+function validateRefusalNils(doc: Record<string, unknown>): Validation {
+  for (const [field, detail] of REFUSAL_NULLS) {
+    if (doc[field] !== null) {return invalid(detail);}
+  }
+  return { ok: true };
+}
+
+/** The refusal arm: no run's evidence, and the refusal that says why. */
+function validateRefusalArm(doc: Record<string, unknown>): Validation {
+  const nils = validateRefusalNils(doc);
+  if (!nils.ok) {return nils;}
+  const refusal = doc.refusal;
+  if (!isRecord(refusal)) {return invalid('a refusal must carry refusal { reason, detail }');}
+  if (typeof refusal.reason !== 'string' || refusal.reason.length === 0) {return invalid('refusal.reason must name the refusal');}
+  if (typeof refusal.detail !== 'string') {return invalid('refusal.detail must be a string');}
+  return { ok: true };
+}
+
+/** The evidence a spawned run carries: the session it minted, its status verbatim
+ *  and the paths of the run directory. */
+function validateRunCarriage(doc: Record<string, unknown>): Validation {
+  const session = doc.session;
+  if (typeof session !== 'string' || session.length === 0) {return invalid('a spawned run carries its session');}
+  const status = doc.status;
+  if (!isRecord(status)) {return invalid('a spawned run carries its status');}
+  const artifacts = doc.artifacts;
+  if (!isRecord(artifacts)) {return invalid('a spawned run carries its artifacts');}
+  for (const field of ['dir', 'events', 'transcript', 'status', 'audit'] as const) {
+    if (typeof artifacts[field] !== 'string') {return invalid(`artifacts.${field} must be a path`);}
+  }
+  return { ok: true };
+}
+
+/** DEC-093 withdraws exactly `result` and `final` on a non-completed run. */
+function validateVerdict(doc: Record<string, unknown>, state: ResultState): Validation {
+  const completed = state === 'completed';
+  if (completed && doc.final !== true) {return invalid('a completed run is final');}
+  if (!completed && doc.final !== false) {return invalid('only a completed run is final');}
+  if (!completed && doc.result !== null) {return invalid('only a completed run carries a result');}
+  return { ok: true };
+}
 
 /**
  * Check a document against design sec-5's shape and DEC-093's precedence rule, in
@@ -365,48 +467,15 @@ const invalid = (detail: string): Validation => ({ ok: false, detail });
 export function validateAgentResult(doc: unknown): Validation {
   if (!isRecord(doc)) {return invalid('the result must be an object');}
   if (doc.schema !== RESULT_SCHEMA) {return invalid(`schema must be ${RESULT_SCHEMA}`);}
-  if (!RESULT_STATES.includes(doc.state as ResultState)) {return invalid(`state is not a member of the state enum: ${String(doc.state)}`);}
-  if (!TERMINATIONS.includes(doc.termination as Termination)) {
-    return invalid(`termination is not a cause token: ${String(doc.termination)}`);
-  }
-  const causes = doc.causes;
-  if (!Array.isArray(causes) || causes.length === 0) {return invalid('causes must be a non-empty list');}
-  for (const cause of causes) {
-    if (!TERMINATIONS.includes(cause as Termination)) {return invalid(`a cause is not a cause token: ${String(cause)}`);}
-  }
-  const state = doc.state as ResultState;
-  const termination = doc.termination as Termination;
-  if (causes[0] !== termination) {return invalid('causes[0] must be the reported termination');}
-  if (CAUSE_STATE[termination] !== state) {return invalid(`state ${state} is not the row of cause ${termination}`);}
-  if (typeof doc.final !== 'boolean') {return invalid('final must be a boolean');}
-  if (typeof doc.truncated !== 'boolean') {return invalid('truncated must be a boolean');}
-  if (typeof doc.transcript !== 'string') {return invalid('transcript must be a string');}
-  if (doc.result !== null && typeof doc.result !== 'string') {return invalid('result must be a string or null');}
-
-  if (state === 'refused') {
-    if (doc.session !== null) {return invalid('a refusal minted no session');}
-    if (doc.status !== null) {return invalid('a refusal has no status: nothing ran');}
-    if (doc.artifacts !== null) {return invalid('a refusal has no artifacts: nothing ran');}
-    if (doc.result !== null) {return invalid('a refusal carries no result');}
-    const refusal = doc.refusal;
-    if (!isRecord(refusal)) {return invalid('a refusal must carry refusal { reason, detail }');}
-    if (typeof refusal.reason !== 'string' || refusal.reason.length === 0) {return invalid('refusal.reason must name the refusal');}
-    if (typeof refusal.detail !== 'string') {return invalid('refusal.detail must be a string');}
-    return { ok: true };
-  }
-
+  const vocabulary = validateVocabulary(doc);
+  if (!vocabulary.ok) {return vocabulary;}
+  const fields = validateFields(doc);
+  if (!fields.ok) {return fields;}
+  if (vocabulary.state === 'refused') {return validateRefusalArm(doc);}
   if (doc.refusal !== null) {return invalid('only a refusal carries refusal');}
-  if (typeof doc.session !== 'string' || doc.session.length === 0) {return invalid('a spawned run carries its session');}
-  if (!isRecord(doc.status)) {return invalid('a spawned run carries its status');}
-  if (!isRecord(doc.artifacts)) {return invalid('a spawned run carries its artifacts');}
-  for (const field of ['dir', 'events', 'transcript', 'status', 'audit'] as const) {
-    if (typeof doc.artifacts[field] !== 'string') {return invalid(`artifacts.${field} must be a path`);}
-  }
-  // DEC-093 withdraws exactly `result` and `final` on a non-completed run.
-  if (state === 'completed' && !doc.final) {return invalid('a completed run is final');}
-  if (state !== 'completed' && doc.final) {return invalid('only a completed run is final');}
-  if (state !== 'completed' && doc.result !== null) {return invalid('only a completed run carries a result');}
-  return { ok: true };
+  const carriage = validateRunCarriage(doc);
+  if (!carriage.ok) {return carriage;}
+  return validateVerdict(doc, vocabulary.state);
 }
 
 /**

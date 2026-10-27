@@ -7,7 +7,7 @@
 // wait entry are the same run document — a Task's fields verbatim, plus quotient's
 // extras in snake_case — so they share one check here, and every check follows
 // `validateAgentResult`'s style: an early return naming the defect it found.
-import { isRecord } from '../json.ts';
+import { isRecord, isMember } from '../json.ts';
 import { RUN_NAME_GRAMMAR } from './evidence.ts';
 import { isAgentResult, validateAgentResult, type AgentResult, type Validation } from './result.ts';
 import type { AckEntry } from './runs.ts';
@@ -215,12 +215,6 @@ const invalid = (detail: string): Validation => ({ ok: false, detail });
 
 /** The verdict a first defect asks for: `{ ok: true }` when there is none. */
 const verdictOf = (fault: string | null): Validation => (fault === null ? { ok: true } : invalid(fault));
-
-/** VALUE is one of TOKENS, unmatched by position: the one narrowing untrusted JSON
- *  goes through, so no member is ever claimed by a type assertion. */
-function isMember<T extends string>(tokens: readonly T[], value: unknown): value is T {
-  return tokens.some((token) => token === value);
-}
 
 /** VALUE is a string or an explicit null: a run document's optional extras. */
 function isTextOrNull(value: unknown): boolean {

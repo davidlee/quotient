@@ -23,6 +23,7 @@ import {
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { isRecord } from '../json.ts';
+import { messageOf } from '../errors.ts';
 import { absent } from './paths.ts';
 import { isAgentResult, type AgentResult } from './result.ts';
 
@@ -181,7 +182,7 @@ export function appendAttempt(runDir: string | null, attempt: AttemptRecord): bo
     appendFileSync(attemptsPath(runDir), `${JSON.stringify(line)}\n`);
     return true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     process.stderr.write(`quotient: could not append ${attemptsPath(runDir)}: ${message}\n`);
     return false;
   }
@@ -200,7 +201,7 @@ export function writeAttemptProbe(runDir: string): boolean {
     closeSync(openSync(ledger, 'a'));
     return true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     process.stderr.write(`quotient: ${ledger} cannot be appended to: ${message}\n`);
     return false;
   }
@@ -266,7 +267,7 @@ export function appendAudit(layout: RunLayout, record: AuditRecord): string | nu
     appendFileSync(layout.audit, `${lead}${JSON.stringify(line)}\n`);
     return ts;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     process.stderr.write(`quotient: could not append ${layout.audit}: ${message}\n`);
     return null;
   }
@@ -345,7 +346,7 @@ export function writeResult(layout: RunLayout, document: AgentResult): string | 
     } catch {
       // Best-effort: a temp that cannot be removed is not the caller's problem.
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     process.stderr.write(`quotient: could not write ${layout.result}: ${message}\n`);
     return null;
   }
@@ -396,7 +397,7 @@ export function removeRun(layout: RunLayout): void {
   try {
     rmSync(layout.dir, { recursive: true, force: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     process.stderr.write(`quotient: could not discard ${layout.dir}: ${message}\n`);
   }
 }

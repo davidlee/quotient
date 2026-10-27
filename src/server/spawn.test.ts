@@ -8,13 +8,13 @@
 // own notes. Nothing touches the network. Every rig registers a teardown that
 // SIGKILLs the groups its stubs reported, so a stub that ignores SIGTERM cannot be
 // orphaned by a failed assertion.
-import { test } from 'node:test';
-import type { TestContext } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn as spawnProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { PassThrough } from 'node:stream';
+import { at } from '../json.ts';
 import { reduce, type Tally } from '../reduce/reduce.ts';
 import { buildArgv, childEnv, runChild, type SpawnPlan } from './spawn.ts';
 import { runLayout, type RunLayout } from './evidence.ts';
@@ -42,6 +42,9 @@ import {
   patchPolicy,
   pause,
   readText,
+  ranResult,
+  refusalDocument,
+  recordLines,
   resultDocument,
   resultJson,
   runOf,
@@ -114,7 +117,7 @@ async function waitForRunDir(runDir: string): Promise<string> {
  * stdin. The channel stays open until the answer arrives, because stdin EOF is
  * DEC-103's abort trigger and an aborted call is answered with nothing.
  */
-async function oneShot(t: TestContext, rig: Rig, request: string, extraEnv: Env = {}): Promise<Record<string, any>> {
+async function oneShot(t: TestContext, rig: Rig, request: string, extraEnv: Env = {}): Promise<Record<string, unknown>> {
   const child = spawnProcess(...serverCommand, {
     cwd: rig.launchDir,
     env: { ...rig.env, ...extraEnv },
@@ -139,11 +142,7 @@ async function oneShot(t: TestContext, rig: Rig, request: string, extraEnv: Env 
   }
   child.stdin.end();
   assert.equal(await exited, 0, err.join(''));
-  const replies = out
-    .join('')
-    .split('\n')
-    .filter((raw) => raw.length > 0)
-    .map((raw) => JSON.parse(raw) as Record<string, any>);
+  const replies = recordLines(out.join(''), 'the server\'s stdout');
   assert.equal(replies.length, 1, out.join(''));
   return replies[0];
 }
@@ -308,7 +307,7 @@ test('an unconfined form passes no extensions, so a profile naming an mcp__* too
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = refusalDocument(reply);
   assert.equal(doc.state, 'refused', JSON.stringify(doc));
   assert.equal(doc.refusal.reason, 'profile-invalid');
   assert.equal(existsSync(join(rig.markerDir, 'ran')), false, 'nothing ran');
@@ -397,13 +396,13 @@ test('the ladder signals the child\'s own group: SIGTERM, then SIGKILL after the
 
   assert.equal(outcome.abort, 'cancelled');
   assert.equal(outcome.signal, 'SIGKILL', 'a TERM-ignoring child is escalated to SIGKILL');
-  assert.ok(elapsed >= 2000, `the default grace is 2000 ms, measured ${elapsed}`);
+  assert.ok(elapsed >= 2000, `the default grace is 2000 ms, measured ${String(elapsed)}`);
   assert.equal(isAlive(pid), false, 'the group is gone');
   const records = jsonLines(outcome.layout.audit);
   assert.deepEqual(records.map((record) => record.record), ['spawn', 'abort', 'exit']);
   assert.equal(records[1].cause, 'cancelled');
-  assert.equal(records[1].usage.requests, 0);
-  assert.deepEqual(records[1].usage.context, { peak_tokens: null, requests_unmeasured: 0 });
+  assert.equal(at(records[1], 'usage', 'requests'), 0);
+  assert.deepEqual(at(records[1], 'usage', 'context'), { peak_tokens: null, requests_unmeasured: 0 });
   assert.equal(records[2].signal, 'SIGKILL');
 });
 
@@ -583,11 +582,11 @@ test('an audit append that fails after the child was launched fails the call clo
   server.end();
   await server.done;
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.state, 'audit_failed', JSON.stringify(doc));
   assert.equal(doc.termination, 'audit');
   assert.deepEqual(doc.causes, ['audit']);
-  assert.equal(reply.result.isError, true);
+  assert.equal(at(reply, 'result', 'isError'), true);
   assert.equal(doc.final, false, 'a run that cannot be evidenced is never a success');
 
   // The surviving evidence: the stream the child produced, the transcript and the
@@ -640,10 +639,10 @@ test('an unwritable attempts.jsonl refuses audit-unavailable without spawning an
   server.end();
   await server.done;
 
-  const doc = resultDocument(reply);
+  const doc = refusalDocument(reply);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'audit-unavailable');
-  assert.match(String(doc.refusal.detail), /attempts\.jsonl/);
+  assert.match(doc.refusal.detail, /attempts\.jsonl/);
   assert.equal(existsSync(join(rig.markerDir, 'launched')), false, 'nothing was spawned');
   assert.deepEqual(readdirSync(rig.runDir), ['attempts.jsonl'], 'no run directory was allocated');
 });
@@ -670,7 +669,7 @@ test('a publish failure (the run directory cannot be made) refuses audit-failed,
   await server.done;
   chmodSync(rig.runDir, 0o755);
 
-  const doc = resultDocument(reply);
+  const doc = refusalDocument(reply);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'audit-failed');
   assert.equal(doc.artifacts, null, 'nothing ran, so there is no run to point at');
@@ -768,7 +767,7 @@ test('a pre-exec spawn failure after the run directory exists reports failed wit
   assert.equal(doc.termination, 'spawn');
   assert.deepEqual(doc.causes, ['spawn']);
   assert.equal(doc.final, false);
-  assert.ok(doc.session, 'the session was minted before the spawn');
+  assert.ok(doc.session !== null && doc.session.length > 0, 'the session was minted before the spawn');
   // The run directory exists — step 8 passed — and its audit says what happened.
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
   assert.deepEqual(
@@ -807,14 +806,14 @@ test('completed requires settled + exit 0 + an answering reason + known accounti
   for (const testCase of cases) {
     await t.test(testCase.name, async (inner) => {
       const rig = newRig(inner, {
-        read: [...stream(testCase.stop), `exit ${testCase.exit}`].join('\n'),
+        read: [...stream(testCase.stop), `exit ${String(testCase.exit)}`].join('\n'),
       });
       const server = serveRig(rig);
       server.write(callLine(15, { prompt: 'work', profile: 'read', cwd: rig.root }));
       const [reply] = await waitForReplies(server, 1);
       server.end();
       await server.done;
-      const doc = resultDocument(reply);
+      const doc = ranResult(reply);
       assert.equal(doc.state, testCase.state, JSON.stringify(doc));
       assert.equal(doc.termination, testCase.termination);
       assert.equal(doc.final, testCase.state === 'completed');
@@ -853,10 +852,10 @@ test('the session lock is released only after the drain and the final audit appe
   const [grandchildPid] = markerPids(rig, 'grandchild.pid');
   assert.ok(isAlive(grandchildPid), 'the grandchild is what holds the pipe open');
 
-  const rival = async (extra: Env = {}): Promise<Record<string, any>> =>
-    resultDocument(await oneShot(t, rig, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' }), extra));
+  const rival = (extra: Env = {}): Promise<Record<string, unknown>> =>
+    oneShot(t, rig, callLine(31, { prompt: 'same session', profile: 'read', cwd: rig.root, session: 'drain' }), extra);
 
-  const busy = await rival();
+  const busy = refusalDocument(await rival());
   assert.equal(busy.state, 'refused');
   assert.equal(busy.refusal.reason, 'session-busy', 'cleanup has not finished, so the lock is still held');
   assert.equal(readFileSync(join(rig.markerDir, 'pids'), 'utf8').trim().split('\n').length, 1, 'no second child was created');
@@ -872,7 +871,7 @@ test('the session lock is released only after the drain and the final audit appe
   await server.done;
   assert.deepEqual(server.replies(), [], 'the cancelled call got no reply: its outcome is its result.json');
   assert.equal(settled.state, 'cancelled');
-  assert.ok(elapsed < 2000, `the ladder bounded the drain: ${elapsed} ms`);
+  assert.ok(elapsed < 2000, `the ladder bounded the drain: ${String(elapsed)} ms`);
   assert.equal(isAlive(grandchildPid), false, 'the drain was not outlived by the member holding the pipe');
   // The final audit append is the `exit` record, written after the drain.
   const records = jsonLines(join(onlyRunDir(rig.runDir), 'audit.jsonl'));
@@ -882,7 +881,7 @@ test('the session lock is released only after the drain and the final audit appe
   );
 
   // Only after that cleanup does the next call get through.
-  const later = await rival({ FAST: '1' });
+  const later = resultDocument(await rival({ FAST: '1' }));
   assert.equal(later.state, 'completed', JSON.stringify(later));
   assert.equal(readFileSync(join(rig.markerDir, 'pids'), 'utf8').trim().split('\n').length, 2);
 });
@@ -902,7 +901,7 @@ test('two server processes on one session: the loser is refused session-busy and
   winner.stdin.write(`${callLine(41, { prompt: 'winner', profile: 'read', cwd: rig.root, session: 'shared' })}\n`);
 
   await waitForPath(join(rig.markerDir, 'pids'), 'the winner\'s child');
-  const loserDoc = resultDocument(await oneShot(t, rig, callLine(42, { prompt: 'loser', profile: 'read', cwd: rig.root, session: 'shared' })));
+  const loserDoc = refusalDocument(await oneShot(t, rig, callLine(42, { prompt: 'loser', profile: 'read', cwd: rig.root, session: 'shared' })));
   assert.equal(loserDoc.state, 'refused');
   assert.equal(loserDoc.refusal.reason, 'session-busy');
   assert.equal(readFileSync(join(rig.markerDir, 'pids'), 'utf8').trim().split('\n').length, 1, 'the loser created no child');
@@ -916,7 +915,9 @@ test('two server processes on one session: the loser is refused session-busy and
   }
   winner.stdin.end();
   assert.equal(await exited, 0);
-  const winnerDoc = resultDocument(JSON.parse(winnerOut.join('').trim()) as Record<string, any>);
+  const winnerReplies = recordLines(winnerOut.join(''), 'the winner\'s stdout');
+  assert.equal(winnerReplies.length, 1, winnerOut.join(''));
+  const winnerDoc = resultDocument(winnerReplies[0]);
   assert.equal(winnerDoc.state, 'completed', JSON.stringify(winnerDoc));
 });
 

@@ -10,6 +10,7 @@
 import { writeFileSync } from 'node:fs';
 import type { Writable } from 'node:stream';
 import { EMPTY_STATUS, reduce, type Reduced } from '../reduce/reduce.ts';
+import { messageOf } from '../errors.ts';
 import type { Admitted } from './admission.ts';
 import { appendAttempt, type RunLayout } from './evidence.ts';
 import { createGate, type Gate } from './gate.ts';
@@ -35,7 +36,7 @@ function writeRunFiles(layout: RunLayout, reduced: Reduced): boolean {
     writeFileSync(layout.status, `${JSON.stringify(reduced.status, null, 2)}\n`);
     return true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = messageOf(error);
     process.stderr.write(`quotient: could not write ${layout.transcript} / ${layout.status}: ${message}\n`);
     return false;
   }
@@ -99,7 +100,7 @@ export async function executeRun(
     // while running it: the answer is a conforming `failed` envelope over the
     // layout, with the reducer's verdict on an unread stream. The detail is
     // diagnostics, not reduced markdown, so it never enters the envelope.
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = messageOf(error);
     deps.diagnostics.write(`quotient: call ${String(admitted.callId)} failed while running: ${detail}\n`);
     return failedResult('error', ['error'], admitted.session.session, EMPTY_STATUS, layout);
   } finally {

@@ -26,7 +26,7 @@ import { basename, dirname, join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { resolveLocations } from '../config.ts';
 import { loadHelp, renderContext, sectionText, type Section } from '../help/help.ts';
-import { isRecord } from '../json.ts';
+import { at, isRecord } from '../json.ts';
 import { packageVersion } from '../root.ts';
 import {
   toolResult,
@@ -88,6 +88,7 @@ import {
   serveRig,
   serverCommand,
   spawnRecord,
+  textAt,
   validPolicy,
   waitForPath,
   waitForReplies,
@@ -102,18 +103,15 @@ import {
 const moduleDir = new URL('.', import.meta.url).pathname;
 
 /** The pi-agent-result/2 document inside a tool result, plus its isError flag. */
-function payload(reply: Record<string, any>): { doc: Record<string, any>; isError: boolean } {
-  assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
-  assert.equal(reply.result.content.length, 1);
-  assert.equal(reply.result.content[0].type, 'text');
-  return { doc: JSON.parse(reply.result.content[0].text), isError: reply.result.isError };
+function payload(reply: Record<string, unknown>): { doc: AgentResult; isError: unknown } {
+  return { doc: resultDocument(reply), isError: at(reply, 'result', 'isError') };
 }
 
 /** Drive exactly one tools/call. */
 async function call(
   params: unknown,
   env: Env = workspace().env,
-): Promise<{ doc: Record<string, any>; isError: boolean; reply: Record<string, any> }> {
+): Promise<{ doc: AgentResult; isError: unknown; reply: Record<string, unknown> }> {
   const { replies } = await converse([line({ id: 42, method: 'tools/call', params })], env);
   assert.equal(replies.length, 1);
   return { ...payload(replies[0]), reply: replies[0] };
@@ -128,15 +126,15 @@ test('initialize answers protocolVersion, a tools capability and serverInfo: quo
   assert.equal(replies.length, 1);
   assert.equal(replies[0].jsonrpc, '2.0');
   assert.equal(replies[0].id, 1);
-  assert.equal(replies[0].result.protocolVersion, LEGACY_VERSION);
+  assert.equal(at(replies[0], 'result', 'protocolVersion'), LEGACY_VERSION);
   assert.equal(LEGACY_VERSION, '2025-06-18');
   assert.deepEqual(
     keysOf(field(replies[0], 'result')),
     ['protocolVersion', 'capabilities', 'serverInfo', 'instructions'],
     'a legacy initialize answers exactly as before the modern era: no resultType, _meta, ttlMs or cacheScope',
   );
-  assert.deepEqual(replies[0].result.capabilities, { tools: {} });
-  assert.deepEqual(replies[0].result.serverInfo, { name: 'quotient', version: packageVersion() });
+  assert.deepEqual(at(replies[0], 'result', 'capabilities'), { tools: {} });
+  assert.deepEqual(at(replies[0], 'result', 'serverInfo'), { name: 'quotient', version: packageVersion() });
 });
 
 test('notifications/initialized is a no-op and ping is served, neither rejected as an unknown method', async () => {
@@ -228,8 +226,8 @@ test('an unknown method answers -32601 with the request id', async () => {
   assert.equal(replies.length, 1);
   assert.equal(replies[0].id, 5);
   assert.equal(replies[0].result, undefined);
-  assert.equal(replies[0].error.code, -32601);
-  assert.match(replies[0].error.message, /resources\/list/);
+  assert.equal(at(replies[0], 'error', 'code'), -32601);
+  assert.match(textAt(replies[0], 'error', 'message'), /resources\/list/);
 });
 
 test('a notification naming an unknown method answers nothing: there is no id to answer', async () => {
@@ -272,9 +270,9 @@ test('the server process starts, answers initialize and exits 0 on stdin EOF', (
   const replies = child.stdout
     .split('\n')
     .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l) as Record<string, any>);
+    .map((l): unknown => JSON.parse(l));
   assert.equal(replies.length, 1);
-  assert.equal(replies[0].result.protocolVersion, '2025-06-18');
+  assert.equal(at(replies[0], 'result', 'protocolVersion'), '2025-06-18');
 });
 
 // ── Shutdown: EOF, the AbortSignal and the process's signals (DEC-118) ──────
@@ -1542,9 +1540,10 @@ test('a malformed params object is refused request-invalid, naming the field', a
     { params: { name: 'pi_other', arguments: {} }, field: /name/ },
   ];
   for (const { params, field } of cases) {
-    const { doc, isError, reply } = await call(params);
+    const { isError, reply } = await call(params);
     assert.equal(reply.error, undefined);
     assert.equal(isError, true);
+    const doc = refusalDocument(reply);
     assert.equal(doc.schema, 'pi-agent-result/2');
     assert.equal(doc.state, 'refused');
     assert.equal(doc.termination, 'refused');
@@ -2122,9 +2121,10 @@ test('both legacy layers present are named together, in the one start-up line', 
 
 test('a policy refusal reaches the caller as a tool result and the ledger', async () => {
   const { runDir, env } = workspace(validPolicy({ enabled: false }));
-  const { doc, isError, reply } = await call(callTool({ prompt: 'hi', profile: 'read' }), env);
+  const { isError, reply } = await call(callTool({ prompt: 'hi', profile: 'read' }), env);
   assert.equal(reply.error, undefined);
   assert.equal(isError, true);
+  const doc = refusalDocument(reply);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'disabled');
   const lines = attempts(runDir);
@@ -2144,7 +2144,7 @@ test('no member of pi/mcp outside its tests authors a jail flag (design sec-3, S
   for (const name of sources) {
     const text = readFileSync(join(moduleDir, name), 'utf8');
     text.split('\n').forEach((sourceLine, index) => {
-      if (forbidden.test(sourceLine)) {offenders.push(`${name}:${index + 1}: ${sourceLine.trim()}`);}
+      if (forbidden.test(sourceLine)) {offenders.push(`${name}:${String(index + 1)}: ${sourceLine.trim()}`);}
     });
   }
   assert.deepEqual(offenders, []);

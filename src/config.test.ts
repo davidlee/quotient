@@ -6,18 +6,19 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { legacyLayers, resolveLocations, type Resolved } from './config.ts';
+import { legacyLayers, resolveLocations, usable, type Resolved } from './config.ts';
 
 const LAUNCH = '/work/project';
 const HOME = '/home/someone';
 
 const path = (resolved: Resolved): string => {
-  assert.equal(resolved.ok, true, resolved.ok ? '' : resolved.detail);
-  return (resolved as { path: string }).path;
+  const found = usable(resolved);
+  assert.ok(found !== null, resolved.ok ? '' : resolved.detail);
+  return found;
 };
 const refusal = (resolved: Resolved): string => {
-  assert.equal(resolved.ok, false, 'expected an unusable location');
-  return (resolved as { detail: string }).detail;
+  if (resolved.ok) {assert.fail('expected an unusable location');}
+  return resolved.detail;
 };
 
 test('QUOTIENT_* variables win over the XDG defaults', () => {

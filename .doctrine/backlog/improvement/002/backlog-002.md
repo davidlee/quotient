@@ -47,3 +47,10 @@ order, …). The remainder is mostly the unsafe-`any` family around
 `Record<string, any>` test helpers and `src/reduce/reduce.ts`, type
 assertions, and template-expression typing — hand work. Per-file counts:
 `.doctrine/slice/002/lint-baseline.tsv` (SL-002 ratchets against it).
+
+## Resolution (2026-10-27)
+
+SL-005 burned the remaining 526 main-tree errors to zero without behaviour
+change on any input the system produces (divergences recorded in SL-005
+notes), and `just gate` now runs `lint` first. One suppression remains
+(`result.test.ts`, a forged `LatchCause[]`).

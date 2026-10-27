@@ -14,7 +14,8 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { DEFAULT_BUDGET_BYTES, reduce, type Status } from './reduce.ts';
+import { messageOf } from '../errors.ts';
+import { DEFAULT_BUDGET_BYTES, reduce, type Reduced, type Status } from './reduce.ts';
 
 type Args = {
   file: string;
@@ -33,48 +34,130 @@ and <out>/status.json. Prints one status line to stdout, or the transcript with 
 
 exit: 0 completed · 1 failed or incomplete · 2 usage error`;
 
+/** argv read left to right: `index` is the token most recently taken, so a flag
+ *  can consume the value that follows it. */
+type Cursor = {
+  readonly argv: readonly string[];
+  index: number;
+};
+
+/** The next token, consuming it; undefined past the end of argv. */
+function take(cursor: Cursor): string | undefined {
+  cursor.index += 1;
+  return cursor.argv.at(cursor.index);
+}
+
+/** The token after FLAG, consuming it: a flag with no value is a usage error. */
+function takeValue(cursor: Cursor, flag: string): string {
+  const next = take(cursor);
+  if (next === undefined) {throw new Error(`${flag} needs a value`);}
+  return next;
+}
+
+/** The switches: no value of their own, each only turns one thing on. */
+const SWITCHES = new Map<string, (args: Args) => void>([
+  ['-v', (args): void => {args.verbose = true;}],
+  ['--verbose', (args): void => {args.verbose = true;}],
+  ['-q', (args): void => {args.quiet = true;}],
+  ['--quiet', (args): void => {args.quiet = true;}],
+  ['--full', (args): void => {args.budget = 0;}],
+]);
+
+/** The flags that take a value, and what each one does with it. */
+const SETTINGS = new Map<string, (args: Args, given: string) => void>([
+  ['--out', (args, given): void => {args.out = given;}],
+  ['--alert', (args, given): void => {args.alerts.push(given);}],
+  ['--budget-bytes', (args, given): void => {args.budget = budgetBytes(given);}],
+]);
+
+/** --budget-bytes: a non-negative integer, or the usage error that says so. */
+function budgetBytes(raw: string): number {
+  if (!/^\d+$/.test(raw)) {throw new Error('--budget-bytes needs a non-negative integer');}
+  return Number(raw);
+}
+
+/** The one positional FILE: `-` is stdin, and a second name is a usage error. */
+function acceptFile(args: Args, arg: string): void {
+  if (arg.startsWith('-') && arg !== '-') {throw new Error(`unknown flag: ${arg}`);}
+  if (args.file !== '-') {throw new Error(`unexpected argument: ${arg}`);}
+  args.file = arg;
+}
+
+/** One argv token: a switch, a value flag, the positional file, or a usage error. */
+function step(args: Args, cursor: Cursor, arg: string): void {
+  const toggle = SWITCHES.get(arg);
+  if (toggle !== undefined) {toggle(args); return;}
+  const setting = SETTINGS.get(arg);
+  if (setting !== undefined) {setting(args, takeValue(cursor, arg)); return;}
+  acceptFile(args, arg);
+}
+
 export function parseArgs(argv: string[]): Args {
   const args: Args = { file: '-', out: null, budget: DEFAULT_BUDGET_BYTES, alerts: [], verbose: false, quiet: false };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    const value = (): string => {
-      const next = argv[++i];
-      if (next === undefined) {throw new Error(`${arg} needs a value`);}
-      return next;
-    };
-    if (arg === '-v' || arg === '--verbose') {args.verbose = true;}
-    else if (arg === '-q' || arg === '--quiet') {args.quiet = true;}
-    else if (arg === '--full') {args.budget = 0;}
-    else if (arg === '--out') {args.out = value();}
-    else if (arg === '--alert') {args.alerts.push(value());}
-    else if (arg === '--budget-bytes') {
-      const raw = value();
-      if (!/^\d+$/.test(raw)) {throw new Error('--budget-bytes needs a non-negative integer');}
-      args.budget = Number(raw);
-    } else if (arg.startsWith('-') && arg !== '-') {throw new Error(`unknown flag: ${arg}`);}
-    else if (args.file === '-') {args.file = arg;}
-    else {throw new Error(`unexpected argument: ${arg}`);}
+  const cursor: Cursor = { argv, index: -1 };
+  for (let arg = take(cursor); arg !== undefined; arg = take(cursor)) {
+    step(args, cursor, arg);
   }
   return args;
 }
 
 export function statusLine(status: Status, transcriptPath: string): string {
-  const { tokens, cost_usd: cost } = status;
-  const money = cost === null ? 'n/a' : cost.toFixed(4);
-  const contextPeak = status.context.peak_tokens === null ? 'n/a' : status.context.peak_tokens;
+  const { tokens } = status;
+  const money = status.cost_usd?.toFixed(4) ?? 'n/a';
+  const peak = status.context.peak_tokens ?? 'n/a';
   return [
     status.state,
-    `turns=${status.turns}`,
-    `requests=${status.requests}`,
-    `unmeasured=${status.requests_unmeasured}`,
+    `turns=${String(status.turns)}`,
+    `requests=${String(status.requests)}`,
+    `unmeasured=${String(status.requests_unmeasured)}`,
     `accounting=${status.accounting}`,
-    `context_peak=${contextPeak}`,
-    `context_unmeasured=${status.context.requests_unmeasured}`,
-    `tools=${status.tool_calls}`,
-    `tokens=${tokens.input}/${tokens.output}`,
+    `context_peak=${String(peak)}`,
+    `context_unmeasured=${String(status.context.requests_unmeasured)}`,
+    `tools=${String(status.tool_calls)}`,
+    `tokens=${String(tokens.input)}/${String(tokens.output)}`,
     `cost=${money}`,
     `transcript=${transcriptPath}`,
   ].join(' ');
+}
+
+/** A thrown value's message: an `Error` carries one, anything else is printed
+ *  as it is, so a failure never reports `undefined`. */
+
+/** FILE as text: `-` is stdin. */
+function readInput(file: string): string {
+  return file === '-' ? readFileSync(0, 'utf8') : readFileSync(file, 'utf8');
+}
+
+/** Where this run's artefacts belong: `--out`, else the input's own directory. */
+function outDir(args: Args): string {
+  if (args.out !== null) {return args.out;}
+  return args.file === '-' ? process.cwd() : dirname(resolve(args.file));
+}
+
+/** Write transcript.md and status.json under DIR, making DIR if it is missing;
+ *  the transcript path the status line prints. */
+function writeArtefacts(dir: string, reduced: Reduced): string {
+  if (!existsSync(dir)) {mkdirSync(dir, { recursive: true });}
+  const transcriptPath = join(dir, 'transcript.md');
+  writeFileSync(transcriptPath, reduced.transcript);
+  writeFileSync(join(dir, 'status.json'), `${JSON.stringify(reduced.status, null, 2)}\n`);
+  return transcriptPath;
+}
+
+/** The alerts on stderr: the caller declared them, so they may appear unprompted. */
+function reportAlerts(alerts: Status['alerts']): void {
+  for (const alert of alerts) {
+    process.stderr.write(`alert ${alert.pattern} :: ${alert.text}\n`);
+  }
+}
+
+/** The transcript (with -v) and the one status line, each on the stream it
+ *  belongs to; `-q` writes no line at all. */
+function print(args: Args, reduced: Reduced, transcriptPath: string): void {
+  if (args.verbose) {process.stdout.write(reduced.transcript);}
+  if (args.quiet) {return;}
+  const stream = args.verbose ? process.stderr : process.stdout;
+  stream.write(`${statusLine(reduced.status, transcriptPath)}\n`);
 }
 
 export function main(argv: string[]): number {
@@ -82,39 +165,28 @@ export function main(argv: string[]): number {
   try {
     args = parseArgs(argv);
   } catch (error) {
-    process.stderr.write(`quotient reduce: ${(error as Error).message}\n${USAGE}\n`);
+    process.stderr.write(`quotient reduce: ${messageOf(error)}\n${USAGE}\n`);
     return 2;
   }
 
   let input: string;
   try {
-    input = args.file === '-' ? readFileSync(0, 'utf8') : readFileSync(args.file, 'utf8');
+    input = readInput(args.file);
   } catch (error) {
-    process.stderr.write(`quotient reduce: cannot read ${args.file}: ${(error as Error).message}\n`);
+    process.stderr.write(`quotient reduce: cannot read ${args.file}: ${messageOf(error)}\n`);
     return 2;
   }
 
-  let reduced;
+  let reduced: Reduced;
   try {
     reduced = reduce(input.split('\n'), { budgetBytes: args.budget, alerts: args.alerts });
   } catch (error) {
-    process.stderr.write(`quotient reduce: ${(error as Error).message}\n`);
+    process.stderr.write(`quotient reduce: ${messageOf(error)}\n`);
     return 2;
   }
 
-  const outDir = args.out ?? (args.file === '-' ? process.cwd() : dirname(resolve(args.file)));
-  if (!existsSync(outDir)) {mkdirSync(outDir, { recursive: true });}
-  const transcriptPath = join(outDir, 'transcript.md');
-  writeFileSync(transcriptPath, reduced.transcript);
-  writeFileSync(join(outDir, 'status.json'), `${JSON.stringify(reduced.status, null, 2)}\n`);
-
-  for (const alert of reduced.status.alerts) {
-    process.stderr.write(`alert ${alert.pattern} :: ${alert.text}\n`);
-  }
-  if (args.verbose) {process.stdout.write(reduced.transcript);}
-  if (!args.quiet) {
-    const stream = args.verbose ? process.stderr : process.stdout;
-    stream.write(`${statusLine(reduced.status, transcriptPath)}\n`);
-  }
+  const transcriptPath = writeArtefacts(outDir(args), reduced);
+  reportAlerts(reduced.status.alerts);
+  print(args, reduced, transcriptPath);
   return reduced.status.state === 'completed' ? 0 : 1;
 }

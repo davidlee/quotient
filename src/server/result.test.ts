@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reduce } from '../reduce/reduce.ts';
-import { ARTIFACTS, buildResult, messageEnd, SETTLED_RECORD, type RunInput } from './test-rig.ts';
+import { ARTIFACTS, buildResult, messageEnd, numberAt, SETTLED_RECORD, type RunInput } from './test-rig.ts';
 import {
   CAUSE_STATE,
   createLatch,
@@ -221,7 +221,7 @@ test('exit 0 is never evidence of success (EX-1)', async (t) => {
     const { doc } = buildResult({ lines: [messageEnd('toolUse'), SETTLED_RECORD], exitCode: 0 });
     assert.equal(doc.final, false);
     assert.equal(doc.result, null);
-    assert.equal(doc.status!.requests, 1, 'the send was counted; it just was not an answer');
+    assert.equal(numberAt(doc.status, 'requests'), 1, 'the send was counted; it just was not an answer');
   });
 });
 
@@ -230,13 +230,14 @@ test('exit 0 is never evidence of success (EX-1)', async (t) => {
 test('the abort latch defeats provisional success: a cause recorded before the commit point decides the state (EX-2, VT-2)', async (t) => {
   const answering = [messageEnd('stop'), SETTLED_RECORD];
 
-  for (const [name, causes, state] of [
+  const latchCases: [string, LatchCause[], ResultState][] = [
     ['a run the backstop stopped cannot report success', ['timeout'], 'timeout'],
     ['a cancel mid-run decides the state even with an answer in hand', ['cancelled'], 'cancelled'],
     ['a switch flip mid-run decides the state', ['switch'], 'cancelled'],
     ['a measured ceiling crossing decides the state', ['ceiling'], 'ceiling_exceeded'],
     ['a failed evidence append decides the state', ['audit'], 'audit_failed'],
-  ] as [string, LatchCause[], ResultState][]) {
+  ];
+  for (const [name, causes, state] of latchCases) {
     await t.test(name, () => {
       const { doc } = buildResult({ lines: answering, causes });
       assert.equal(doc.state, state, JSON.stringify(doc));
@@ -292,7 +293,11 @@ test('the abort latch defeats provisional success: a cause recorded before the c
     // A types-only vocabulary does not survive a cast, so `resultFor` filters the
     // list: a stream that never settled stays non-success no matter what the caller
     // claims to have latched.
-    const { doc } = buildResult({ lines: [messageEnd('stop')], causes: ['stop'] as unknown as LatchCause[] });
+    // The value the door must reject is one the type system cannot express, so this
+    // line lies on purpose: `resultFor` drops it at runtime.
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- a forged cause is a value the vocabulary cannot hold
+    const causes = ['stop'] as unknown as LatchCause[];
+    const { doc } = buildResult({ lines: [messageEnd('stop')], causes });
     assert.equal(doc.state, 'incomplete');
     assert.equal(doc.termination, 'eof');
     assert.equal(doc.final, false);
@@ -378,14 +383,17 @@ test('one vocabulary: `timeout` is the cause token, `backstop` is not, and every
     );
     assert.equal(new Set(TERMINATIONS).size, TERMINATIONS.length, 'no duplicated token');
     assert.equal(TERMINATIONS.length, 16);
-    assert.ok(TERMINATIONS.includes('timeout'), 'the wall clock\'s cause and state are one word');
-    assert.ok(!(TERMINATIONS as readonly string[]).includes('backstop'), '`backstop` names the mechanism in prose; it is not a cause token');
+    // The enum read as the strings it is made of, so a token outside it can be
+    // looked for without a cast.
+    const vocabulary: readonly string[] = TERMINATIONS;
+    assert.ok(vocabulary.includes('timeout'), 'the wall clock\'s cause and state are one word');
+    assert.ok(!vocabulary.includes('backstop'), '`backstop` names the mechanism in prose; it is not a cause token');
     // pi's stop reasons, verbatim: a snake-case matcher classifies nothing while
     // looking correct.
     for (const token of ['stop', 'length', 'error', 'aborted', 'toolUse', 'deferred']) {
-      assert.ok(TERMINATIONS.includes(token as Termination), token);
+      assert.ok(vocabulary.includes(token), token);
     }
-    assert.ok(!(TERMINATIONS as readonly string[]).includes('tool_use'), 'the wrong spelling must never appear');
+    assert.ok(!vocabulary.includes('tool_use'), 'the wrong spelling must never appear');
   });
 
   await t.test('the table is total: every cause maps to a state and every state is reachable from it', () => {
@@ -453,21 +461,21 @@ function bulky(): string[] {
     lines.push(
       JSON.stringify({
         type: 'tool_execution_start',
-        toolCallId: `call-${index}`,
+        toolCallId: `call-${String(index)}`,
         toolName: 'bash',
-        args: { command: `step ${index}` },
+        args: { command: `step ${String(index)}` },
       }),
     );
     lines.push(
       JSON.stringify({
         type: 'tool_execution_end',
-        toolCallId: `call-${index}`,
+        toolCallId: `call-${String(index)}`,
         toolName: 'bash',
-        result: { content: [{ type: 'text', text: `step ${index} output` }], structuredContent: { exit_code: 0 } },
+        result: { content: [{ type: 'text', text: `step ${String(index)} output` }], structuredContent: { exit_code: 0 } },
         isError: false,
       }),
     );
-    lines.push(messageEnd('stop', `step ${index} prose`));
+    lines.push(messageEnd('stop', `step ${String(index)} prose`));
   }
   lines.push(SETTLED_RECORD);
   return lines;
@@ -486,10 +494,9 @@ test('the transcript budget is soft and wired through the policy clamp (EX-6, VT
     const budget = transcriptBudget(64, 64);
     const { doc } = buildResult({ lines: bulky(), budgetBytes: budget });
     const bytes = Buffer.byteLength(doc.transcript);
-    assert.ok(bytes > 64, `the header and the result block are mandatory: ${bytes} bytes`);
-    const status = doc.status as { transcript: { bytes: number; elided: number } };
-    assert.equal(status.transcript.bytes, bytes, 'the status reports the honest byte count');
-    assert.ok(status.transcript.elided > 0, 'the body was elided');
+    assert.ok(bytes > 64, `the header and the result block are mandatory: ${String(bytes)} bytes`);
+    assert.equal(numberAt(doc.status, 'transcript', 'bytes'), bytes, 'the status reports the honest byte count');
+    assert.ok(numberAt(doc.status, 'transcript', 'elided') > 0, 'the body was elided');
     assert.equal(doc.artifacts?.transcript, ARTIFACTS.transcript, 'the unbudgeted text is at artifacts.transcript');
     assert.ok(doc.result === 'step 39 prose', 'the answer survives the budget');
   });
@@ -567,6 +574,13 @@ test('status.state judges the stream and state judges the call (EX-5)', async (t
 const isUnreachable = (entry: Reachability): entry is { unreachable: string } => 'unreachable' in entry;
 const producedBy = (entry: Reachability): entry is { producedBy: string } => 'producedBy' in entry;
 
+/** The entries of TABLE that are stated holes, each as the line the assertion prints. */
+function statedHoles<T extends string>(noun: string, table: Record<T, Reachability>): string[] {
+  return Object.entries<Reachability>(table).flatMap(([member, entry]) =>
+    isUnreachable(entry) ? [`${noun} ${member}: ${entry.unreachable}`] : [],
+  );
+}
+
 test('every state and every termination is produced by a named path or declared unreachable (EX-9, VT-7)', async (t) => {
   const produced = new Map<Termination, AgentResult>();
   for (const token of TERMINATIONS) {
@@ -595,12 +609,8 @@ test('every state and every termination is produced by a named path or declared 
   // every member is reachable in this build, so the hole list is empty — and it
   // is empty as a stated choice, which is why the arm exists.
   const holes = [
-    ...Object.entries(REACHABILITY.states)
-      .filter(([, entry]) => isUnreachable(entry))
-      .map(([member, entry]) => `state ${member}: ${(entry as { unreachable: string }).unreachable}`),
-    ...Object.entries(REACHABILITY.terminations)
-      .filter(([, entry]) => isUnreachable(entry))
-      .map(([member, entry]) => `termination ${member}: ${(entry as { unreachable: string }).unreachable}`),
+    ...statedHoles('state', REACHABILITY.states),
+    ...statedHoles('termination', REACHABILITY.terminations),
   ];
   assert.deepEqual(holes, [], 'an unreachable member is a stated hole, and this build has none');
 

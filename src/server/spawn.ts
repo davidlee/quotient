@@ -22,13 +22,14 @@
 // and later the gate all ride it; there is no second shutdown path that could fall
 // out of step with it. Releasing the session lock and answering the call are the
 // server's, and they happen after this resolves.
-import { spawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
+import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { finished } from 'node:stream/promises';
 import { countRecord, createTally, type Tally } from '../reduce/reduce.ts';
-import { isRecord } from '../json.ts';
+import { at, isRecord } from '../json.ts';
+import { messageOf } from '../errors.ts';
 import { attemptsPath, appendAudit, runLayout, type AuditRecord, type CallId, type RunLayout } from './evidence.ts';
 import type { Form, FormSource } from './policy.ts';
 import { MCP_EXTENSION, MCP_TOOL_PREFIX, toolsArgument, type Profile } from './profiles.ts';
@@ -227,248 +228,101 @@ export function childEnv(
  * The caller releases the session lock and answers only after this resolves.
  */
 export async function runChild(plan: SpawnPlan, control: RunControl): Promise<RunOutcome> {
-  const layout = plan.layout ?? runLayout(plan.runDir, plan.callId);
-  const graceMs = control.graceMs ?? DEFAULT_GRACE_MS;
-  const [command, argv] = launchCommand(plan.form, plan.sessionDir, buildArgv(plan));
-  const env = childEnv(control.env ?? process.env, plan.runDir, layout);
-
-  const lines: string[] = [];
-  const tally = createTally();
-  let settled = false;
-  let abort: AbortCause | null = null;
-  let spawnFailed = false;
-  let auditFailed = false;
-  let auditFailedBeforeSpawn = false;
-  let exit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
-  /** When the drain must give up on the pipes; null until a trigger signals the
-   *  group, because a run that ended itself has a tail worth waiting for. */
-  let drainBound: number | null = null;
+  const { layout, graceMs, command, argv, env } = launchOf(plan, control);
+  const state: RunState = {
+    lines: [],
+    tally: createTally(),
+    settled: false,
+    exit: null,
+    abort: null,
+    spawnFailed: false,
+    auditFailed: false,
+    auditFailedBeforeSpawn: false,
+    drainBound: null,
+  };
+  const audit = auditWriter(layout, plan, state, control);
 
   // The tally exists before the first byte does: the hook is told the run's
   // starting state, so an idle poll has something to judge while the child is
   // still silent.
-  control.onRecord?.(tally);
-
-  const outcome = (): RunOutcome => ({
-    exitCode: exit?.code ?? null,
-    signal: exit?.signal ?? null,
-    settled,
-    lines,
-    abort,
-    spawnFailed,
-    auditFailed,
-    auditFailedBeforeSpawn,
-    layout,
-  });
-
-  const audit = (record: AuditRecord): boolean => {
-    const ts = appendAudit(layout, { policy_digest: plan.policyDigest, session: plan.session, ...record });
-    if (ts === null) {
-      auditFailed = true;
-      return false;
-    }
-    control.onAudit?.(ts);
-    return true;
-  };
+  control.onRecord?.(state.tally);
 
   try {
     mkdirSync(layout.dir, { recursive: true });
   } catch {
     // Nowhere to put the evidence: nothing ran, so this is the same refusal as a
     // failed `spawn` record below (design sec-6's unallocatable run directory).
-    auditFailed = true;
-    auditFailedBeforeSpawn = true;
-    return outcome();
+    state.auditFailed = true;
+    state.auditFailedBeforeSpawn = true;
+    return outcomeOf(state, layout);
   }
 
   // The decision before the act: an operator reading audit.jsonl sees what was
   // launched, under which snapshot. A record that cannot be written means the run
   // never starts; its directory stays, holding what its publication wrote.
-  if (
-    !audit({
-      record: 'spawn',
-      root: plan.root,
-      form: command,
-      form_kind: plan.form.kind,
-      form_source: plan.formSource.kind,
-      // Only a project form has an approved identity to name: a machine form is
-      // operator-published like the policy, and hashing it would add a per-call
-      // read and a failure mode to every default install.
-      ...(plan.formSource.kind === 'project'
-        ? { form_root: plan.formSource.root, form_sha256: plan.formSource.sha256 }
-        : {}),
-      profile: plan.profile.name,
-      profile_digest: plan.profileDigest,
-      profile_source: plan.profile.source,
-      help_digest: plan.helpDigest,
-      argv,
-    })
-  ) {
-    auditFailedBeforeSpawn = true;
-    return outcome();
+  if (!audit(spawnRecord(plan, command, argv))) {
+    state.auditFailedBeforeSpawn = true;
+    return outcomeOf(state, layout);
   }
 
   const events = createWriteStream(layout.events);
   const stderrLog = createWriteStream(layout.stderr);
 
-  const child: ChildProcess = spawn(command, argv, {
+  // One session of its own (`setsid`): the child leads a new process group, so
+  // `process.kill(-pid)` reaches it and everything it starts, and nothing else.
+  const { child, exited } = startChild(command, argv, {
     cwd: plan.root,
     env,
-    // One session of its own (`setsid`): the child leads a new process group, so
-    // `process.kill(-pid)` reaches it and everything it starts, and nothing else.
     detached: true,
     stdio: ['pipe', 'pipe', 'pipe'],
-  });
-
-  const exited = new Promise<void>((resolve) => {
-    child.once('exit', (code, signal) => {
-      exit = { code, signal };
-      resolve();
-    });
-    child.once('error', (error) => {
-      // A pre-exec failure (ENOENT, EACCES) has no pid, so `exit` never arrives:
-      // the run is `failed` with termination `spawn`, not a success with no
-      // evidence (EX-7).
-      if (child.pid === undefined) {
-        spawnFailed = true;
-        exit = { code: null, signal: null };
-      }
-      process.stderr.write(`quotient: the launch form ${command} failed: ${error.message}\n`);
-      resolve();
-    });
-  });
+  }, state);
+  const stdout = requirePipe(child.stdout, 'stdout');
+  const stderr = requirePipe(child.stderr, 'stderr');
+  const stdin = requirePipe(child.stdin, 'stdin');
 
   // stdout is the event stream: captured verbatim into events.jsonl and split on
   // LF for the record list (pi's json.md framing — split on LF, strip a CR, no
   // `readline`). The count runs through the reducer's own accumulator, so the
   // audit's usage snapshot and PHASE-07's gate cannot disagree about a record.
-  const decoder = new StringDecoder('utf8');
-  let pending = '';
-  const observe = (record: string): void => {
-    if (record.trim().length === 0) {return;}
-    lines.push(record);
-    let event: unknown;
-    try {
-      event = JSON.parse(record);
-    } catch {
-      return; // malformed: the reducer counts it, this only watches for settling
-    }
-    // Not an object (`null`, `[]` …): malformed by the reducer's own rule, so the
-    // live tally and the reduction count the same lines.
-    if (!isRecord(event)) {return;}
-    if (event.type === 'agent_settled') {settled = true;}
-    // This runs inside a stream event, outside any promise: a record whose
-    // handling throws is treated as malformed rather than ending the server.
-    try {
-      countRecord(event, tally);
-      control.onRecord?.(tally);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`quotient: skipped a stream record that could not be counted: ${message}\n`);
-    }
-  };
-  const stdout = child.stdout!;
-  stdout.on('data', (chunk: Buffer) => {
-    events.write(chunk);
-    pending += decoder.write(chunk);
-    let newline = pending.indexOf('\n');
-    while (newline >= 0) {
-      let record = pending.slice(0, newline);
-      pending = pending.slice(newline + 1);
-      if (record.endsWith('\r')) {record = record.slice(0, -1);}
-      observe(record);
-      newline = pending.indexOf('\n');
-    }
+  captureStdout(stdout, events, (record) => {
+    observeRecord(record, state, control.onRecord);
   });
 
   // The evidence streams end exactly once, whatever ended them: a stream `end`, a
   // destroyed pipe (a launch that never happened) or the drain below. A trailing
   // fragment without LF is not a record — the same framing rule the server's own
   // reader follows — and it stays in events.jsonl verbatim.
-  let eventsEnded = false;
-  const finishEvents = (): void => {
-    if (eventsEnded) {return;}
-    eventsEnded = true;
-    events.end();
-  };
+  const finishEvents = endOnce(events);
+  const finishStderr = endOnce(stderrLog);
   stdout.on('end', finishEvents);
   stdout.on('close', finishEvents);
 
-  let stderrEnded = false;
-  const finishStderr = (): void => {
-    if (stderrEnded) {return;}
-    stderrEnded = true;
-    stderrLog.end();
-  };
-  child.stderr!.on('data', (chunk: Buffer) => stderrLog.write(chunk));
-  child.stderr!.on('end', finishStderr);
-  child.stderr!.on('close', finishStderr);
+  captureStderr(stderr, stderrLog);
+  stderr.on('end', finishStderr);
+  stderr.on('close', finishStderr);
 
   // The prompt is the child's stdin, and the pipe closes after the write: pi
   // reads its prompt from a stream that ends, never from the server's stdin.
-  const stdin = child.stdin!;
   stdin.on('error', () => {
     // The child exited before reading: EPIPE is the child's ending, not an
     // evidence failure.
   });
   stdin.end(plan.prompt);
 
-  /**
-   * The one ladder. Idempotent: the first trigger's cause is the reported one, and
-   * a later trigger is not a second shutdown. The abort record is written where
-   * the decision is taken, so it carries the usage facts known at that moment and,
-   * when the rung carried one, the crossing it judged.
-   *
-   * Whatever the rung, a trigger that has signalled leaves a `drainBound` behind:
-   * from there the drain is bounded rather than trustful, because a member the
-   * group signal could not reach is exactly what keeps the pipe open. It is set
-   * last, one grace past the signal actually sent, so the drain never gives up
-   * before the ladder has finished with the leader.
-   */
-  const terminate = async (cause: AbortCause, crossing: Crossing | null = null): Promise<void> => {
-    if (abort !== null) {return;}
-    abort = cause;
-    // Additive evidence, never a new cause: only a gate rung names a crossing, so
-    // a `cancelled`/`eof`/`audit` abort writes the same record it always wrote.
-    audit({
-      record: 'abort',
-      cause,
-      settled,
-      usage: usageOf(tally),
-      ...(crossing ? { unit: crossing.unit, observed: crossing.observed, limit: crossing.limit } : {}),
-    });
-    const pid = child.pid;
-    // Never signal without a verified pid of our own child, and never `-0` or the
-    // server's own group: the child leads its group, the server leads another.
-    if (!signallable(pid)) {return;}
-    if (exit === null) {
-      signalGroup(pid, 'SIGTERM');
-      if (!(await waitFor(exited, graceMs))) {
-        signalGroup(pid, 'SIGKILL');
-        await exited;
-      }
-    } else {
-      // The leader is reaped; its process group is not. A member that outlived the
-      // leader is exactly what holds the stdout pipe open, so the group is killed
-      // outright: there is no graceful rung for a leader that has already exited,
-      // and the drain is what this signal bounds.
-      signalGroup(pid, 'SIGKILL');
-    }
-    drainBound = Date.now() + graceMs;
-  };
+  const ladder: Ladder = { child, exited, graceMs, state, audit };
 
   // An evidence failure fails the run closed: a stream that cannot be recorded
   // stops the run through the same ladder as every other trigger.
   const evidenceFailure = (): void => {
-    auditFailed = true;
-    void terminate('audit');
+    state.auditFailed = true;
+    void terminate(ladder, 'audit');
   };
   events.on('error', evidenceFailure);
   stderrLog.on('error', evidenceFailure);
 
   const onAbort = (): void => {
     const reason: unknown = control.signal.reason;
-    void terminate(abortCauseOf(reason), crossingOf(reason));
+    void terminate(ladder, abortCauseOf(reason), crossingOf(reason));
   };
   control.signal.addEventListener('abort', onAbort, { once: true });
   if (control.signal.aborted) {onAbort();}
@@ -478,17 +332,299 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
   // still open is what bounds the wait, so it may not be removed with the reap.
   await exited;
 
-  // Drain: the child's exit does not close stdout while a member of its group
-  // holds the pipe, and the `exit` record and the caller's answer both wait for
-  // the last byte. With no trigger the wait is unbounded — a run that ended itself
-  // has a tail worth every byte of, and truncating it would lose evidence — so the
-  // wait is taken a grace at a time and the bound re-read between slices: a trigger
-  // landing mid-drain applies a bound the wait did not have when it started. With
-  // a trigger the wait is bounded by `drainBound` outright.
-  const pipesClosed = Promise.all([finished(stdout).catch(() => {}), finished(child.stderr!).catch(() => {})]);
+  await drainPipes(state, graceMs, child, stdout, stderr);
+  finishEvents();
+  finishStderr();
+  await finished(events).catch(() => undefined);
+  await finished(stderrLog).catch(() => undefined);
+
+  audit(exitRecord(state));
+
+  // The `exit` record is the last thing a trigger could usefully precede: from
+  // here the run is over and a late trigger has no bound left to move.
+  control.signal.removeEventListener('abort', onAbort);
+
+  return outcomeOf(state, layout);
+}
+
+/** The child's exit status and the signal that ended it, as the OS reported them. */
+type Exit = { code: number | null; signal: NodeJS.Signals | null };
+
+/** The launch facts a plan and its control determine, before any evidence exists. */
+type Launch = {
+  layout: RunLayout;
+  graceMs: number;
+  command: string;
+  argv: string[];
+  env: Record<string, string | undefined>;
+};
+
+/** Resolve the run's directory, grace, command, argv and child environment. */
+function launchOf(plan: SpawnPlan, control: RunControl): Launch {
+  const layout = plan.layout ?? runLayout(plan.runDir, plan.callId);
+  const [command, argv] = launchCommand(plan.form, plan.sessionDir, buildArgv(plan));
+  const env = childEnv(control.env ?? process.env, plan.runDir, layout);
+  return { layout, graceMs: control.graceMs ?? DEFAULT_GRACE_MS, command, argv, env };
+}
+
+/** The mutable facts of one run: its stream and live tally, the exit status, the
+ *  trigger's cause and the drain's bound. One record, so every step of the run
+ *  reads and writes the same facts. */
+type RunState = {
+  lines: string[];
+  tally: Tally;
+  settled: boolean;
+  exit: Exit | null;
+  abort: AbortCause | null;
+  spawnFailed: boolean;
+  auditFailed: boolean;
+  auditFailedBeforeSpawn: boolean;
+  /** When the drain must give up on the pipes; null until a trigger signals the
+   *  group, because a run that ended itself has a tail worth waiting for. */
+  drainBound: number | null;
+};
+
+/** The `exit` audit record: the reaped status and what the run was, never an
+ *  interpretation of it. */
+function exitRecord(state: RunState): AuditRecord {
+  return {
+    record: 'exit',
+    code: state.exit?.code ?? null,
+    signal: state.exit?.signal ?? null,
+    settled: state.settled,
+    spawn_failed: state.spawnFailed,
+  };
+}
+
+/** The run as reported: facts, never an interpretation (EX-7). */
+function outcomeOf(state: RunState, layout: RunLayout): RunOutcome {
+  return {
+    exitCode: state.exit?.code ?? null,
+    signal: state.exit?.signal ?? null,
+    settled: state.settled,
+    lines: state.lines,
+    abort: state.abort,
+    spawnFailed: state.spawnFailed,
+    auditFailed: state.auditFailed,
+    auditFailedBeforeSpawn: state.auditFailedBeforeSpawn,
+    layout,
+  };
+}
+
+/** The run's one audit writer: every record carries this run's policy digest and
+ *  session, and an append that fails fails the run closed. */
+function auditWriter(
+  layout: RunLayout,
+  plan: SpawnPlan,
+  state: RunState,
+  control: RunControl,
+): (record: AuditRecord) => boolean {
+  return (record) => {
+    const ts = appendAudit(layout, { policy_digest: plan.policyDigest, session: plan.session, ...record });
+    if (ts === null) {
+      state.auditFailed = true;
+      return false;
+    }
+    control.onAudit?.(ts);
+    return true;
+  };
+}
+
+/** The `spawn` audit record: what is about to be launched, under which snapshot,
+ *  written before the launch so the decision rides beside its act. */
+function spawnRecord(plan: SpawnPlan, command: string, argv: string[]): AuditRecord {
+  return {
+    record: 'spawn',
+    root: plan.root,
+    form: command,
+    form_kind: plan.form.kind,
+    form_source: plan.formSource.kind,
+    // Only a project form has an approved identity to name: a machine form is
+    // operator-published like the policy, and hashing it would add a per-call
+    // read and a failure mode to every default install.
+    ...(plan.formSource.kind === 'project'
+      ? { form_root: plan.formSource.root, form_sha256: plan.formSource.sha256 }
+      : {}),
+    profile: plan.profile.name,
+    profile_digest: plan.profileDigest,
+    profile_source: plan.profile.source,
+    help_digest: plan.helpDigest,
+    argv,
+  };
+}
+
+/** A stdio pipe the spawn asked for and got: the type still allows null, so it is
+ *  refused rather than asserted away. */
+function requirePipe<T>(pipe: T | null, what: string): T {
+  if (pipe === null) {
+    throw new Error(`the child has no ${what} pipe`);
+  }
+  return pipe;
+}
+
+/** Spawn the child and the promise that settles when it has exited or failed to
+ *  launch. A pre-exec failure (ENOENT, EACCES) has no pid, so `exit` never
+ *  arrives: the run is `failed` with termination `spawn`, not a success with no
+ *  evidence (EX-7). */
+function startChild(
+  command: string,
+  argv: readonly string[],
+  options: SpawnOptions,
+  state: RunState,
+): { child: ChildProcess; exited: Promise<void> } {
+  const child = spawn(command, [...argv], options);
+  const exited = new Promise<void>((resolve) => {
+    child.once('exit', (code, signal) => {
+      state.exit = { code, signal };
+      resolve();
+    });
+    child.once('error', (error) => {
+      if (child.pid === undefined) {
+        state.spawnFailed = true;
+        state.exit = { code: null, signal: null };
+      }
+      process.stderr.write(`quotient: the launch form ${command} failed: ${messageOf(error)}\n`);
+      resolve();
+    });
+  });
+  return { child, exited };
+}
+
+/** Capture stdout verbatim into EVENTS and hand each LF-framed record to RECORD
+ *  (pi's json.md framing — split on LF, strip a CR, no `readline`). */
+function captureStdout(stdout: Readable, events: WriteStream, record: (line: string) => void): void {
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  stdout.on('data', (chunk: Buffer) => {
+    events.write(chunk);
+    pending += decoder.write(chunk);
+    let newline = pending.indexOf('\n');
+    while (newline >= 0) {
+      let line = pending.slice(0, newline);
+      pending = pending.slice(newline + 1);
+      if (line.endsWith('\r')) {line = line.slice(0, -1);}
+      record(line);
+      newline = pending.indexOf('\n');
+    }
+  });
+}
+
+/** Capture stderr verbatim into its own log: the two streams are never merged. */
+function captureStderr(stderr: Readable, stderrLog: WriteStream): void {
+  stderr.on('data', (chunk: Buffer) => stderrLog.write(chunk));
+}
+
+/** A finisher that ends an evidence stream exactly once, whatever ended it: a
+ *  stream `end`, a destroyed pipe, or the drain below. */
+function endOnce(stream: WriteStream): () => void {
+  let ended = false;
+  return () => {
+    if (ended) {return;}
+    ended = true;
+    stream.end();
+  };
+}
+
+/** One stream record's effect on the run: the list keeps it in order, and a
+ *  well-formed object updates the settle flag and the live tally. This runs
+ *  inside a stream event, outside any promise, so a record whose handling throws
+ *  is treated as malformed rather than ending the server. */
+function observeRecord(record: string, state: RunState, onRecord: ((tally: Tally) => void) | undefined): void {
+  if (record.trim().length === 0) {return;}
+  state.lines.push(record);
+  let event: unknown;
+  try {
+    event = JSON.parse(record);
+  } catch {
+    return; // malformed: the reducer counts it, this only watches for settling
+  }
+  // Not an object (`null`, `[]` …): malformed by the reducer's own rule, so the
+  // live tally and the reduction count the same lines.
+  if (!isRecord(event)) {return;}
+  if (event.type === 'agent_settled') {state.settled = true;}
+  try {
+    countRecord(event, state.tally);
+    onRecord?.(state.tally);
+  } catch (error) {
+    process.stderr.write(`quotient: skipped a stream record that could not be counted: ${messageOf(error)}\n`);
+  }
+}
+
+/** What the one ladder needs from the run it ends: the child, the promise of its
+ *  exit, the grace, the mutable facts and the audit writer. */
+type Ladder = {
+  child: ChildProcess;
+  exited: Promise<void>;
+  graceMs: number;
+  state: RunState;
+  audit: (record: AuditRecord) => boolean;
+};
+
+/**
+ * The one ladder. Idempotent: the first trigger's cause is the reported one, and
+ * a later trigger is not a second shutdown. The abort record is written where
+ * the decision is taken, so it carries the usage facts known at that moment and,
+ * when the rung carried one, the crossing it judged.
+ *
+ * Whatever the rung, a trigger that has signalled leaves a `drainBound` behind:
+ * from there the drain is bounded rather than trustful, because a member the
+ * group signal could not reach is exactly what keeps the pipe open. It is set
+ * last, one grace past the signal actually sent, so the drain never gives up
+ * before the ladder has finished with the leader.
+ */
+async function terminate(ladder: Ladder, cause: AbortCause, crossing: Crossing | null = null): Promise<void> {
+  const { child, exited, graceMs, state, audit } = ladder;
+  if (state.abort !== null) {return;}
+  state.abort = cause;
+  // Additive evidence, never a new cause: only a gate rung names a crossing, so
+  // a `cancelled`/`eof`/`audit` abort writes the same record it always wrote.
+  audit({
+    record: 'abort',
+    cause,
+    settled: state.settled,
+    usage: usageOf(state.tally),
+    ...(crossing !== null ? { unit: crossing.unit, observed: crossing.observed, limit: crossing.limit } : {}),
+  });
+  const pid = child.pid;
+  // Never signal without a verified pid of our own child, and never `-0` or the
+  // server's own group: the child leads its group, the server leads another.
+  if (!signallable(pid)) {return;}
+  if (state.exit === null) {
+    signalGroup(pid, 'SIGTERM');
+    if (!(await waitFor(exited, graceMs))) {
+      signalGroup(pid, 'SIGKILL');
+      await exited;
+    }
+  } else {
+    // The leader is reaped; its process group is not. A member that outlived the
+    // leader is exactly what holds the stdout pipe open, so the group is killed
+    // outright: there is no graceful rung for a leader that has already exited,
+    // and the drain is what this signal bounds.
+    signalGroup(pid, 'SIGKILL');
+  }
+  state.drainBound = Date.now() + graceMs;
+}
+
+/**
+ * Drain: the child's exit does not close stdout while a member of its group
+ * holds the pipe, and the `exit` record and the caller's answer both wait for
+ * the last byte. With no trigger the wait is unbounded — a run that ended itself
+ * has a tail worth every byte of, and truncating it would lose evidence — so the
+ * wait is taken a grace at a time and the bound re-read between slices: a trigger
+ * landing mid-drain applies a bound the wait did not have when it started. With
+ * a trigger the wait is bounded by `state.drainBound` outright.
+ */
+async function drainPipes(
+  state: RunState,
+  graceMs: number,
+  child: ChildProcess,
+  stdout: Readable,
+  stderr: Readable,
+): Promise<void> {
+  const pipesClosed = Promise.all([finished(stdout).catch(() => undefined), finished(stderr).catch(() => undefined)]);
   let drained = false;
   for (;;) {
-    const bound = drainBound;
+    const bound = state.drainBound;
     const slice = bound === null ? graceMs : bound - Date.now();
     if (slice <= 0) {break;}
     if (await waitFor(pipesClosed, slice)) {
@@ -504,23 +640,8 @@ export async function runChild(plan: SpawnPlan, control: RunControl): Promise<Ru
     // never ending at all.
     if (signallable(child.pid)) {signalGroup(child.pid, 'SIGKILL');}
     stdout.destroy();
-    child.stderr!.destroy();
+    stderr.destroy();
   }
-  finishEvents();
-  finishStderr();
-  await finished(events).catch(() => {});
-  await finished(stderrLog).catch(() => {});
-
-  // Read through outcome(): `exit` is assigned in the `exited` callback, which
-  // TypeScript's narrowing cannot see, so a direct read here types as `never`.
-  const { exitCode, signal } = outcome();
-  audit({ record: 'exit', code: exitCode, signal, settled, spawn_failed: spawnFailed });
-
-  // The `exit` record is the last thing a trigger could usefully precede: from
-  // here the run is over and a late trigger has no bound left to move.
-  control.signal.removeEventListener('abort', onAbort);
-
-  return outcome();
 }
 
 /** The usage facts an audit record carries: the accumulator's units, verbatim. */
@@ -540,27 +661,39 @@ function usageOf(tally: Tally): Record<string, unknown> {
  *  unrecognised reason is a cancellation: a trigger fired, and the ladder needs a
  *  cause rather than none. */
 function abortCauseOf(reason: unknown): AbortCause {
-  const named = typeof reason === 'string' ? reason : (reason as { cause?: unknown } | null | undefined)?.cause;
+  const named = causeTokenOf(reason);
   return ABORT_CAUSES.find((cause) => cause === named) ?? 'cancelled';
+}
+
+/** The `cause` a trigger's reason carries beside its trigger, read structurally
+ *  — `spawn` keeps no dependency on the gate. A bare string is the whole reason;
+ *  a reason that is not an object carries no cause. */
+function causeTokenOf(reason: unknown): unknown {
+  if (typeof reason === 'string') {return reason;}
+  if (reason === null || (typeof reason !== 'object' && typeof reason !== 'function')) {return undefined;}
+  return 'cause' in reason ? reason.cause : undefined;
 }
 
 /** The crossing a gate rung carried, read structurally off the abort reason: the
  *  unit that crossed, what it read and the bound it crossed. A bare cause token,
  *  or a trigger without a readable unit, names no crossing and adds no fields. */
 function crossingOf(reason: unknown): Crossing | null {
-  if (typeof reason !== 'object' || reason === null) {return null;}
-  const trigger = (reason as { trigger?: unknown }).trigger;
-  if (typeof trigger !== 'object' || trigger === null) {return null;}
-  const fields = trigger as Record<string, unknown>;
-  const unit = fields.unit;
+  if (!isRecord(reason)) {return null;}
+  const trigger = at(reason, 'trigger');
+  if (!isRecord(trigger)) {return null;}
+  const unit = at(trigger, 'unit');
   if (typeof unit !== 'string') {return null;}
-  const observed = fields.observed;
-  const limit = fields.limit;
   return {
     unit,
-    observed: typeof observed === 'number' ? observed : null,
-    limit: typeof limit === 'number' ? limit : null,
+    observed: numberOrNull(at(trigger, 'observed')),
+    limit: numberOrNull(at(trigger, 'limit')),
   };
+}
+
+/** NUMBER when it is one, null when it is not: a crossing's reading may be
+ *  unobserved. */
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' ? value : null;
 }
 
 /** A pid this process may signal as a group: its own child's, positive, and never

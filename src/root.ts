@@ -4,12 +4,16 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { at } from './json.ts';
 
 export const packageRoot: string = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** The version package.json declares. Read on each call: no I/O at import. */
 export function packageVersion(): string {
-  return JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')).version;
+  const manifest = join(packageRoot, 'package.json');
+  const version: unknown = at(JSON.parse(readFileSync(manifest, 'utf8')), 'version');
+  if (typeof version !== 'string') {throw new Error(`${manifest} declares no version`);}
+  return version;
 }
 
 /** The absolute path the running bin was invoked by (`process.argv[1]`), for the

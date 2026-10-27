@@ -1,6 +1,6 @@
-gate: test typecheck build nix-build forms-probe forms-check hostile-audit pack-check
+gate: lint test typecheck build nix-build forms-probe forms-check hostile-audit pack-check
 
-# Not yet in `gate` (IMP-002): typescript-eslint strict, zero warnings, and shellcheck.
+# typescript-eslint strict, zero warnings (IMP-002), and shellcheck.
 lint:
     npx eslint . --max-warnings 0
     shellcheck scripts/* nix/check.sh nix/checks/replace.sh nix/checks/fixtures/run.sh nix/checks/fixtures/cases.sh

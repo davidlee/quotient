@@ -78,16 +78,25 @@ function shutdownSignal(): AbortSignal {
   return shutdown.signal;
 }
 
+/** The bare invocation: serve this process's own stdin and stdout. A terminal is
+ *  not an MCP client, so it gets a note first. */
+async function serveStdio(): Promise<number> {
+  if (process.stdin.isTTY) {process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client. Try `quotient help`. Ctrl-D exits.\n');}
+  await serve(process.stdin, process.stdout, process.env, process.stderr, {
+    launchDir: process.cwd(),
+    signal: shutdownSignal(),
+  });
+  return 0;
+}
+
 async function run(argv: string[]): Promise<number> {
-  const [verb, ...rest] = argv;
+  // Spelled out rather than destructured: `argv` may be empty, and `case undefined`
+  // is then the reading of no verb at all.
+  const verb = argv.length > 0 ? argv[0] : undefined;
+  const rest = argv.slice(1);
   switch (verb) {
     case undefined:
-      if (process.stdin.isTTY) {process.stderr.write('quotient: speaks MCP on stdio; run it from an MCP client. Try `quotient help`. Ctrl-D exits.\n');}
-      await serve(process.stdin, process.stdout, process.env, process.stderr, {
-        launchDir: process.cwd(),
-        signal: shutdownSignal(),
-      });
-      return 0;
+      return serveStdio();
     case 'reduce':
       return reduce(rest);
     case 'help':

@@ -7,7 +7,7 @@ import unusedImports from 'eslint-plugin-unused-imports';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['node_modules', 'dist', 'result', '.direnv', '.pi', '.doctrine'] },
+  { ignores: ['node_modules', 'dist', 'result', '.direnv', '.pi', '.doctrine', '.worktrees'] },
   {
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },

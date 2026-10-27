@@ -7,8 +7,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isRecord } from '../json.ts';
-import { countRecord, createTally, reduce, type Reduced } from './reduce.ts';
+import { at, isRecord } from '../json.ts';
+import { countRecord, createTally, reduce, type Reduced, type Tally } from './reduce.ts';
 
 const cli = new URL('../cli.ts', import.meta.url).pathname;
 
@@ -151,13 +151,14 @@ test('alerts match untruncated text, beyond the rendered snippet', () => {
 test('budget is enforced, elided from the middle, and never eats the result', () => {
   const middle: string[] = [];
   for (let i = 0; i < 100; i++) {
-    middle.push(...call('bash', { command: `step ${i} --with-a-reasonably-long-argument` }), result(`output of step ${i}`));
+    middle.push(...call('bash', { command: `step ${String(i)} --with-a-reasonably-long-argument` }), result(`output of step ${String(i)}`));
   }
   middle.push(assistant([{ type: 'text', text: 'FINISHED' }]));
   const budget = 600;
   const { transcript, status } = reduceLines(run(...middle), budget);
 
-  assert.ok(Buffer.byteLength(transcript) <= budget, `transcript is ${Buffer.byteLength(transcript)} bytes`);
+  const bytes = Buffer.byteLength(transcript);
+  assert.ok(bytes <= budget, `transcript is ${String(bytes)} bytes`);
   assert.match(transcript, /entries elided/);
   assert.match(transcript, /^## Result\nFINISHED$/m);
   assert.ok(status.transcript.elided > 0);
@@ -201,12 +202,12 @@ test('tokens and cost accumulate across turns, once', () => {
   assert.equal(status.requests, 2); // `agent_end` replays messages; it is not a send
 });
 
-const assistantRecord = (usage: unknown, stopReason = 'stop') => ({
+const assistantRecord = (usage: unknown, stopReason = 'stop'): Record<string, unknown> => ({
   type: 'message_end',
   message: { role: 'assistant', stopReason, usage },
 });
 
-const countRecords = (...records: any[]) => {
+const countRecords = (...records: Record<string, unknown>[]): Tally => {
   const tally = createTally();
   for (const record of records) {countRecord(record, tally);}
   return tally;
@@ -715,6 +716,19 @@ test('the live tally over object lines equals the reduction, junk lines and all'
   assert.equal(live.cost, status.cost_usd);
 });
 
+// --- the bin: the status line, the files it writes, and its exit codes ------
+
+/** What a child `execFileSync` reported as failed says about itself: its exit
+ *  status and the stderr it had piped. */
+function failedChild(error: unknown): { status: number; stderr: string } {
+  const status = at(error, 'status');
+  const stderr = at(error, 'stderr');
+  if (typeof status !== 'number' || typeof stderr !== 'string') {
+    assert.fail(`expected a failed child's status and stderr: ${String(error)}`);
+  }
+  return { status, stderr };
+}
+
 test('cli: one status line by default, exit 0 when completed', () => {
   const stdout = execFileSync('node', [cli, 'reduce', '--out', mkdtempSync(join(tmpdir(), 'reduce-'))], {
     input: run(says('ok', 'stop', tokenUsage())).join('\n'),
@@ -737,7 +751,7 @@ test('cli: writes transcript.md and status.json beside the input, exit 1 when fa
   try {
     execFileSync('node', [cli, 'reduce', events], { encoding: 'utf8', stdio: 'pipe' });
   } catch (error) {
-    code = (error as { status: number }).status;
+    code = failedChild(error).status;
   }
   assert.equal(code, 1);
   const transcript = readFileSync(join(dir, 'transcript.md'), 'utf8');
@@ -745,11 +759,11 @@ test('cli: writes transcript.md and status.json beside the input, exit 1 when fa
   // prose is body activity and the result block keeps the fallback.
   assert.match(transcript, /^## Result\n\(no assistant answer\)$/m);
   assert.match(transcript, /^broke$/m);
-  const status = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8'));
-  assert.equal(status.state, 'failed');
-  assert.equal(status.schema, 'pi-run-status/3');
-  assert.equal(status.requests_unmeasured, 1);
-  assert.deepEqual(status.context, { peak_tokens: null, requests_unmeasured: 1 });
+  const status: unknown = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8'));
+  assert.equal(at(status, 'state'), 'failed');
+  assert.equal(at(status, 'schema'), 'pi-run-status/3');
+  assert.equal(at(status, 'requests_unmeasured'), 1);
+  assert.deepEqual(at(status, 'context'), { peak_tokens: null, requests_unmeasured: 1 });
 });
 
 test('cli: alerts go to stderr, status line stays parseable; -q is silent', () => {
@@ -767,8 +781,7 @@ test('cli: usage errors exit 2 and name the problem', () => {
   try {
     execFileSync('node', [cli, 'reduce', '--budget-bytes', 'lots'], { encoding: 'utf8', stdio: 'pipe' });
   } catch (error) {
-    code = (error as { status: number }).status;
-    stderr = String((error as { stderr: string }).stderr);
+    ({ status: code, stderr } = failedChild(error));
   }
   assert.equal(code, 2);
   assert.match(stderr, /--budget-bytes needs a non-negative integer/);

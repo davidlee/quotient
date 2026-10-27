@@ -20,7 +20,7 @@
 // header grammar this loader parses. It is strict enough that `split` and one
 // regular expression parse it, so the loader needs no YAML or markdown
 // dependency; everything after the header is prose and is not parsed.
-import { createHash } from 'node:crypto';
+import { createHash, type Hash } from 'node:crypto';
 import { readdirSync, readFileSync, realpathSync, statSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { absent, canonicalPath, errorCode, within } from './paths.ts';
@@ -43,8 +43,10 @@ export const FILESYSTEMS = ['read', 'write'] as const;
 /** The filesystem capability a profile grants. */
 export type Filesystem = (typeof FILESYSTEMS)[number];
 
+const FILESYSTEM_SET: ReadonlySet<string> = new Set(FILESYSTEMS);
+
 export const isFilesystem = (value: unknown): value is Filesystem =>
-  (FILESYSTEMS as readonly unknown[]).includes(value);
+  typeof value === 'string' && FILESYSTEM_SET.has(value);
 
 /** pi's `--thinking` levels: the optional header field's vocabulary. */
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -52,7 +54,9 @@ export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhig
 /** One of pi's thinking levels. */
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
-const isThinkingLevel = (value: string): value is ThinkingLevel => (THINKING_LEVELS as readonly string[]).includes(value);
+const THINKING_LEVEL_SET: ReadonlySet<string> = new Set(THINKING_LEVELS);
+
+const isThinkingLevel = (value: string): value is ThinkingLevel => THINKING_LEVEL_SET.has(value);
 
 /** One validated profile document, frozen into a snapshot. */
 export type Profile = {
@@ -94,6 +98,88 @@ const HEADER_LINE = /^([a-z][a-z0-9_]*):([ \t].*)?$/;
 const MODEL = /^\S+$/;
 const TOOL_NAME = /^[a-z][a-z0-9_-]*$/;
 
+/** A parse that failed: the line, the file and the reason an operator has to act on. */
+type Failure = { ok: false; detail: string };
+
+/** The line indices of the header's opening and closing markers. */
+type HeaderBounds = { ok: true; open: number; close: number } | Failure;
+
+/** One header line: its key and trimmed value, or why it is not a header line. */
+type HeaderLine = { ok: true; key: string; value: string } | Failure;
+
+/** The line indices of the header's markers: the document opens with the first
+ *  non-blank line, and closes the header at the first `-->` after it. */
+function headerBounds(lines: readonly string[], path: string): HeaderBounds {
+  const open = lines.findIndex((line) => line.trim().length > 0);
+  if (open < 0 || lines[open].trim() !== HEADER_OPEN) {
+    return { ok: false, detail: `${path}: the document must open with "${HEADER_OPEN}"` };
+  }
+  const close = lines.findIndex((line, index) => index > open && line.trim() === HEADER_CLOSE);
+  if (close < 0) {
+    return { ok: false, detail: `${path}: the header opened on line ${String(open + 1)} and never closes with "${HEADER_CLOSE}"` };
+  }
+  return { ok: true, open, close };
+}
+
+/** One header line between the markers: one `key: value` of the header vocabulary. */
+function headerLine(line: string, path: string, index: number): HeaderLine {
+  const match = HEADER_LINE.exec(line);
+  if (match === null) {
+    return {
+      ok: false,
+      detail: `${path}:${String(index + 1)}: the header holds one "key: value" per line, and this line is neither`,
+    };
+  }
+  const [, key, raw = ''] = match;
+  const value = raw.trim();
+  if (value.length === 0) {
+    return { ok: false, detail: `${path}:${String(index + 1)}: the header field "${key}" has no value` };
+  }
+  if (!HEADER_FIELDS.includes(key)) {
+    return { ok: false, detail: `${path}:${String(index + 1)}: unknown header field "${key}"` };
+  }
+  return { ok: true, key, value };
+}
+
+/** The header's fields, by key: a line that is not one, or a key declared twice, refuses. */
+function headerFields(lines: readonly string[], path: string, from: number, to: number): { ok: true; fields: Map<string, string> } | Failure {
+  const fields = new Map<string, string>();
+  for (let index = from; index < to; index += 1) {
+    const field = headerLine(lines[index], path, index);
+    if (!field.ok) {return field;}
+    if (fields.has(field.key)) {
+      return { ok: false, detail: `${path}:${String(index + 1)}: the header field "${field.key}" is declared twice` };
+    }
+    fields.set(field.key, field.value);
+  }
+  return { ok: true, fields };
+}
+
+/** The `tools` field's comma-separated names: a value that is not a tool name, or a repeat, refuses. */
+function readTools(raw: string, path: string): { ok: true; tools: string[] } | Failure {
+  const tools: string[] = [];
+  for (const part of raw.split(',')) {
+    const tool = part.trim();
+    if (!TOOL_NAME.test(tool)) {
+      return { ok: false, detail: `${path}: "${tool}" is not a tool name (${TOOL_NAME.source})` };
+    }
+    if (tools.includes(tool)) {return { ok: false, detail: `${path}: the tool "${tool}" is listed twice` };}
+    tools.push(tool);
+  }
+  return { ok: true, tools };
+}
+
+/** The declared `thinking` level, absent when the header omits the field. */
+function readThinking(fields: ReadonlyMap<string, string>, path: string): { ok: true; thinking: ThinkingLevel | undefined } | Failure {
+  const declared = fields.get('thinking');
+  if (declared === undefined) {return { ok: true, thinking: undefined };}
+  if (!isThinkingLevel(declared)) {
+    const valid = THINKING_LEVELS.map((candidate) => `"${candidate}"`).join(', ');
+    return { ok: false, detail: `${path}: thinking must be one of ${valid}, not "${declared}"` };
+  }
+  return { ok: true, thinking: declared };
+}
+
 /**
  * Parse one document's header. Every failure names the file and, where there is
  * one, the line: a start-up refusal an operator cannot locate is not a refusal
@@ -103,47 +189,27 @@ function parseDocument(
   name: string,
   path: string,
   text: string,
-): { ok: true; profile: Profile } | { ok: false; detail: string } {
+): { ok: true; profile: Profile } | Failure {
   const lines = text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
-  const open = lines.findIndex((line) => line.trim().length > 0);
-  if (open < 0 || lines[open].trim() !== HEADER_OPEN) {
-    return { ok: false, detail: `${path}: the document must open with "${HEADER_OPEN}"` };
-  }
-  const close = lines.findIndex((line, index) => index > open && line.trim() === HEADER_CLOSE);
-  if (close < 0) {
-    return { ok: false, detail: `${path}: the header opened on line ${open + 1} and never closes with "${HEADER_CLOSE}"` };
-  }
+  const header = readHeader(lines, path);
+  if (!header.ok) {return header;}
+  return buildProfile(name, path, header.fields);
+}
 
-  const fields = new Map<string, string>();
-  for (let index = open + 1; index < close; index += 1) {
-    const match = HEADER_LINE.exec(lines[index]);
-    if (match === null) {
-      return {
-        ok: false,
-        detail: `${path}:${index + 1}: the header holds one "key: value" per line, and this line is neither`,
-      };
-    }
-    const [, key, raw = ''] = match;
-    const value = raw.trim();
-    if (value.length === 0) {
-      return { ok: false, detail: `${path}:${index + 1}: the header field "${key}" has no value` };
-    }
-    if (!HEADER_FIELDS.includes(key)) {
-      return { ok: false, detail: `${path}:${index + 1}: unknown header field "${key}"` };
-    }
-    if (fields.has(key)) {
-      return { ok: false, detail: `${path}:${index + 1}: the header field "${key}" is declared twice` };
-    }
-    fields.set(key, value);
-  }
+/** The header's fields, once the document opens and closes it and declares every required field. */
+function readHeader(lines: readonly string[], path: string): { ok: true; fields: Map<string, string> } | Failure {
+  const bounds = headerBounds(lines, path);
+  if (!bounds.ok) {return bounds;}
+  const header = headerFields(lines, path, bounds.open + 1, bounds.close);
+  if (!header.ok) {return header;}
   for (const key of REQUIRED_HEADER_FIELDS) {
-    if (!fields.has(key)) {return { ok: false, detail: `${path}: the header is missing "${key}"` };}
+    if (!header.fields.has(key)) {return { ok: false, detail: `${path}: the header is missing "${key}"` };}
   }
+  return header;
+}
 
-  const filesystem = fields.get('filesystem');
-  if (!isFilesystem(filesystem)) {
-    return { ok: false, detail: `${path}: filesystem must be "read" or "write", not "${filesystem}"` };
-  }
+/** The `model` field: one token, and never one that carries a thinking level. */
+function readModel(fields: ReadonlyMap<string, string>, path: string): { ok: true; model: string } | Failure {
   const model = fields.get('model') ?? '';
   if (!MODEL.test(model)) {return { ok: false, detail: `${path}: model must be one non-empty token` };}
   const suffix = model.slice(model.lastIndexOf(':') + 1);
@@ -153,26 +219,22 @@ function parseDocument(
       detail: `${path}: model "${model}" carries the level ":${suffix}"; set it with the thinking field instead`,
     };
   }
+  return { ok: true, model };
+}
 
-  let thinking: ThinkingLevel | undefined;
-  const declaredThinking = fields.get('thinking');
-  if (declaredThinking !== undefined) {
-    if (!isThinkingLevel(declaredThinking)) {
-      const valid = THINKING_LEVELS.map((candidate) => `"${candidate}"`).join(', ');
-      return { ok: false, detail: `${path}: thinking must be one of ${valid}, not "${declaredThinking}"` };
-    }
-    thinking = declaredThinking;
+/** The profile a validated header declares: its capability, model, thinking and tools. */
+function buildProfile(name: string, path: string, fields: ReadonlyMap<string, string>): { ok: true; profile: Profile } | Failure {
+  const filesystem = fields.get('filesystem');
+  if (!isFilesystem(filesystem)) {
+    return { ok: false, detail: `${path}: filesystem must be "read" or "write", not "${String(filesystem)}"` };
   }
-
-  const tools: string[] = [];
-  for (const part of (fields.get('tools') ?? '').split(',')) {
-    const tool = part.trim();
-    if (!TOOL_NAME.test(tool)) {
-      return { ok: false, detail: `${path}: "${tool}" is not a tool name (${TOOL_NAME.source})` };
-    }
-    if (tools.includes(tool)) {return { ok: false, detail: `${path}: the tool "${tool}" is listed twice` };}
-    tools.push(tool);
-  }
+  const modelField = readModel(fields, path);
+  if (!modelField.ok) {return modelField;}
+  const thinkingField = readThinking(fields, path);
+  if (!thinkingField.ok) {return thinkingField;}
+  const toolsField = readTools(fields.get('tools') ?? '', path);
+  if (!toolsField.ok) {return toolsField;}
+  const thinking: ThinkingLevel | undefined = thinkingField.thinking;
 
   // An omitted `thinking` adds no key at all: a profile's shape stays exactly the
   // fields its document declared.
@@ -182,8 +244,8 @@ function parseDocument(
       name,
       source: path,
       filesystem,
-      model,
-      tools: Object.freeze(tools),
+      model: modelField.model,
+      tools: Object.freeze(toolsField.tools),
       ...(thinking === undefined ? {} : { thinking }),
     }),
   };
@@ -231,6 +293,13 @@ function readDocument(path: string, document: string): { ok: true; loaded: Loade
  * layers' contents and paths and nothing else.
  */
 export function loadProfiles(layers: readonly string[]): SnapshotLoad {
+  const read = readWinners(layers);
+  if (!read.ok) {return read;}
+  return { ok: true, snapshot: snapshotOf(layers, read.winners) };
+}
+
+/** The winning document per name: the highest layer's, every layer validated. */
+function readWinners(layers: readonly string[]): { ok: true; winners: Map<string, Loaded> } | { ok: false; path: string; detail: string } {
   const winners = new Map<string, Loaded>();
   for (const layer of layers) {
     const listed = readLayer(layer);
@@ -241,25 +310,38 @@ export function loadProfiles(layers: readonly string[]): SnapshotLoad {
       if (!winners.has(read.loaded.profile.name)) {winners.set(read.loaded.profile.name, read.loaded);}
     }
   }
+  return { ok: true, winners };
+}
 
+/** One winning document into the digest: its name, its source path and its bytes, each NUL-terminated. */
+function digestDocument(digest: Hash, name: string, profile: Profile, bytes: Buffer): void {
+  for (const part of [name, profile.source, bytes]) {
+    digest.update(part);
+    digest.update('\0');
+  }
+}
+
+/**
+ * The snapshot of WINNERS, in name order so the digest describes the documents
+ * and not the order they were read in.
+ */
+function snapshotOf(layers: readonly string[], winners: ReadonlyMap<string, Loaded>): Snapshot {
   const profiles = new Map<string, Profile>();
   const digest = createHash('sha256');
   for (const name of [...winners.keys()].sort()) {
-    const { profile, bytes } = winners.get(name)!;
-    for (const part of [name, profile.source, bytes]) {
-      digest.update(part);
-      digest.update('\0');
-    }
-    profiles.set(name, profile);
+    const winner = winners.get(name);
+    if (winner === undefined) {continue;} // the name is one of `winners`' own keys
+    digestDocument(digest, name, winner.profile, winner.bytes);
+    profiles.set(name, winner.profile);
   }
 
   // The entries are frozen at construction; the map is never written again, and
   // every accessor below hands back a copy rather than the stored object.
-  return {
-    ok: true,
-    snapshot: Object.freeze({ layers: Object.freeze([...layers]), profiles, digest: digest.digest('hex') }),
-  };
+  return Object.freeze({ layers: Object.freeze([...layers]), profiles, digest: digest.digest('hex') });
 }
+
+/** LISTED, or FALLBACK when nothing is listed: the refusal's own word for "none". */
+const orNone = (listed: string, fallback: string): string => (listed.length > 0 ? listed : fallback);
 
 /** The four profile refusals, in the order step 3 decides them. */
 export type ProfileRefusal = 'profile-invalid' | 'profile-unknown' | 'profile-not-allowed' | 'profile-capability-mismatch';
@@ -293,14 +375,14 @@ export function resolveProfile(
     return {
       ok: false,
       reason: 'profile-unknown',
-      detail: `profile "${name}" is not in the start-up snapshot of ${snapshot.layers.join(', ') || 'no layer'}`,
+      detail: `profile "${name}" is not in the start-up snapshot of ${orNone(snapshot.layers.join(', '), 'no layer')}`,
     };
   }
   if (!Object.hasOwn(pinned, name)) {
     return {
       ok: false,
       reason: 'profile-not-allowed',
-      detail: `profile "${name}" is not listed in the policy's profiles (${Object.keys(pinned).join(', ') || 'none'})`,
+      detail: `profile "${name}" is not listed in the policy's profiles (${orNone(Object.keys(pinned).join(', '), 'none')})`,
     };
   }
   if (pinned[name] !== found.filesystem) {
@@ -331,6 +413,59 @@ export type RootResolution =
   | { ok: true; root: string; rootsEntry: string }
   | { ok: false; reason: RootRefusal; detail: string };
 
+/** A canonical form that is not a directory: what step 4 refuses before the allowlist. */
+type Canonical = { ok: true; path: string } | { ok: false; reason: RootRefusal; detail: string };
+
+/** The candidate path: an absent `cwd` is the launch directory, a relative one resolves against it. */
+function rootCandidate(requested: string | undefined, launchDir: string): string {
+  if (requested === undefined) {return launchDir;}
+  return isAbsolute(requested) ? requested : resolve(launchDir, requested);
+}
+
+/** The candidate's realpath, which must exist and be a directory. */
+function canonicalDirectory(candidate: string): Canonical {
+  let canonical: string;
+  try {
+    canonical = realpathSync(candidate);
+  } catch (error) {
+    if (errorCode(error) === 'ENOTDIR') {
+      return { ok: false, reason: 'root-not-a-directory', detail: `${candidate} is not a directory` };
+    }
+    return { ok: false, reason: 'root-missing', detail: `${candidate} does not exist (${errorCode(error)})` };
+  }
+  let stats: ReturnType<typeof statSync>;
+  try {
+    stats = statSync(canonical);
+  } catch (error) {
+    return { ok: false, reason: 'root-missing', detail: `${canonical} does not exist (${errorCode(error)})` };
+  }
+  if (!stats.isDirectory()) {
+    return { ok: false, reason: 'root-not-a-directory', detail: `${canonical} is not a directory` };
+  }
+  return { ok: true, path: canonical };
+}
+
+/**
+ * The DEEPEST canonical roots entry containing CANONICAL, if any contains it.
+ *
+ * The same predicate the child-view check uses (DEC-095): `canonical` is already
+ * a realpath, so the comparison is against the allowlisted root's canonical form.
+ * `/work/oneevil` is not inside `/work/one`, however much of it the string shares,
+ * and a root that does not exist canonicalises to a path that matches nothing.
+ * Every matching entry contains `canonical`, so the deepest one contains all the
+ * others: `within(best, candidate)` is what makes the choice order-independent.
+ */
+function deepestRoot(allowedRoots: readonly string[], canonical: string): string | undefined {
+  let rootsEntry: string | undefined;
+  for (const allowedRoot of allowedRoots) {
+    const matched = canonicalPath(allowedRoot);
+    if (within(matched, canonical) && (rootsEntry === undefined || within(rootsEntry, matched))) {
+      rootsEntry = matched;
+    }
+  }
+  return rootsEntry;
+}
+
 /**
  * Step 4: canonicalise the call's root and allowlist it by path components,
  * reporting the matched roots entry as well.
@@ -351,49 +486,17 @@ export function resolveRoot(
   launchDir: string,
   allowedRoots: readonly string[],
 ): RootResolution {
-  const candidate =
-    requested === undefined ? launchDir : isAbsolute(requested) ? requested : resolve(launchDir, requested);
-
-  let canonical: string;
-  try {
-    canonical = realpathSync(candidate);
-  } catch (error) {
-    if (errorCode(error) === 'ENOTDIR') {
-      return { ok: false, reason: 'root-not-a-directory', detail: `${candidate} is not a directory` };
-    }
-    return { ok: false, reason: 'root-missing', detail: `${candidate} does not exist (${errorCode(error)})` };
-  }
-  let stats: ReturnType<typeof statSync>;
-  try {
-    stats = statSync(canonical);
-  } catch (error) {
-    return { ok: false, reason: 'root-missing', detail: `${canonical} does not exist (${errorCode(error)})` };
-  }
-  if (!stats.isDirectory()) {
-    return { ok: false, reason: 'root-not-a-directory', detail: `${canonical} is not a directory` };
-  }
-
-  // The same predicate the child-view check uses (DEC-095): `canonical` is already
-  // a realpath, so the comparison is against the allowlisted root's canonical form.
-  // `/work/oneevil` is not inside `/work/one`, however much of it the string shares,
-  // and a root that does not exist canonicalises to a path that matches nothing.
-  // Every matching entry contains `canonical`, so the deepest one contains all the
-  // others: `within(best, candidate)` is what makes the choice order-independent.
-  let rootsEntry: string | undefined;
-  for (const allowedRoot of allowedRoots) {
-    const matched = canonicalPath(allowedRoot);
-    if (within(matched, canonical) && (rootsEntry === undefined || within(rootsEntry, matched))) {
-      rootsEntry = matched;
-    }
-  }
+  const canonical = canonicalDirectory(rootCandidate(requested, launchDir));
+  if (!canonical.ok) {return canonical;}
+  const rootsEntry = deepestRoot(allowedRoots, canonical.path);
   if (rootsEntry === undefined) {
     return {
       ok: false,
       reason: 'root-not-allowlisted',
-      detail: `${canonical} is not inside an allowlisted root (${allowedRoots.join(', ') || 'none'})`,
+      detail: `${canonical.path} is not inside an allowlisted root (${orNone(allowedRoots.join(', '), 'none')})`,
     };
   }
-  return { ok: true, root: canonical, rootsEntry };
+  return { ok: true, root: canonical.path, rootsEntry };
 }
 
 /** DEC-103's token: the call asked for a tool the profile does not grant. */

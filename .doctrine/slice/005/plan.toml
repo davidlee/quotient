@@ -1,0 +1,115 @@
+# Implementation plan for SL-005 — the authored, durable phase plan.
+#
+# This is the single source of each phase's objective, criteria, verification,
+# and links. Runtime status lives separately under .doctrine/state/ (phase
+# tracking) — never record progress here. Hand-edit freely: the tool reads this
+# file but does not rewrite it.
+schema  = "doctrine.plan.overview"
+version = 1
+slice   = "SL-005"
+
+# Canonical spec/requirement links — cite ids, never restate what they say. The
+# plan reader does not model these yet, so nothing downstream consumes them.
+[specs]
+primary       = []
+collaborators = []
+
+[requirements]
+targets      = []
+dependencies = []
+
+# One [[phase]] table per phase, in execution order.
+[[phase]]
+id        = "PHASE-01"
+name      = "Foundations: ignore worktrees, baseline, typed JSON readers and contract guards"
+objective = "eslint ignores .worktrees; a per-file baseline is recorded; src/json.ts gains the small readers over unknown that D1 needs; test-rig.ts parsers (jsonLines, attempts, replies, waitForReplies, resultDocument and kin) return unknown-narrowed or contract-typed values via type guards over the existing validators. Orchestrator-authored, so workers follow one pattern."
+entrance_criteria = [
+  { id = "EN-1", text = "Previous phase exits hold (PHASE-01: design locked). `just gate` green on the starting commit; per-file counts match research/lint-baseline.tsv as ratcheted by the previous phase." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "`npx eslint .` no longer reports .worktrees/ paths; research/lint-baseline.tsv records per-file main-tree counts." },
+  { id = "EX-2", text = "First red: src/json.test.ts cases for the new readers fail before they exist; recorded in the phase sheet." },
+  { id = "EX-3", text = "test-rig.ts has no `Record<string, any>`; resultDocument returns AgentResult and fails a test on a contract-invalid document; a typed-guard helper over Validation is exported for other wire documents." },
+  { id = "EX-4", text = "`just gate` green; test count not below 741; no file above its baseline count; files in scope lint clean (`npx eslint <files> --max-warnings 0`). Baseline TSV ratcheted down to the new counts." },
+]
+verification = [
+  { id = "VT-1", expects = "json.test.ts covers isRecord and each new reader over records, arrays, null and primitives.", test_file = "src/json.test.ts", keywords = ["isRecord"], waived = false },
+  { id = "VA-1", expects = "Diff scan (design sec-2 D4): no new `as`, non-null `!`, `any`, or `eslint-disable` without a one-rule reason; every rewritten truthiness test reviewed for 0 / empty-string semantics; findings recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-02"
+name      = "Test files to zero"
+objective = "Every src/**/*.test.ts lints clean, using the PHASE-01 helpers; done by pi workers one cluster per run (gate, profiles, session, spawn, server, the rest), verified by the orchestrator."
+entrance_criteria = [
+  { id = "EN-1", text = "Previous phase exits hold (PHASE-01: design locked). `just gate` green on the starting commit; per-file counts match research/lint-baseline.tsv as ratcheted by the previous phase." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "Every file matching src/**/*.test.ts lints clean." },
+  { id = "EX-2", text = "No test removed or weakened: assertions keep their expected values; test count not below 741." },
+  { id = "EX-3", text = "`just gate` green; test count not below 741; no file above its baseline count; files in scope lint clean (`npx eslint <files> --max-warnings 0`). Baseline TSV ratcheted down to the new counts." },
+]
+verification = [
+  { id = "VT-1", expects = "The suite passes under the new typing.", test_file = "src/server/test-rig.ts", keywords = ["resultDocument"], waived = false },
+  { id = "VA-1", expects = "Diff scan (design sec-2 D4): no new `as`, non-null `!`, `any`, or `eslint-disable` without a one-rule reason; every rewritten truthiness test reviewed for 0 / empty-string semantics; findings recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-03"
+name      = "reduce to zero"
+objective = "src/reduce/reduce.ts and src/reduce/cli.ts lint clean: pi events read as Record<string, unknown> through json.ts readers; over-threshold functions split into small named pure functions (D2). Accounting behaviour unchanged."
+entrance_criteria = [
+  { id = "EN-1", text = "Previous phase exits hold (PHASE-01: design locked). `just gate` green on the starting commit; per-file counts match research/lint-baseline.tsv as ratcheted by the previous phase." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "src/reduce/** lints clean." },
+  { id = "EX-2", text = "reduce.test.ts passes unchanged in its expectations." },
+  { id = "EX-3", text = "`just gate` green; test count not below 741; no file above its baseline count; files in scope lint clean (`npx eslint <files> --max-warnings 0`). Baseline TSV ratcheted down to the new counts." },
+]
+verification = [
+  { id = "VT-1", expects = "reduce.test.ts accounting and status cases pass unchanged.", test_file = "src/reduce/reduce.test.ts", keywords = ["countRecord"], waived = false },
+  { id = "VA-1", expects = "Diff scan (design sec-2 D4): no new `as`, non-null `!`, `any`, or `eslint-disable` without a one-rule reason; every rewritten truthiness test reviewed for 0 / empty-string semantics; findings recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-04"
+name      = "Remaining production files to zero"
+objective = "Every remaining src file (spawn.ts, session.ts, profiles.ts, policy.ts, help.ts, result.ts, server.ts, gate.ts, root.ts, paths.ts, cli.ts, others) lints clean; complexity by extraction (D2)."
+entrance_criteria = [
+  { id = "EN-1", text = "Previous phase exits hold (PHASE-01: design locked). `just gate` green on the starting commit; per-file counts match research/lint-baseline.tsv as ratcheted by the previous phase." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "`npx eslint . --max-warnings 0` exits 0." },
+  { id = "EX-2", text = "`just gate` green; test count not below 741; no file above its baseline count; files in scope lint clean (`npx eslint <files> --max-warnings 0`). Baseline TSV ratcheted down to the new counts." },
+]
+verification = [
+  { id = "VT-1", expects = "Whole suite passes.", test_file = "src/server/server.test.ts", keywords = ["describe"], waived = false },
+  { id = "VA-1", expects = "Diff scan (design sec-2 D4): no new `as`, non-null `!`, `any`, or `eslint-disable` without a one-rule reason; every rewritten truthiness test reviewed for 0 / empty-string semantics; findings recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
+
+[[phase]]
+id        = "PHASE-05"
+name      = "Gate lint; resolve IMP-002"
+objective = "`lint` joins `just gate`; the justfile's 'Not yet in gate' comment goes; IMP-002 resolved citing SL-005."
+entrance_criteria = [
+  { id = "EN-1", text = "Previous phase exits hold (PHASE-01: design locked). `just gate` green on the starting commit; per-file counts match research/lint-baseline.tsv as ratcheted by the previous phase." },
+]
+exit_criteria = [
+  { id = "EX-1", text = "justfile: gate depends on lint; `just gate` green." },
+  { id = "EX-2", text = "IMP-002 status resolved with a note citing SL-005." },
+]
+verification = [
+  { id = "VT-1", expects = "gate recipe lists lint.", test_file = "justfile", keywords = ["gate: lint", "lint:"], waived = false },
+  { id = "VA-1", expects = "Diff scan (design sec-2 D4): no new `as`, non-null `!`, `any`, or `eslint-disable` without a one-rule reason; every rewritten truthiness test reviewed for 0 / empty-string semantics; findings recorded in the phase sheet." },
+]
+specs        = []
+requirements = []
+

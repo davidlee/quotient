@@ -9,30 +9,36 @@
 // nothing is spawned.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { isRecord } from '../json.ts';
 import {
   MCP_EXTENSION,
   PROFILE_NAME,
   THINKING_LEVELS,
   checkProfileExtensions,
   effectiveTools,
+  isFilesystem,
   loadProfiles,
   resolveProfile,
   resolveRoot,
-  toolsArgument, type Filesystem 
+  toolsArgument, type Filesystem, type Profile, type Snapshot
 } from './profiles.ts';
 import { readPolicy } from './policy.ts';
 import {
   attempts,
   callLine,
   converse,
+  jsonLines,
   launchEnv,
   profileDocument,
+  ranResult,
+  refusalDocument,
+  resultDocument,
   validPolicy,
   writeProfiles,
-  xdgProfileLayer, type Env 
+  xdgProfileLayer, type Env
 } from './test-rig.ts';
 
 /** The example documents the package ships to start from (not a built-in layer). */
@@ -49,17 +55,30 @@ function profileDir(documents: Record<string, string>): string {
 const pinRead = (...names: string[]): Record<string, Filesystem> =>
   Object.fromEntries(names.map((name) => [name, 'read' as const]));
 
-function snapshotOf(documents: Record<string, string>) {
-  const loaded = loadProfiles([profileDir(documents)]);
+/** The start-up snapshot of LAYERS, which must load. */
+function snapshotOfLayers(layers: readonly string[]): Snapshot {
+  const loaded = loadProfiles(layers);
   if (!loaded.ok) {assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);}
   return loaded.snapshot;
+}
+
+/** The start-up snapshot of one temp layer holding DOCUMENTS. */
+function snapshotOf(documents: Record<string, string>): Snapshot {
+  return snapshotOfLayers([profileDir(documents)]);
+}
+
+/** The named entry of SNAPSHOT, failing the test when it is absent. */
+function profileOf(snapshot: Snapshot, name: string): Profile {
+  const profile = snapshot.profiles.get(name);
+  if (profile === undefined) {assert.fail(`the ${name} profile is missing`);}
+  return profile;
 }
 
 /** Load one `read` document that must refuse at start-up; the detail it names. */
 function refuseDocument(text: string, detail: RegExp): void {
   const dir = profileDir({ read: text });
   const loaded = loadProfiles([dir]);
-  if (loaded.ok) {assert.fail(`expected a start-up refusal matching ${detail}`);}
+  if (loaded.ok) {assert.fail(`expected a start-up refusal matching ${String(detail)}`);}
   assert.equal(loaded.path, join(dir, 'read.md'));
   assert.match(loaded.detail, detail);
 }
@@ -88,36 +107,36 @@ function acceptRoot(resolution: ReturnType<typeof resolveRoot>): { root: string;
 
 // ── The example documents ──────────────────────────────────────────────────
 
-test('every example document loads as a profile layer', () => {
-  const loaded = loadProfiles([EXAMPLE_PROFILES]);
-  if (!loaded.ok) {assert.fail(`the example profiles do not validate: ${loaded.path}: ${loaded.detail}`);}
-  const snapshot = loaded.snapshot;
-
-  assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
-  const shipped = readdirSync(EXAMPLE_PROFILES)
+/** The names of the example documents the package ships. */
+function shippedProfiles(): string[] {
+  return readdirSync(EXAMPLE_PROFILES)
     .filter((name) => name.endsWith('.md'))
     .map((name) => name.slice(0, -'.md'.length))
     .sort();
+}
+
+test('every example document loads as a profile layer', () => {
+  const snapshot = snapshotOfLayers([EXAMPLE_PROFILES]);
+
+  assert.match(snapshot.digest, /^[0-9a-f]{64}$/);
+  const shipped = shippedProfiles();
   assert.deepEqual([...snapshot.profiles.keys()].sort(), shipped, 'every shipped document is exercised');
   assert.ok(shipped.includes('read') && shipped.includes('write'), 'a read and a write example ship');
 
-  const read = snapshot.profiles.get('read');
-  if (read === undefined) {assert.fail('the read profile is missing');}
+  const read = profileOf(snapshot, 'read');
   assert.equal(read.filesystem, 'read');
   assert.equal(read.model, 'llm-gateway/deepseek-flash');
   assert.equal(read.thinking, 'off');
   assert.ok(read.tools.includes('bash'), 'read-only is an OS claim, not a tool list');
 
-  const write = snapshot.profiles.get('write');
-  if (write === undefined) {assert.fail('the write profile is missing');}
+  const write = profileOf(snapshot, 'write');
   assert.equal(write.filesystem, 'write');
   assert.equal(write.model, 'llm-gateway/deepseek-flash');
   assert.equal(write.thinking, 'off');
   assert.ok(write.tools.includes('bash'));
   assert.ok(write.tools.includes('write'));
 
-  const research = snapshot.profiles.get('research');
-  if (research === undefined) {assert.fail('the research profile is missing');}
+  const research = profileOf(snapshot, 'research');
   assert.equal(research.filesystem, 'read');
   assert.equal(research.thinking, 'low');
   assert.deepEqual(research.tools, ['read', 'grep', 'find', 'ls', 'bash']);
@@ -127,8 +146,7 @@ test('every example document loads as a profile layer', () => {
     ['judgement', 'high', read],
     ['implement', 'high', write],
   ] as const) {
-    const profile = snapshot.profiles.get(name);
-    if (profile === undefined) {assert.fail(`the ${name} profile is missing`);}
+    const profile = profileOf(snapshot, name);
     assert.equal(profile.thinking, thinking);
     assert.equal(profile.filesystem, base.filesystem);
     assert.equal(profile.model, base.model);
@@ -245,7 +263,7 @@ test('an invalid document refuses at start-up, naming the path, and never per ca
     { launchDir: wire.root },
   );
   assert.equal(replies.length, 1);
-  const doc = JSON.parse(replies[0].result.content[0].text);
+  const doc = refusalDocument(replies[0]);
   assert.equal(doc.state, 'refused');
   assert.equal(doc.refusal.reason, 'profile-invalid');
   assert.match(doc.refusal.detail, /broken\.md/);
@@ -283,12 +301,11 @@ test('loadProfiles: per name the launch-dir layer wins, and each profile carries
     { read: document({ tools: 'read' }) },
     { read: document(), write: document({ filesystem: 'write' }) },
   );
-  const loaded = loadProfiles([launch, xdg]);
-  if (!loaded.ok) {assert.fail(`expected a snapshot, got ${loaded.path}: ${loaded.detail}`);}
-  const read = loaded.snapshot.profiles.get('read');
-  assert.deepEqual(read?.tools, ['read'], 'the launch-dir document shadows the XDG one');
-  assert.equal(read?.source, join(launch, 'read.md'));
-  assert.equal(loaded.snapshot.profiles.get('write')?.source, join(xdg, 'write.md'), 'an unshadowed name falls through');
+  const snapshot = snapshotOfLayers([launch, xdg]);
+  const read = profileOf(snapshot, 'read');
+  assert.deepEqual(read.tools, ['read'], 'the launch-dir document shadows the XDG one');
+  assert.equal(read.source, join(launch, 'read.md'));
+  assert.equal(snapshot.profiles.get('write')?.source, join(xdg, 'write.md'), 'an unshadowed name falls through');
 });
 
 test('loadProfiles: a missing layer is empty; an unreadable one refuses start-up', () => {
@@ -380,9 +397,15 @@ test('step 3 pins capability: a document whose filesystem differs from the polic
 test('the policy map is own-keyed: a profile named constructor is not mapped by Object.prototype', () => {
   const snapshot = snapshotOf({ constructor: document() });
   refuseProfile(resolveProfile(snapshot, 'constructor', pinRead('read')), 'profile-not-allowed');
-  const parsed = JSON.parse('{"__proto__": "read"}') as Record<string, Filesystem>;
+  const parsed: unknown = JSON.parse('{"__proto__": "read"}');
+  if (!isProfileMap(parsed)) {assert.fail('the parsed map is not a profile map');}
   refuseProfile(resolveProfile(snapshot, 'constructor', parsed), 'profile-not-allowed');
 });
+
+/** A parsed policy profile map: every own value a capability. */
+function isProfileMap(value: unknown): value is Record<string, Filesystem> {
+  return isRecord(value) && Object.values(value).every(isFilesystem);
+}
 
 // ── Step 4: the root (EX-4) ────────────────────────────────────────────────
 
@@ -511,7 +534,7 @@ function refuseTools(
   detail?: RegExp,
   note?: string,
 ): void {
-  if (resolution.ok) {assert.fail(`expected a ${reason} refusal, got [${resolution.tools.join(', ')}]${note ? ` (${note})` : ''}`);}
+  if (resolution.ok) {assert.fail(`expected a ${reason} refusal, got [${resolution.tools.join(', ')}]${note === undefined ? '' : ` (${note})`}`);}
   assert.equal(resolution.reason, reason);
   if (detail !== undefined) {assert.match(resolution.detail, detail);}
 }
@@ -532,26 +555,24 @@ function mintWire(options: { documents?: Record<string, string>; policy?: Record
   return { env: launchEnv(dir), runDir: join(dir, 'run'), root };
 }
 
-async function drive(args: Record<string, unknown>, wire: Wire): Promise<Record<string, any>> {
+/** The one reply a call answers with: a tool result, never a JSON-RPC error. */
+async function callOnce(args: Record<string, unknown>, wire: Wire): Promise<Record<string, unknown>> {
   const { replies } = await converse([callLine(1, args)], wire.env, { launchDir: wire.root });
   assert.equal(replies.length, 1);
-  assert.equal(replies[0].error, undefined, 'a refusal is a tool result, never a JSON-RPC error');
-  return JSON.parse(replies[0].result.content[0].text);
+  const reply = replies[0];
+  assert.equal(reply.error, undefined, 'a refusal is a tool result, never a JSON-RPC error');
+  return reply;
 }
 
 test('a call that clears steps 3-6 reaches the run, with an absent cwd taken from the launch directory', async () => {
   const wire = mintWire();
-  const doc = await drive({ prompt: 'review this', profile: 'read', tools: ['read', 'bash'] }, wire);
+  const doc = ranResult(await callOnce({ prompt: 'review this', profile: 'read', tools: ['read', 'bash'] }, wire));
   assert.equal(doc.state, 'failed');
   assert.equal(doc.termination, 'spawn');
   // The run was reached: step 8 passed, a run directory exists, and its `spawn`
   // record names the root the absent `cwd` resolved to through the launch
   // directory and the policy's allowlist.
-  assert.ok(doc.artifacts !== null);
-  const audit = readFileSync(doc.artifacts.audit, 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const audit = jsonLines(doc.artifacts.audit);
   assert.equal(audit[0].record, 'admitted', 'the run was published before it was spawned');
   const spawned = audit.find((record) => record.record === 'spawn');
   assert.ok(spawned !== undefined, 'the run audited its spawn');
@@ -566,22 +587,22 @@ test('a call that clears steps 3-6 reaches the run, with an absent cwd taken fro
 test('the profile refusals reach the caller as tool results, in grammar -> snapshot -> map -> capability order', async () => {
   const wire = mintWire();
 
-  const malformed = await drive({ prompt: 'hi', profile: 'read/', cwd: wire.root }, wire);
+  const malformed = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read/', cwd: wire.root }, wire));
   assert.equal(malformed.refusal.reason, 'profile-invalid');
   assert.match(malformed.refusal.detail, /read\//);
 
-  const unknown = await drive({ prompt: 'hi', profile: 'ghost', cwd: wire.root }, wire);
+  const unknown = refusalDocument(await callOnce({ prompt: 'hi', profile: 'ghost', cwd: wire.root }, wire));
   assert.equal(unknown.refusal.reason, 'profile-unknown');
 
-  const listed = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root }, wire);
+  const listed = resultDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: wire.root }, wire));
   assert.equal(listed.state, 'failed', 'the same name is admitted once the policy lists it');
 
   const restricted = mintWire({ policy: { profiles: {} } });
-  const refused = await drive({ prompt: 'hi', profile: 'read', cwd: restricted.root }, restricted);
+  const refused = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: restricted.root }, restricted));
   assert.equal(refused.refusal.reason, 'profile-not-allowed');
 
   const elevated = mintWire({ policy: { profiles: { read: 'write' } } });
-  const mismatch = await drive({ prompt: 'hi', profile: 'read', cwd: elevated.root }, elevated);
+  const mismatch = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: elevated.root }, elevated));
   assert.equal(mismatch.refusal.reason, 'profile-capability-mismatch');
   assert.equal(attempts(elevated.runDir).at(-1)?.reason, 'profile-capability-mismatch', 'the refusal is in the ledger');
 });
@@ -589,10 +610,10 @@ test('the profile refusals reach the caller as tool results, in grammar -> snaps
 test('a root outside the allowlist, or missing, refuses before the seam', async () => {
   const wire = mintWire();
 
-  const missing = await drive({ prompt: 'hi', profile: 'read', cwd: join(wire.root, 'absent') }, wire);
+  const missing = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: join(wire.root, 'absent') }, wire));
   assert.equal(missing.refusal.reason, 'root-missing');
 
-  const outside = await drive({ prompt: 'hi', profile: 'read', cwd: '/tmp' }, wire);
+  const outside = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: '/tmp' }, wire));
   assert.equal(outside.refusal.reason, 'root-not-allowlisted');
 });
 
@@ -601,31 +622,35 @@ test('a capability with no wrapper form refuses wrapper-unavailable', async () =
     documents: { read: document(), write: document({ filesystem: 'write' }) },
     policy: { forms: { read: '/nix/store/aaa/bin/pi-mcp-read' } },
   });
-  const doc = await drive({ prompt: 'hi', profile: 'write', cwd: wire.root }, wire);
+  const doc = refusalDocument(await callOnce({ prompt: 'hi', profile: 'write', cwd: wire.root }, wire));
   assert.equal(doc.refusal.reason, 'wrapper-unavailable');
   assert.match(doc.refusal.detail, /write/);
 });
 
 test('context ceiling bounds are enforced, and the retired tokens field is refused with guidance', async () => {
   const wire = mintWire();
-  const legacy = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { tokens: 100001 } }, wire);
+  const legacy = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { tokens: 100001 } }, wire));
   assert.equal(legacy.refusal.reason, 'request-invalid');
   assert.match(legacy.refusal.detail, /ceilings\.context_tokens/);
 
-  const doc = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { context_tokens: 100001 } }, wire);
+  const doc = refusalDocument(
+    await callOnce({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { context_tokens: 100001 } }, wire),
+  );
   assert.equal(doc.refusal.reason, 'ceiling-above-maximum');
   assert.match(doc.refusal.detail, /context_tokens/);
   assert.match(doc.refusal.detail, /100001/);
   assert.match(doc.refusal.detail, /100000/);
 
-  const clamped = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { context_tokens: 10 } }, wire);
+  const clamped = resultDocument(
+    await callOnce({ prompt: 'hi', profile: 'read', cwd: wire.root, ceilings: { context_tokens: 10 } }, wire),
+  );
   assert.equal(clamped.state, 'failed', 'a ceiling at or below the maximum is clamped, not refused');
 });
 
 test('a profile naming an mcp__ tool under a form with no builtin:mcp extension refuses profile-invalid', async () => {
   const documents = { read: document({ tools: 'read, mcp__doctrine__search' }) };
   const withoutExtension = mintWire({ documents });
-  const refused = await drive({ prompt: 'hi', profile: 'read', cwd: withoutExtension.root }, withoutExtension);
+  const refused = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: withoutExtension.root }, withoutExtension));
   assert.equal(refused.refusal.reason, 'profile-invalid');
   assert.match(refused.refusal.detail, /builtin:mcp/);
 
@@ -633,13 +658,13 @@ test('a profile naming an mcp__ tool under a form with no builtin:mcp extension 
     documents,
     policy: { forms: { read: { path: '/nix/store/aaa/bin/pi-mcp-read', extensions: ['builtin:mcp'] } } },
   });
-  const admitted = await drive({ prompt: 'hi', profile: 'read', cwd: withExtension.root }, withExtension);
+  const admitted = resultDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: withExtension.root }, withExtension));
   assert.equal(admitted.state, 'failed', 'the form that passes -e builtin:mcp admits the same profile');
 });
 
 test('a widening tools request is refused tools-not-allowed before the seam, naming the first offending tool', async () => {
   const wire = mintWire();
-  const doc = await drive({ prompt: 'hi', profile: 'read', cwd: wire.root, tools: ['read', 'write'] }, wire);
+  const doc = refusalDocument(await callOnce({ prompt: 'hi', profile: 'read', cwd: wire.root, tools: ['read', 'write'] }, wire));
   assert.equal(doc.refusal.reason, 'tools-not-allowed');
   assert.match(doc.refusal.detail, /"write"/);
   assert.match(doc.refusal.detail, /read/, 'the detail names the profile so the operator can find it');

@@ -51,7 +51,7 @@ export function within(outer: string, inner: string): boolean {
 
 /** A filesystem error's code (`ENOENT`, `EACCES` …), for a refusal's detail. */
 export const errorCode = (error: unknown): string =>
-  error instanceof Error && 'code' in error ? String((error as { code?: unknown }).code) : 'unknown error';
+  error instanceof Error && 'code' in error ? String(error.code) : 'unknown error';
 
 /**
  * Whether a failed read of PATH means PATH is absent. Only an absent entry is:

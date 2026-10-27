@@ -21,6 +21,7 @@ import { legacyLayers, resolveLocations, usable, type Locations } from '../confi
 import { loadHelp, renderContext, sectionText, type Section } from '../help/help.ts';
 import { packageVersion } from '../root.ts';
 import { isRecord } from '../json.ts';
+import { messageOf } from '../errors.ts';
 import { admit, readmit, type AdmissionContext, type Refused, type Startup, type StartupFailure } from './admission.ts';
 import { ackDocument, envelopeResult, handleDocument, POLL_INTERVAL_MS, taskOf, toolResult, type Task, type ToolResult } from './documents.ts';
 import { appendAttempt, type CallId } from './evidence.ts';
@@ -337,9 +338,6 @@ function callTool(params: unknown, call: CallContext, context: Context): Answer 
   return HANDLERS[tool.name](tool.args, call, context);
 }
 
-/** One line from a caught value. */
-const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
-
 function reply(host: CallHost, message: Record<string, unknown>): void {
   host.output.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
 }
@@ -399,27 +397,16 @@ export function runCall(host: CallHost, id: WireId, handler: (signal: AbortSigna
 }
 
 /** Dispatch one record. An unknown method with an id answers -32601; anything
- *  unparsable is dropped with a stderr note (there is no id to answer with). */
-async function handleLine(line: string, context: Context): Promise<void> {
+ *  unparsable is dropped with a stderr note (there is no id to answer with).
+ *  Synchronous: a handler that runs asynchronously answers through `runCall`. */
+function handleLine(line: string, context: Context): void {
   if (line.trim().length === 0) {return;}
 
-  let message: unknown;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    context.diagnostics.write('quotient: unparsable JSON-RPC line dropped\n');
-    return;
-  }
-  if (!isRecord(message)) {
-    context.diagnostics.write('quotient: JSON-RPC message is not an object; dropped\n');
-    return;
-  }
+  const message = parsedMessage(line, context);
+  if (message === undefined) {return;}
 
   const method = typeof message.method === 'string' ? message.method : '(no method)';
-  const hasId = Object.hasOwn(message, 'id');
-  const id = hasId ? (message.id as WireId) : null;
-
-  if (!hasId) {
+  if (!Object.hasOwn(message, 'id')) {
     notification(method, message.params, context);
     return;
   }
@@ -427,13 +414,35 @@ async function handleLine(line: string, context: Context): Promise<void> {
   // Every message with an id is classified first, whatever its method.
   const era = classifyEra(message.params);
   if ('error' in era) {
-    reply(context, { id, error: era.error });
+    reply(context, { id: wireId(message.id), error: era.error });
     return;
   }
-  const request: Request = { id, method, params: message.params };
+  const request: Request = { id: wireId(message.id), method, params: message.params };
   if (era.era === 'legacy') {legacyRequest(request, context);}
   else {modernRequest(request, declaresTasks(era), context);}
 }
+
+/** The record LINE spells, or undefined when it is not one: an unparsable line
+ *  and a parsed non-object are both dropped with a note, having no id to answer. */
+function parsedMessage(line: string, context: Context): Record<string, unknown> | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    context.diagnostics.write('quotient: unparsable JSON-RPC line dropped\n');
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    context.diagnostics.write('quotient: JSON-RPC message is not an object; dropped\n');
+    return undefined;
+  }
+  return parsed;
+}
+
+/** A request id as JSON-RPC spells one: a string, a number, or null. Any other
+ *  value is not an id, and is answered as null — the id that names no request. */
+const wireId = (value: unknown): WireId =>
+  typeof value === 'string' || typeof value === 'number' ? value : null;
 
 /** A notification: never answered, in either era. A request method sent as a
  *  notification has nothing to answer either. */
@@ -661,16 +670,22 @@ export function abortNamed(params: unknown, host: CallHost): void {
  * the iterator reports as an AbortError. Only the input's own errors are caught
  * here; an error from the consumer's loop body is not the input's and propagates.
  */
-async function* inputChunks(input: Readable, diagnostics: Writable, signal?: AbortSignal): AsyncGenerator {
-  if (signal) {addAbortSignal(signal, input);}
+async function* inputChunks(input: Readable, diagnostics: Writable, signal?: AbortSignal): AsyncGenerator<Uint8Array | string> {
+  if (signal !== undefined) {addAbortSignal(signal, input);}
   try {
-    for await (const chunk of input) {yield chunk;}
+    for await (const chunk of input) {yield inputChunk(chunk);}
   } catch (error) {
     // A failed input is the client gone, as EOF is; the signal's AbortError is
     // the operator's shutdown and needs no note.
-    if (!signal?.aborted) {diagnostics.write(`quotient: the input failed: ${(error as Error).message}\n`);}
+    if (signal?.aborted !== true) {diagnostics.write(`quotient: the input failed: ${messageOf(error)}\n`);}
   }
 }
+
+/** One chunk of the client's input in the decoder's terms: a string as itself, a
+ *  byte sequence as its bytes. A stream in object mode has no business here, so
+ *  anything else is taken as its text. */
+const inputChunk = (chunk: unknown): Uint8Array | string =>
+  typeof chunk === 'string' || chunk instanceof Uint8Array ? chunk : String(chunk);
 
 /** What every run reads of the server: the options' timings and the start-up
  *  digests. A start-up-refused server admits nothing, so it never launches and
@@ -738,7 +753,9 @@ function onClientGone(input: Readable, signal: AbortSignal | undefined, closing:
 /** Dispatch every complete record in BUFFERED, in order, and answer what is left:
  *  a fragment still waiting for its LF. Once the client is gone no record is
  *  dispatched, even one already read: it would admit a run or write a reply
- *  nobody reads (design sec-6). */
+ *  nobody reads (design sec-6). Asynchronous for the one microtask between
+ *  records: a reply a settled run has queued is written before the next record
+ *  is handled, so a run's answer never overtakes a later request's. */
 async function dispatchLines(buffered: string, context: Context): Promise<string> {
   let pending = buffered;
   let newline = pending.indexOf('\n');
@@ -746,8 +763,9 @@ async function dispatchLines(buffered: string, context: Context): Promise<string
     let record = pending.slice(0, newline);
     pending = pending.slice(newline + 1);
     if (record.endsWith('\r')) {record = record.slice(0, -1);}
-    await handleLine(record, context);
+    handleLine(record, context);
     newline = pending.indexOf('\n');
+    await Promise.resolve();
   }
   return pending;
 }
@@ -781,7 +799,7 @@ export async function serve(
   let pending = '';
 
   for await (const chunk of inputChunks(input, diagnostics, options.signal)) {
-    pending = await dispatchLines(pending + (typeof chunk === 'string' ? chunk : decoder.write(chunk as Buffer)), context);
+    pending = await dispatchLines(pending + (typeof chunk === 'string' ? chunk : decoder.write(chunk)), context);
   }
   // EOF, a failed input or the signal ends the loop. A trailing fragment without
   // LF is not a record: JSONL framing terminates every record with one.

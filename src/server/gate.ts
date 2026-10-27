@@ -25,8 +25,7 @@
 // it crossed. The gate keeps no usage of its own, so the numbers it judges and
 // the numbers the result reports are the same accumulator's, and it never accounts
 // anything itself.
-import { createTally } from '../reduce/reduce.ts';
-import type { Tally } from '../reduce/reduce.ts';
+import { createTally, type Tally } from '../reduce/reduce.ts';
 import { readPolicy, type Maxima } from './policy.ts';
 
 /** The causes the gate aborts with: a subset of the spawn's `AbortCause`, so the

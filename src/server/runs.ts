@@ -15,6 +15,7 @@ import { mkdirSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { Writable } from 'node:stream';
 import { EMPTY_STATUS } from '../reduce/reduce.ts';
+import { messageOf } from '../errors.ts';
 import type { Admitted, Refused } from './admission.ts';
 import {
   appendAttempt,
@@ -177,17 +178,6 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     box.resolve = resolve;
   });
   return { promise, resolve: (value: T): void => { box.resolve?.(value); } };
-}
-
-/** One line from a caught value, for a diagnostic or a refusal's detail. Total:
- *  a value that cannot be printed (`Object.create(null)`) must not stop the
- *  settlement that reports it. */
-function messageOf(error: unknown): string {
-  try {
-    return error instanceof Error ? error.message : String(error);
-  } catch {
-    return 'a value that cannot be printed';
-  }
 }
 
 /** Whether a record has reached a terminal state: settled, or lost. */

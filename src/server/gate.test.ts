@@ -16,6 +16,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { at } from '../json.ts';
 import { countRecord, createTally, reduce, type Tally } from '../reduce/reduce.ts';
 import { createGate, type Gate, type GateConfig } from './gate.ts';
 import {
@@ -26,10 +27,12 @@ import {
   jsonLines,
   markerPids,
   newRig,
+  numberAt,
   serveRig,
   patchPolicy,
   pause,
-  resultDocument,
+  ranResult,
+  refusalDocument,
   SETTLED,
   waitForPath,
   waitForReplies, type Rig 
@@ -112,7 +115,7 @@ async function within<T>(promise: Promise<T>, ms: number, what: string): Promise
  *  promise on the first trigger — the abort is `controller.abort` in the server. */
 function unitGate(rig: Rig, overrides: Partial<GateConfig> = {}): { gate: Gate; causes: string[]; aborted: Promise<string> } {
   const causes: string[] = [];
-  let settle: (cause: string) => void = () => {};
+  let settle: (cause: string) => void = () => undefined;
   const aborted = new Promise<string>((resolve) => (settle = resolve));
   const gate = createGate({
     ceilings: {},
@@ -210,7 +213,9 @@ test('the gate judges the numbers the status reports: a retry/compaction fixture
   assert.equal(trigger.observed, reduced.status.requests, 'the crossing names the status\'s request count');
 
   // The same for cost: the gate's observed cost is the status's cost_usd.
-  const byCost = unitGate(rig, { ceilings: { cost_usd: reduced.status.cost_usd! - 0.001 } });
+  const observedCost = reduced.status.cost_usd;
+  if (observedCost === null) {assert.fail('the fixture prices its sends');}
+  const byCost = unitGate(rig, { ceilings: { cost_usd: observedCost - 0.001 } });
   byCost.gate.tick(tally);
   byCost.gate.close();
   assert.deepEqual(byCost.causes, ['ceiling']);
@@ -335,7 +340,9 @@ test('timeout: the wall clock aborts with cause timeout, however quiet the child
   const [trigger] = gate.triggers();
   assert.equal(trigger.unit, 'wall_clock_s');
   assert.equal(trigger.limit, 0.05);
-  assert.ok((trigger.observed!) >= 0.1, `observed ${trigger.observed} s`);
+  const observed = trigger.observed;
+  if (observed === null) {assert.fail('the wall clock observes a value');}
+  assert.ok(observed >= 0.1, `observed ${String(observed)} s`);
   gate.close();
 });
 
@@ -367,7 +374,7 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.state, 'ceiling_exceeded', JSON.stringify(doc));
   assert.equal(doc.termination, 'ceiling');
   assert.deepEqual(doc.causes, ['ceiling']);
@@ -375,10 +382,10 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
 
   const audit = jsonLines(doc.artifacts.audit);
   const abort = audit.find((record) => record.record === 'abort');
-  assert.ok(abort, `an abort record is owed: ${JSON.stringify(audit)}`);
+  if (abort === undefined) {assert.fail(`an abort record is owed: ${JSON.stringify(audit)}`);}
   assert.equal(abort.cause, 'ceiling');
-  assert.ok(abort.usage.requests >= 1, 'the abort record carries the accumulator\'s usage');
-  assert.equal(abort.usage.cost_usd, 0.01, 'the usage is the accumulator\'s at the crossing');
+  assert.ok(numberAt(abort, 'usage', 'requests') >= 1, 'the abort record carries the accumulator\'s usage');
+  assert.equal(at(abort, 'usage', 'cost_usd'), 0.01, 'the usage is the accumulator\'s at the crossing');
   // The crossing itself rides the record: which unit crossed, what it read and the
   // bound it crossed — evidence an operator cannot reconstruct from the cause token.
   assert.equal(abort.unit, 'cost_usd', 'the abort record names the unit that crossed');
@@ -404,18 +411,21 @@ test('a context abort freezes crossing-prefix evidence while buffered output rai
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.termination, 'ceiling');
   assert.equal(doc.state, 'ceiling_exceeded');
   assert.equal(doc.status.context.peak_tokens, 210);
   const audit = jsonLines(doc.artifacts.audit);
   const abort = audit.find((record) => record.record === 'abort');
-  assert.ok(abort);
+  if (abort === undefined) {assert.fail(`an abort record is owed: ${JSON.stringify(audit)}`);}
   assert.equal(abort.unit, 'context_tokens');
   assert.equal(abort.observed, 160);
   assert.equal(abort.limit, 150);
-  assert.deepEqual(abort.usage.context, { peak_tokens: 160, requests_unmeasured: 0 });
-  assert.ok(doc.status.context.peak_tokens > abort.observed, 'final drain includes the later buffered usage');
+  assert.deepEqual(at(abort, 'usage', 'context'), { peak_tokens: 160, requests_unmeasured: 0 });
+  assert.ok(
+    numberAt(doc.status, 'context', 'peak_tokens') > numberAt(abort, 'observed'),
+    'final drain includes the later buffered usage',
+  );
 });
 
 // ── EX-3 / VT-3: the switch halts an in-flight run ────────────────────────
@@ -431,7 +441,7 @@ test('switch: flipping enabled to false halts an in-flight run through the ladde
   patchPolicy(rig, 'enabled', false);
   const [reply] = await waitForReplies(server, 1);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.state, 'cancelled', 'a switch flips the run to cancelled, not a counting verdict');
   assert.equal(doc.termination, 'switch');
   assert.deepEqual(doc.causes, ['switch']);
@@ -443,7 +453,7 @@ test('switch: flipping enabled to false halts an in-flight run through the ladde
   server.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'switch2' }));
   const [, refused] = await waitForReplies(server, 2);
   await closeServer(server);
-  const next = resultDocument(refused);
+  const next = refusalDocument(refused);
   assert.equal(next.state, 'refused');
   assert.equal(next.refusal.reason, 'disabled');
 });
@@ -458,7 +468,7 @@ test('switch: a policy deleted during an idle run aborts it, and the next call i
 
   rmSync(rig.policyPath);
   const [reply] = await waitForReplies(server, 1);
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.termination, 'switch');
   const abort = jsonLines(doc.artifacts.audit).find((record) => record.record === 'abort');
   assert.equal(abort?.cause, 'switch', 'a source that cannot be read is not evidence the switch is off');
@@ -467,7 +477,7 @@ test('switch: a policy deleted during an idle run aborts it, and the next call i
   server.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'lost2' }));
   const [, refused] = await waitForReplies(server, 2);
   await closeServer(server);
-  assert.equal(resultDocument(refused).refusal.reason, 'policy-unavailable');
+  assert.equal(refusalDocument(refused).refusal.reason, 'policy-unavailable');
 });
 
 test('switch: a policy corrupted during an idle run aborts it, and the next call is refused policy-invalid (EX-4, VT-4)', async (t) => {
@@ -478,7 +488,7 @@ test('switch: a policy corrupted during an idle run aborts it, and the next call
 
   writeFileSync(rig.policyPath, '{"mode": "per-call", "roots": [');
   const [reply] = await waitForReplies(server, 1);
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.termination, 'switch');
   const abort = jsonLines(doc.artifacts.audit).find((record) => record.record === 'abort');
   assert.equal(abort?.cause, 'switch', 'an unparsable source fails closed');
@@ -487,7 +497,7 @@ test('switch: a policy corrupted during an idle run aborts it, and the next call
   server.write(callLine(2, { prompt: 'again', profile: 'read', cwd: rig.root, session: 'broken2' }));
   const [, refused] = await waitForReplies(server, 2);
   await closeServer(server);
-  assert.equal(resultDocument(refused).refusal.reason, 'policy-invalid');
+  assert.equal(refusalDocument(refused).refusal.reason, 'policy-invalid');
 });
 
 // ── EX-6: the wall clock, and a clean run's empty audit ───────────────────
@@ -503,7 +513,7 @@ test('timeout: the wall clock halts a stalled run with cause timeout and its own
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.termination, 'timeout');
   assert.equal(doc.state, 'timeout', 'the backstop has its own state row');
   assert.deepEqual(doc.causes, ['timeout']);
@@ -528,7 +538,7 @@ test('usage sanity live: an unpriced send halts the run as accounting_unknown (E
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.state, 'accounting_unknown', JSON.stringify(doc));
   assert.equal(doc.termination, 'accounting');
   assert.equal(doc.status.accounting, 'unknown');
@@ -544,7 +554,7 @@ test('a run that hits no limit completes, and its audit has no abort record (EX-
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.state, 'completed', JSON.stringify(doc));
   assert.equal(doc.termination, 'stop');
   const records = jsonLines(doc.artifacts.audit).map((record) => record.record);
@@ -559,16 +569,19 @@ test('the transcript budget reaches a running call: the policy re-read at admiss
   // activity never folds them, and the transcript is large enough that a
   // 256-byte budget must elide. One send, so no ceiling reaches the run.
   const prose = 'x'.repeat(300);
-  const exchanges = Array.from({ length: 40 }, (_, index) => [
-    emit({ type: 'tool_execution_start', toolCallId: `c${index}`, toolName: 'bash', args: { command: `cat notes ${index}` } }),
-    emit({
-      type: 'tool_execution_end',
-      toolCallId: `c${index}`,
-      toolName: 'bash',
-      result: { content: [{ type: 'text', text: `note ${index} ${prose}` }], structuredContent: { exit_code: 0 } },
-      isError: false,
-    }),
-  ]).flat();
+  const exchanges = Array.from({ length: 40 }, (_, index) => {
+    const nth = String(index);
+    return [
+      emit({ type: 'tool_execution_start', toolCallId: `c${nth}`, toolName: 'bash', args: { command: `cat notes ${nth}` } }),
+      emit({
+        type: 'tool_execution_end',
+        toolCallId: `c${nth}`,
+        toolName: 'bash',
+        result: { content: [{ type: 'text', text: `note ${nth} ${prose}` }], structuredContent: { exit_code: 0 } },
+        isError: false,
+      }),
+    ];
+  }).flat();
   const rig = newRig(t, {
     read: [
       `printf '%s\\n' $$ > "@MARKER@/pid"`,
@@ -584,10 +597,13 @@ test('the transcript budget reaches a running call: the policy re-read at admiss
   server.write(callLine(1, { prompt: 'write a lot', profile: 'read', cwd: rig.root, session: 'budget1' }));
   await waitForPath(join(rig.markerDir, 'pid'), 'the launcher');
   const [first] = await waitForReplies(server, 1);
-  const unbudgeted = resultDocument(first);
+  const unbudgeted = ranResult(first);
   assert.equal(unbudgeted.state, 'completed', JSON.stringify(unbudgeted));
   assert.equal(unbudgeted.status.transcript.elided, 0, 'an effectively unbudgeted transcript elides nothing');
-  assert.ok(unbudgeted.status.transcript.bytes > 256, `the bulky stream is the point: ${unbudgeted.status.transcript.bytes} bytes`);
+  assert.ok(
+    unbudgeted.status.transcript.bytes > 256,
+    `the bulky stream is the point: ${String(unbudgeted.status.transcript.bytes)} bytes`,
+  );
 
   // The operator's next write is a real 256-byte ceiling: the call reads the policy
   // per call, so it is the reducer of the NEXT run that it reaches.
@@ -596,12 +612,12 @@ test('the transcript budget reaches a running call: the policy re-read at admiss
   const [, second] = await waitForReplies(server, 2);
   await closeServer(server);
 
-  const budgeted = resultDocument(second);
+  const budgeted = ranResult(second);
   assert.equal(budgeted.state, 'completed', JSON.stringify(budgeted));
   assert.ok(budgeted.status.transcript.elided > 0, 'the budget reached this run\'s reducer: the middle was elided');
   assert.ok(
     budgeted.status.transcript.bytes < unbudgeted.status.transcript.bytes,
-    `the budgeted transcript is smaller: ${budgeted.status.transcript.bytes} < ${unbudgeted.status.transcript.bytes}`,
+    `the budgeted transcript is smaller: ${String(budgeted.status.transcript.bytes)} < ${String(unbudgeted.status.transcript.bytes)}`,
   );
   assert.ok(budgeted.transcript.includes('entries elided'), 'the elision is stated in the text an operator reads');
 });
@@ -629,7 +645,7 @@ test('a nested figure named in a tool result is not attributed to the run: cost_
   const [reply] = await waitForReplies(server, 1);
   await closeServer(server);
 
-  const doc = resultDocument(reply);
+  const doc = ranResult(reply);
   assert.equal(doc.state, 'completed', JSON.stringify(doc));
   // One real send, priced at 0.01: the status describes this run's own sends.
   assert.equal(doc.status.cost_usd, 0.01, 'the run\'s own send is the whole of cost_usd');

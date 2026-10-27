@@ -8,16 +8,20 @@
 // reads the ambient environment and nothing is spawned.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PassThrough, Writable } from 'node:stream';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { resolveLocations, usable } from '../config.ts';
-import { checkChildView, protectedStores, type ChildViewInput } from './childview.ts';
+import {
+  checkChildView,
+  protectedStores,
+  type ChildViewInput,
+  type ProtectedStore,
+  type StoreKind,
+} from './childview.ts';
 import { canonicalPath, within } from './paths.ts';
 import { RUN_EVIDENCE_FILES, attemptsPath, evidenceStores, runLayout } from './evidence.ts';
-import { serve } from './server.ts';
-import { RIG_PROFILES, validPolicy, writeProfiles, xdgProfileLayer } from './test-rig.ts';
+import { RIG_PROFILES, attempts, converse, line, refusalDocument, validPolicy, writeProfiles, xdgProfileLayer } from './test-rig.ts';
 
 type Tree = {
   /** The operator's state directory: the run dir, the session home and the policy. */
@@ -88,10 +92,18 @@ function view(t: Tree, overrides: Partial<ChildViewInput> = {}): ChildViewInput 
 
 /** The refusal's detail, for a check that must fail. */
 function refusal(check: ReturnType<typeof checkChildView>): string {
+  // `equal` narrows `check` to the refused arm, which is the only one that has a
+  // reason and a detail.
   assert.equal(check.ok, false, 'the view must be refused');
-  if (check.ok) {throw new Error('unreachable');}
   assert.equal(check.reason, 'view-overlaps-protected');
   return check.detail;
+}
+
+/** The protected store of KIND, failing the test when the layout declares none. */
+function storeOf(stores: readonly ProtectedStore[], kind: StoreKind): ProtectedStore {
+  const found = stores.find((store) => store.kind === kind);
+  if (found === undefined) {assert.fail(`the layout declares no ${kind} store`);}
+  return found;
 }
 
 // ── Canonicalisation and containment (DEC-095) ─────────────────────────
@@ -166,19 +178,18 @@ test('the protected stores come from the evidence layout: the run evidence and t
     stores.map((store) => store.kind),
     ['run-evidence', 'attempts-ledger', 'session-home', 'policy-file', 'approvals-store', 'profile-layer', 'help-layer'],
   );
-  const byKind = new Map(stores.map((store) => [store.kind, store]));
-  assert.equal(byKind.get('run-evidence')?.path, realpathSync(t.runDir));
-  assert.equal(byKind.get('run-evidence')?.tolerance, 'unreachable');
-  assert.equal(byKind.get('attempts-ledger')?.path, attemptsPath(realpathSync(t.runDir)));
-  assert.equal(byKind.get('attempts-ledger')?.tolerance, 'unreachable');
-  assert.equal(byKind.get('session-home')?.path, realpathSync(t.sessionHome));
-  assert.equal(byKind.get('session-home')?.tolerance, 'unreachable');
-  assert.equal(byKind.get('session-home')?.except, join(realpathSync(t.sessionHome), 'sess-a'));
-  assert.equal(byKind.get('policy-file')?.path, realpathSync(t.policyPath));
-  assert.equal(byKind.get('policy-file')?.tolerance, 'never-writable');
+  assert.equal(storeOf(stores, 'run-evidence').path, realpathSync(t.runDir));
+  assert.equal(storeOf(stores, 'run-evidence').tolerance, 'unreachable');
+  assert.equal(storeOf(stores, 'attempts-ledger').path, attemptsPath(realpathSync(t.runDir)));
+  assert.equal(storeOf(stores, 'attempts-ledger').tolerance, 'unreachable');
+  assert.equal(storeOf(stores, 'session-home').path, realpathSync(t.sessionHome));
+  assert.equal(storeOf(stores, 'session-home').tolerance, 'unreachable');
+  assert.equal(storeOf(stores, 'session-home').except, join(realpathSync(t.sessionHome), 'sess-a'));
+  assert.equal(storeOf(stores, 'policy-file').path, realpathSync(t.policyPath));
+  assert.equal(storeOf(stores, 'policy-file').tolerance, 'never-writable');
   // The approvals store, never-writable, protected whether or not it exists.
-  assert.equal(byKind.get('approvals-store')?.path, join(realpathSync(t.state), 'config', 'quotient', 'approvals.json'));
-  assert.equal(byKind.get('approvals-store')?.tolerance, 'never-writable');
+  assert.equal(storeOf(stores, 'approvals-store').path, join(realpathSync(t.state), 'config', 'quotient', 'approvals.json'));
+  assert.equal(storeOf(stores, 'approvals-store').tolerance, 'never-writable');
   // Then the two XDG layers, never-writable, whether or not they exist.
   assert.deepEqual(
     stores.slice(5).map((store) => [store.kind, store.path, store.tolerance]),
@@ -241,7 +252,7 @@ test('the policy file is never writable: a write root containing it refuses, a r
   const shared = {
     root: authority,
     sessionDir: t.session,
-    exposure: [] as string[],
+    exposure: [],
     sessionHome: t.sessionHome,
     runDir: t.runDir,
     policyPath,
@@ -437,56 +448,27 @@ test('validation step 8 precedes the seam: the refusal reaches the caller as a t
   };
   writeProfiles(xdgProfileLayer(t.state), RIG_PROFILES);
 
+  // `converse` keeps the channel open until the call answers (stdin EOF is
+  // DEC-103's abort trigger), and it holds the reply to `pi-agent-result/2`.
   for (const profile of ['read', 'write']) {
-    const replies: string[] = [];
-    let answered = (): void => {};
-    const answer = new Promise<void>((resolve) => {
-      answered = resolve;
+    const call = line({
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'pi_agent', arguments: { prompt: 'hi', profile, cwd: t.state } },
     });
-    const output = new Writable({
-      write(chunk, _encoding, done) {
-        replies.push(String(chunk));
-        answered();
-        done();
-      },
-    });
-    // `tools/call` is answered asynchronously (design sec-4 lets it overlap the
-    // reader) and stdin EOF is DEC-103's abort trigger, so the channel stays open
-    // until this call has answered.
-    const input = new PassThrough();
-    const serving = serve(input, output, env, new Writable({ write: (_chunk, _encoding, done) => { done(); } }), {
-      launchDir: t.launch,
-    });
-    input.write(
-      `${JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: { name: 'pi_agent', arguments: { prompt: 'hi', profile, cwd: t.state } },
-      })}\n`,
-    );
-    await answer;
-    input.end();
-    await serving;
-
-    const reply = JSON.parse(replies.join('').trim()) as Record<string, any>;
-    assert.equal(reply.error, undefined);
-    assert.equal(reply.result.isError, true);
-    const doc = JSON.parse(reply.result.content[0].text) as Record<string, any>;
-    assert.equal(doc.state, 'refused');
+    const { replies } = await converse([call], env, { launchDir: t.launch });
+    assert.equal(replies.length, 1);
+    const doc = refusalDocument(replies[0]);
     assert.equal(doc.refusal.reason, 'view-overlaps-protected');
-    assert.ok(String(doc.refusal.detail).includes(JSON.stringify(realpathSync(t.runDir))));
+    assert.ok(doc.refusal.detail.includes(JSON.stringify(realpathSync(t.runDir))));
   }
 
   // Both refusals are evidence in the server-level ledger, and no run directory
   // was allocated for either: PHASE-06 allocates one, after step 8.
-  const lines = readFileSync(attemptsPath(t.runDir), 'utf8')
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
-  assert.equal(lines.length, 2);
+  const ledger = attempts(t.runDir);
+  assert.equal(ledger.length, 2);
   assert.deepEqual(
-    lines.map((line) => line.reason),
+    ledger.map((record) => record.reason),
     ['view-overlaps-protected', 'view-overlaps-protected'],
   );
   assert.deepEqual(readdirSync(t.runDir), ['attempts.jsonl']);

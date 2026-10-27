@@ -36,7 +36,7 @@ import {
 import { randomBytes } from 'node:crypto';
 import { hostname as osHostname } from 'node:os';
 import { join } from 'node:path';
-import { isRecord } from '../json.ts';
+import { at, isRecord } from '../json.ts';
 import { errorCode } from './paths.ts';
 import { appendAttempt, type CallId } from './evidence.ts';
 import type { Filesystem } from './profiles.ts';
@@ -179,8 +179,9 @@ function startTimeField(stat: string): string | null {
   const close = stat.lastIndexOf(')');
   if (close < 0) {return null;}
   const fields = stat.slice(close + 1).trim().split(/\s+/);
-  const starttime = fields[19];
-  return starttime !== undefined && /^\d+$/.test(starttime) ? starttime : null;
+  // A stat line with fewer than 22 fields has no field 22 to read.
+  const starttime = at(fields, 19);
+  return typeof starttime === 'string' && /^\d+$/.test(starttime) ? starttime : null;
 }
 
 /**
@@ -361,8 +362,16 @@ function readRecord(path: string): RecordRead {
   return { ok: true, value };
 }
 
+/**
+ * The part of a `<lock>` record a reader can rely on. `pid` and `starttime` are
+ * validated by `readOwnership` and are the identity every liveness check reads;
+ * `session` and `call_id` are only ever quoted in a refusal, so they are the
+ * record's value as written, not a claim about their type.
+ */
+type LockRecord = { session: unknown; pid: number; starttime: string; call_id: unknown };
+
 type OwnershipRead =
-  | { ok: true; record: OwnershipRecord; value: Record<string, unknown> }
+  | { ok: true; record: LockRecord; value: Record<string, unknown> }
   | { ok: false; detail: string; missing: boolean };
 
 /**
@@ -381,7 +390,11 @@ function readOwnership(path: string): OwnershipRead {
   if (!isStartTime(starttime)) {
     return { ok: false, detail: `${path} carries no kernel start time`, missing: false };
   }
-  return { ok: true, record: read.value as OwnershipRecord, value: read.value };
+  return {
+    ok: true,
+    record: { session: read.value.session, pid, starttime, call_id: read.value.call_id },
+    value: read.value,
+  };
 }
 
 /** Write one record where `<lock>` or its successor will be read from. */
@@ -441,16 +454,16 @@ function takeOwnership(
   return { ok: true };
 }
 
-const aliveRefusal = (record: OwnershipRecord): Step => ({
+const aliveRefusal = (record: LockRecord): Step => ({
   ok: false,
   reason: 'session-busy',
-  detail: `session "${record.session}" is owned by pid ${record.pid} (start time ${record.starttime}, call ${JSON.stringify(record.call_id)}), which is alive; concurrency on one session is refused rather than queued`,
+  detail: `session "${String(record.session)}" is owned by pid ${String(record.pid)} (start time ${record.starttime}, call ${JSON.stringify(record.call_id)}), which is alive; concurrency on one session is refused rather than queued`,
 });
 
-const unknownRefusal = (record: OwnershipRecord, procDir: string): Step => ({
+const unknownRefusal = (record: LockRecord, procDir: string): Step => ({
   ok: false,
   reason: 'session-busy',
-  detail: `session "${record.session}" is owned by pid ${record.pid} (start time ${record.starttime}) and its liveness cannot be read from ${procDir}; an unknowable owner is treated as live and the lock is not reclaimed`,
+  detail: `session "${String(record.session)}" is owned by pid ${String(record.pid)} (start time ${record.starttime}) and its liveness cannot be read from ${procDir}; an unknowable owner is treated as live and the lock is not reclaimed`,
 });
 
 /** Drop the claim this process created; it is ours by construction, so this is safe. */
@@ -460,6 +473,108 @@ function dropClaim(paths: SessionPaths): void {
   } catch (error) {
     process.stderr.write(`quotient: could not clear the claim ${paths.claim}: ${errorCode(error)}\n`);
   }
+}
+
+/**
+ * Create the reclaim claim `<lock>.claim`, the one `O_EXCL` create that serialises
+ * the reclaim: null when this call holds it, else the refusal that says who does.
+ */
+function takeClaim(paths: SessionPaths): Step | null {
+  try {
+    closeSync(openSync(paths.claim, 'wx', OWNER_ONLY_FILE));
+    return null;
+  } catch (error) {
+    if (errorCode(error) === 'EEXIST') {
+      return {
+        ok: false,
+        reason: 'session-busy',
+        detail: `the reclaim of ${paths.lock} is serialised by ${paths.claim}, which is already held — by a live reclaimer or by one that died holding it; only an operator can clear it`,
+      };
+    }
+    return { ok: false, reason: 'session-busy', detail: `the claim ${paths.claim} could not be created (${errorCode(error)})` };
+  }
+}
+
+/**
+ * Under the claim, re-confirm the record we intended to replace: two stale
+ * observers must not both install an owner. The re-confirm is a fresh liveness
+ * observation, so it can say all three things the first one could: the owner is
+ * alive, the owner is stale, or the owner's liveness cannot be read — and only
+ * the last is a refusal about knowing, not about a live owner. Null when the
+ * successor may be installed; every refusal here drops the claim on the way out.
+ */
+function reconfirmStale(paths: SessionPaths, stale: LockRecord, procDir: string): Step | null {
+  const again = readOwnership(paths.lock);
+  if (!again.ok || again.record.pid !== stale.pid || again.record.starttime !== stale.starttime) {
+    dropClaim(paths);
+    return {
+      ok: false,
+      reason: 'session-busy',
+      detail: `${paths.lock} changed while the reclaim was being serialised; the lock is not the stale record this call saw`,
+    };
+  }
+  const liveness = observeLiveness(procDir, again.record.pid, again.record.starttime);
+  if (liveness === 'stale') {return null;}
+  dropClaim(paths);
+  return liveness === 'alive' ? aliveRefusal(again.record) : unknownRefusal(again.record, procDir);
+}
+
+/**
+ * Install RECORD over `<lock>`: written to a temp file in the same directory and
+ * renamed over the lock, one atomic replacement, so the path is never absent.
+ * Null on success, else the refusal describing the failure.
+ */
+function installSuccessor(paths: SessionPaths, record: OwnershipRecord): Step | null {
+  const successor = `${paths.lock}.${String(process.pid)}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    writeRecord(successor, record);
+    renameSync(successor, paths.lock);
+    return null;
+  } catch (error) {
+    try {
+      unlinkSync(successor);
+    } catch {
+      // A temp file that was never created is nothing to clear.
+    }
+    return {
+      ok: false,
+      reason: 'session-busy',
+      detail: `the successor record could not be installed over ${paths.lock} (${errorCode(error)})`,
+    };
+  }
+}
+
+/**
+ * The create lost to a lock that carries no readable record. An absent one is not
+ * a reclaim at all: nothing was replaced, nothing is serialised and no record was
+ * observed, so the plain create is legal again and is re-attempted exactly once
+ * (never recursively — a second vanish is a path that keeps changing under us, not
+ * a race to keep chasing). Any other unreadable lock fails closed: it is not
+ * reclaimed, and only an operator can clear it.
+ */
+function reclaimUnreadable(
+  paths: SessionPaths,
+  before: { detail: string; missing: boolean },
+  record: OwnershipRecord,
+  procDir: string,
+  runDir: string | null,
+  callId: CallId,
+  policyDigest: string | null | undefined,
+  retried: boolean,
+): Step {
+  if (!before.missing) {
+    return {
+      ok: false,
+      reason: 'session-busy',
+      detail: `${paths.lock} exists and carries no readable ownership record (${before.detail}); it must be cleared by an operator`,
+    };
+  }
+  if (!retried) {return takeOwnership(paths, record, procDir, runDir, callId, policyDigest, true);}
+  return {
+    ok: false,
+    reason: 'session-busy',
+    detail: `${paths.lock} was absent when read after the create lost to it, and again after one re-attempt; ownership is decided by a single create, so the call is refused`,
+  };
 }
 
 /**
@@ -481,98 +596,55 @@ function reclaim(
 ): Step {
   const before = readOwnership(paths.lock);
   if (!before.ok) {
-    if (before.missing) {
-      // The lock the create lost to is gone. Nothing was replaced, nothing is
-      // serialised and no record was observed: the plain create is legal again,
-      // and it is re-attempted exactly once (never recursively — a second vanish
-      // is a path that keeps changing under us, not a race to keep chasing).
-      if (!retried) {return takeOwnership(paths, record, procDir, runDir, callId, policyDigest, true);}
-      return {
-        ok: false,
-        reason: 'session-busy',
-        detail: `${paths.lock} was absent when read after the create lost to it, and again after one re-attempt; ownership is decided by a single create, so the call is refused`,
-      };
-    }
-    return {
-      ok: false,
-      reason: 'session-busy',
-      detail: `${paths.lock} exists and carries no readable ownership record (${before.detail}); it must be cleared by an operator`,
-    };
+    return reclaimUnreadable(paths, before, record, procDir, runDir, callId, policyDigest, retried);
   }
+
   const liveness = observeLiveness(procDir, before.record.pid, before.record.starttime);
-  if (liveness === 'alive') {return aliveRefusal(before.record);}
-  if (liveness === 'unknown') {return unknownRefusal(before.record, procDir);}
-
-  try {
-    closeSync(openSync(paths.claim, 'wx', OWNER_ONLY_FILE));
-  } catch (error) {
-    if (errorCode(error) === 'EEXIST') {
-      return {
-        ok: false,
-        reason: 'session-busy',
-        detail: `the reclaim of ${paths.lock} is serialised by ${paths.claim}, which is already held — by a live reclaimer or by one that died holding it; only an operator can clear it`,
-      };
-    }
-    return { ok: false, reason: 'session-busy', detail: `the claim ${paths.claim} could not be created (${errorCode(error)})` };
+  if (liveness !== 'stale') {
+    return liveness === 'alive' ? aliveRefusal(before.record) : unknownRefusal(before.record, procDir);
   }
 
-  // Under the claim, re-confirm the record we intended to replace: two stale
-  // observers must not both install an owner. The re-confirm is a fresh liveness
-  // observation, so it can say all three things the first one could: the owner is
-  // alive, the owner is stale, or the owner's liveness cannot be read — and only
-  // the last is a refusal about knowing, not about a live owner.
-  const again = readOwnership(paths.lock);
-  if (!again.ok || again.record.pid !== before.record.pid || again.record.starttime !== before.record.starttime) {
-    dropClaim(paths);
-    return {
-      ok: false,
-      reason: 'session-busy',
-      detail: `${paths.lock} changed while the reclaim was being serialised; the lock is not the stale record this call saw`,
-    };
-  }
-  const reconfirmed = observeLiveness(procDir, again.record.pid, again.record.starttime);
-  if (reconfirmed !== 'stale') {
-    dropClaim(paths);
-    return reconfirmed === 'alive' ? aliveRefusal(again.record) : unknownRefusal(again.record, procDir);
-  }
+  const claimed = takeClaim(paths);
+  if (claimed !== null) {return claimed;}
 
-  const successor = `${paths.lock}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  try {
-    writeRecord(successor, record);
-    renameSync(successor, paths.lock);
-  } catch (error) {
-    try {
-      unlinkSync(successor);
-    } catch {
-      // A temp file that was never created is nothing to clear.
-    }
-    dropClaim(paths);
-    return {
-      ok: false,
-      reason: 'session-busy',
-      detail: `the successor record could not be installed over ${paths.lock} (${errorCode(error)})`,
-    };
-  }
+  const reconfirmed = reconfirmStale(paths, before.record, procDir);
+  if (reconfirmed !== null) {return reconfirmed;}
+
+  const installed = installSuccessor(paths, record);
   dropClaim(paths);
+  if (installed !== null) {return installed;}
 
   // Every reclaim is auditable after the fact: what it replaced, the claim it won
   // and the record it installed (EX-8).
   appendAttempt(runDir, {
     callId,
     reason: 'session-reclaimed',
-    detail: `pid ${before.record.pid} (start time ${before.record.starttime}, call ${JSON.stringify(before.record.call_id)}) was stale and its lock was reclaimed by pid ${record.pid} (start time ${record.starttime})`,
+    detail: `pid ${String(before.record.pid)} (start time ${before.record.starttime}, call ${JSON.stringify(before.record.call_id)}) was stale and its lock was reclaimed by pid ${String(record.pid)} (start time ${record.starttime})`,
     policyDigest,
     reclaim: {
       lock: paths.lock,
       claim: paths.claim,
       stale: before.value,
-      successor: record as unknown as Record<string, unknown>,
+      successor: record,
     },
   });
   return { ok: true };
 }
 
 type BindStep = { ok: true; binding: BindingRecord } | { ok: false; reason: SessionRefusal; detail: string };
+
+/**
+ * The binding a readable `<binding>` file carries: the (root, capability) pair is
+ * the one this call has already matched the file against, and the session and the
+ * bound stamp are the file's. Null when the file names no session or no bound
+ * stamp, which is corrupt state rather than a binding.
+ */
+function bindingOf(value: Record<string, unknown>, record: OwnershipRecord): BindingRecord | null {
+  const session = value.session;
+  const bound = value.bound;
+  if (typeof session !== 'string' || typeof bound !== 'string') {return null;}
+  return { session, root: record.root, capability: record.capability, bound };
+}
 
 /**
  * Bind the session to (root, capability) on first use, and refuse a different pair
@@ -623,7 +695,43 @@ function bind(paths: SessionPaths, record: OwnershipRecord): BindStep {
       detail: `session "${record.session}" is bound to the "${String(boundCapability)}" capability; this call asks for "${record.capability}"`,
     };
   }
-  return { ok: true, binding: existing.value as unknown as BindingRecord };
+  const reused = bindingOf(existing.value, record);
+  if (reused === null) {
+    return {
+      ok: false,
+      reason: 'session-busy',
+      detail: `${paths.binding} carries no readable session and bound stamp; it must be cleared by an operator`,
+    };
+  }
+  return { ok: true, binding: reused };
+}
+
+type NamedSession = { ok: true; session: string } | { ok: false; reason: SessionRefusal; detail: string };
+
+/**
+ * The session id this call names, or the refusal saying the name is not one; an
+ * absent name mints a fresh id (EX-1).
+ */
+function resolveSession(named: string | undefined): NamedSession {
+  if (named === undefined) {return { ok: true, session: mintSessionId() };}
+  if (!isSessionId(named)) {
+    return {
+      ok: false,
+      reason: 'session-invalid',
+      detail: `session ${JSON.stringify(named)} does not match the session grammar ${SESSION_GRAMMAR.source}`,
+    };
+  }
+  return { ok: true, session: named };
+}
+
+/** Make each directory owner-only; null when they exist, else what failed. */
+function layOut(dirs: readonly string[], home: string): string | null {
+  try {
+    for (const dir of dirs) {mkdirSync(dir, { recursive: true, mode: OWNER_ONLY_DIR });}
+    return null;
+  } catch (error) {
+    return `the session state under ${home} could not be laid out (${errorCode(error)})`;
+  }
 }
 
 /**
@@ -634,26 +742,15 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
   const { sessionHome, runDir, root, capability, callId } = options;
   const procDir = options.procDir ?? '/proc';
 
-  let session = options.session;
-  if (session === undefined) {
-    session = mintSessionId();
-  } else if (!isSessionId(session)) {
-    return {
-      ok: false,
-      reason: 'session-invalid',
-      detail: `session ${JSON.stringify(session)} does not match the session grammar ${SESSION_GRAMMAR.source}`,
-    };
-  }
+  const chosen = resolveSession(options.session);
+  if (!chosen.ok) {return chosen;}
+  const session = chosen.session;
 
   const paths = sessionPaths(sessionHome, session);
   const refuse = (reason: SessionRefusal, detail: string): SessionAcquisition => ({ ok: false, reason, detail });
 
-  try {
-    mkdirSync(paths.home, { recursive: true, mode: OWNER_ONLY_DIR });
-    mkdirSync(paths.sessions, { recursive: true, mode: OWNER_ONLY_DIR });
-  } catch (error) {
-    return refuse('session-busy', `the session state under ${sessionHome} could not be laid out (${errorCode(error)})`);
-  }
+  const layoutFailure = layOut([paths.home, paths.sessions], sessionHome);
+  if (layoutFailure !== null) {return refuse('session-busy', layoutFailure);}
 
   const own = processStartTime(procDir, process.pid);
   if (!own.ok) {
@@ -680,14 +777,13 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
   // contended session creates no directory of its own. Home and `sessions` are
   // made before the lock because the lock lives in `sessions`; the session
   // directory is a side effect of ownership, so it comes after it.
-  try {
-    mkdirSync(paths.sessionDir, { recursive: true, mode: OWNER_ONLY_DIR });
-  } catch (error) {
+  const dirFailure = layOut([paths.sessionDir], sessionHome);
+  if (dirFailure !== null) {
     // The lock is this call's and the layout it protects cannot be made: give the
     // ownership back before refusing, so the refusal is this call's layout failure
     // and not a lock the next caller would have to wait out.
     releaseSession(paths, record);
-    return refuse('session-busy', `the session state under ${sessionHome} could not be laid out (${errorCode(error)})`);
+    return refuse('session-busy', dirFailure);
   }
 
   const bound = bind(paths, record);
@@ -706,7 +802,7 @@ export function acquireSession(options: AcquireOptions): SessionAcquisition {
     capability,
     binding: bound.binding,
     owner: { pid: record.pid, starttime: record.starttime, ...options.here },
-    release: () => { releaseSession(paths, record); },
+    release: (): void => { releaseSession(paths, record); },
   };
 }
 
@@ -732,7 +828,7 @@ export function releaseSession(
   const holder = observed.record;
   if (holder.pid !== record.pid || holder.starttime !== record.starttime || holder.call_id !== record.call_id) {
     diagnostics.write(
-      `quotient: leaving ${paths.lock} in place: it is not this owner's record (pid ${holder.pid}, start time ${holder.starttime}, call ${JSON.stringify(holder.call_id)})\n`,
+      `quotient: leaving ${paths.lock} in place: it is not this owner's record (pid ${String(holder.pid)}, start time ${holder.starttime}, call ${JSON.stringify(holder.call_id)})\n`,
     );
     return;
   }

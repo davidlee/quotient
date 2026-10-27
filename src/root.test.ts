@@ -5,11 +5,18 @@ import { copyFileSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packageRoot, packageVersion } from './root.ts';
+import { at } from './json.ts';
 
 const CHECKOUT = realpathSync(new URL('..', import.meta.url).pathname);
 const TSC = join(CHECKOUT, 'node_modules', 'typescript', 'bin', 'tsc');
 
-const versionIn = (dir: string): string => JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version;
+/** The `version` in DIR's package.json. */
+function versionIn(dir: string): string {
+  const parsed: unknown = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+  const version = at(parsed, 'version');
+  if (typeof version !== 'string') {assert.fail(`no version string in ${join(dir, 'package.json')}`);}
+  return version;
+}
 
 test('packageRoot is the checkout from the source tree, and packageVersion reads its package.json', () => {
   assert.equal(packageRoot, CHECKOUT);
@@ -24,6 +31,6 @@ test('packageRoot is the package directory from a tsc-built dist tree', (t) => {
 
   const probe = `import { packageRoot, packageVersion } from ${JSON.stringify(join(pkg, 'dist', 'root.js'))};
 process.stdout.write(JSON.stringify({ packageRoot, version: packageVersion() }));`;
-  const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8' }));
+  const out: unknown = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8' }));
   assert.deepEqual(out, { packageRoot: realpathSync(pkg), version: versionIn(pkg) });
 });

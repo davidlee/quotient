@@ -9,9 +9,14 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clampCeilings, selectSlot, transcriptBudget, writablePaths, type Admission } from './policy.ts';
+import { isRecord } from '../json.ts';
+import { clampCeilings, selectSlot, transcriptBudget, writablePaths, type Admission, type Policy } from './policy.ts';
 import { sha256Hex } from './evidence.ts';
 import { admit, attempts, validPolicy, workspace, type Env } from './test-rig.ts';
+
+/** RECORD without FIELD: the field left out, as the artefact under test must see it. */
+const omitting = <T>(record: Record<string, T>, field: string): Record<string, T> =>
+  Object.fromEntries(Object.entries(record).filter(([key]) => key !== field));
 
 function refuse(verdict: Admission, reason: string, detail: RegExp): void {
   if (verdict.ok) {assert.fail(`expected a ${reason} refusal, got an admission`);}
@@ -36,8 +41,7 @@ test('a policy declared by the launch environment is admitted', () => {
 test('an unusable location refuses policy-unavailable, naming the variable: unset with no XDG base, or relative', () => {
   const ws = workspace(validPolicy());
   for (const name of ['QUOTIENT_POLICY', 'QUOTIENT_RUN_DIR', 'QUOTIENT_SESSION_HOME']) {
-    const unset: Env = { ...ws.env };
-    delete unset[name];
+    const unset: Env = omitting(ws.env, name);
     delete unset.XDG_CONFIG_HOME;
     refuse(admit(unset, 1), 'policy-unavailable', new RegExp(`${name} is unset`));
     refuse(admit({ ...ws.env, [name]: 'relative/path' }, 17), 'policy-unavailable', new RegExp(`${name} is set but not`));
@@ -66,7 +70,7 @@ test('an unparsable policy refuses policy-invalid and records the readable diges
   assert.equal(lines.length, 1);
   assert.equal(lines[0].reason, 'policy-invalid');
   assert.equal(lines[0].policy_digest, sha256Hex(readFileSync(ws.policyPath)));
-  assert.match(String(lines[0].policy_digest), /^[0-9a-f]{64}$/);
+  assert.match(lines[0].policy_digest, /^[0-9a-f]{64}$/);
 });
 
 test('an unknown policy key refuses policy-invalid, naming it', () => {
@@ -133,8 +137,7 @@ test('a policy naming a non-absolute root or form path refuses policy-invalid', 
 
 test('a missing required policy field refuses policy-invalid, naming it', () => {
   for (const field of ['schema', 'mode', 'roots', 'profiles', 'forms', 'exposure', 'enabled']) {
-    const policy = validPolicy();
-    delete policy[field];
+    const policy = omitting(validPolicy(), field);
     refuse(admit(workspace(policy).env, 6), 'policy-invalid', new RegExp(field));
   }
 });
@@ -163,6 +166,15 @@ test('any static-only field refuses posture-unsupported, with no field drop', ()
     // Nothing was spawned, so the ledger is the only sink that can hold it.
     assert.equal(attempts(ws.runDir)[0].reason, 'posture-unsupported');
   }
+});
+
+test('the first defect reported is in check order: schema, static-only fields, unknown fields, missing fields, then mode', () => {
+  const staticOnly = { ...validPolicy({ mode: 7, speed: 1 }), root: '/work/one' };
+  refuse(admit(workspace(staticOnly).env, 13), 'posture-unsupported', /static-only field "root"/);
+  refuse(admit(workspace(validPolicy({ mode: 7, speed: 1 })).env, 14), 'policy-invalid', /unknown policy field: speed/);
+  const noRoots = omitting(validPolicy({ mode: 'static' }), 'roots');
+  refuse(admit(workspace(noRoots).env, 15), 'policy-invalid', /missing policy field: roots/);
+  refuse(admit(workspace(omitting(validPolicy(), 'mode')).env, 16), 'policy-invalid', /missing policy field: mode/);
 });
 
 test('an unrecognised mode refuses posture-unsupported: only per-call is served', () => {
@@ -210,7 +222,7 @@ test('a policy re-read per call sees an enable flip at the next call', () => {
 // ── The forms: a capability selects its wrapper form (EX-5, EX-7) ──────────
 
 /** A policy as `admitCall` normalised it, so the later steps see the real shape. */
-function admittedPolicy(overrides: Record<string, unknown> = {}) {
+function admittedPolicy(overrides: Record<string, unknown> = {}): Policy {
   const ws = workspace(validPolicy(overrides));
   const verdict = admit(ws.env, 1);
   if (!verdict.ok) {assert.fail(`expected admission, got ${verdict.reason}: ${verdict.detail}`);}
@@ -300,19 +312,26 @@ test('quotient-policy/2: schema is required and checked first; /1 is refused wit
   }
 });
 
+/** The `maxima` record of POLICY, as the suite then edits it. */
+function maximaOf(policy: Record<string, unknown>): Record<string, unknown> {
+  const maxima = policy.maxima;
+  if (!isRecord(maxima)) {assert.fail(`expected a maxima record: ${JSON.stringify(policy)}`);}
+  return maxima;
+}
+
 test('policy/2 refuses old or mixed token ceiling fields and requires context_tokens', () => {
   const old = validPolicy();
-  const oldMaxima = old.maxima as Record<string, unknown>;
+  const oldMaxima = maximaOf(old);
   delete oldMaxima.context_tokens;
   oldMaxima.tokens = 100000;
   refuse(admit(workspace(old).env, 1), 'policy-invalid', /maxima\.tokens.*context_tokens/);
 
   const mixed = validPolicy();
-  (mixed.maxima as Record<string, unknown>).tokens = 100000;
+  maximaOf(mixed).tokens = 100000;
   refuse(admit(workspace(mixed).env, 1), 'policy-invalid', /maxima\.tokens.*context_tokens/);
 
   const missing = validPolicy();
-  delete (missing.maxima as Record<string, unknown>).context_tokens;
+  delete maximaOf(missing).context_tokens;
   refuse(admit(workspace(missing).env, 1), 'policy-invalid', /maxima\.context_tokens/);
 });
 

@@ -45,7 +45,7 @@ export const HELP_SECTIONS = [
 
 export type Section = (typeof HELP_SECTIONS)[number];
 
-const ALIASES: Readonly<Record<string, Section>> = { refusals: 'result' };
+const ALIASES: Readonly<Record<string, Section | undefined>> = { refusals: 'result' };
 
 /** Where a section's built-in text comes from: a help file, a contract (no
  *  override), or a renderer over the caller's context. */
@@ -75,8 +75,7 @@ const SUFFIX = '.md';
 
 /** A section by its name or alias; null for neither. */
 export function sectionName(name: string): Section | null {
-  if ((HELP_SECTIONS as readonly string[]).includes(name)) {return name as Section;}
-  return ALIASES[name] ?? null;
+  return HELP_SECTIONS.find((section) => section === name) ?? ALIASES[name] ?? null;
 }
 
 /** One read of the help layers, held for the process lifetime. */
@@ -93,6 +92,14 @@ export type HelpSnapshot = {
 export type HelpLoad = { ok: true; snapshot: HelpSnapshot } | { ok: false; path: string; detail: string };
 
 type Failure = { ok: false; path: string; detail: string };
+
+/** One section's chosen text and the source it came from: a layer file or the
+ *  built-in one. */
+type Entry = { source: string; text: string };
+
+/** The sections the layers claimed, highest first: the first claim of a section
+ *  wins, the lower ones are read but not used. */
+type Overrides = Map<Section, Entry>;
 
 const unreadable = (path: string, error: unknown): Failure => ({
   ok: false,
@@ -125,38 +132,58 @@ function readText(path: string): { ok: true; text: string } | Failure {
  * cannot be read is a broken package and refuses the same way.
  */
 export function loadHelp(layers: readonly string[], root: string = packageRoot): HelpLoad {
-  const overrides = new Map<Section, { source: string; text: string }>();
+  const overrides: Overrides = new Map();
   for (const layer of layers) {
-    const listed = layerSections(layer);
-    if (!listed.ok) {return listed;}
-    for (const section of HELP_SECTIONS) {
-      if (SOURCES[section].kind === 'contract' || !listed.sections.has(`${section}${SUFFIX}`)) {continue;}
-      const path = join(layer, `${section}${SUFFIX}`);
-      const read = readText(path);
-      if (!read.ok) {return read;}
-      if (!overrides.has(section)) {overrides.set(section, { source: path, text: read.text });}
-    }
+    const failure = addLayer(overrides, layer);
+    if (failure !== null) {return failure;}
   }
+  return snapshotOf(overrides, root);
+}
 
+/** Add one layer's overridable sections to OVERRIDES: every section file it holds
+ *  is read, shadowed or not, and the first unreadable file refuses the load. */
+function addLayer(overrides: Overrides, layer: string): Failure | null {
+  const listed = layerSections(layer);
+  if (!listed.ok) {return listed;}
+  for (const section of HELP_SECTIONS) {
+    if (SOURCES[section].kind === 'contract' || !listed.sections.has(`${section}${SUFFIX}`)) {continue;}
+    const path = join(layer, `${section}${SUFFIX}`);
+    const read = readText(path);
+    if (!read.ok) {return read;}
+    if (!overrides.has(section)) {overrides.set(section, { source: path, text: read.text });}
+  }
+  return null;
+}
+
+/** The text and source SECTION prints: an override, else its built-in file, else
+ *  null for a rendered section no layer overrode. */
+function chosenFor(section: Section, overrides: Overrides, root: string): { ok: true; chosen: Entry | null } | Failure {
+  const override = overrides.get(section);
+  if (override !== undefined) {return { ok: true, chosen: override };}
+  const source = SOURCES[section];
+  if (source.kind === 'rendered') {return { ok: true, chosen: null };}
+  const path = join(root, source.path);
+  const read = readText(path);
+  if (!read.ok) {return read;}
+  return { ok: true, chosen: { source: path, text: read.text } };
+}
+
+/** The snapshot over the chosen texts: each section's source (a file path, or
+ *  `builtin:<section>` for a rendered one) and the digest over section, source
+ *  and bytes, in section order. */
+function snapshotOf(overrides: Overrides, root: string): HelpLoad {
   const texts = new Map<Section, string | null>();
   const sources = new Map<Section, string>();
   const digest = createHash('sha256');
   for (const section of HELP_SECTIONS) {
-    const source = SOURCES[section];
-    let chosen = overrides.get(section) ?? null;
-    if (chosen === null && source.kind !== 'rendered') {
-      const path = join(root, source.path);
-      const read = readText(path);
-      if (!read.ok) {return read;}
-      chosen = { source: path, text: read.text };
-    }
-    const sourcePath = chosen?.source ?? `builtin:${section}`;
-    texts.set(section, chosen?.text ?? null);
+    const chosen = chosenFor(section, overrides, root);
+    if (!chosen.ok) {return chosen;}
+    const entry = chosen.chosen;
+    const sourcePath = entry?.source ?? `builtin:${section}`;
+    const text = entry?.text ?? null;
+    texts.set(section, text);
     sources.set(section, sourcePath);
-    for (const part of [section, sourcePath, chosen?.text ?? '']) {
-      digest.update(part);
-      digest.update('\0');
-    }
+    digest.update(`${section}\0${sourcePath}\0${text ?? ''}\0`);
   }
   return { ok: true, snapshot: Object.freeze({ texts, sources, digest: digest.digest('hex') }) };
 }
@@ -224,12 +251,15 @@ export function profileTable(profiles: readonly Profile[], policy: PolicyView): 
 export function maximaTable(policy: PolicyView): string {
   const heading = '## Per-run maxima\n\n';
   if (!policy.ok) {return `${heading}The policy could not be read when this text was rendered (${policy.detail}); it is re-read on every call.\n`;}
+  // The maxima read through a lookup keyed by the field names the vocabulary
+  // lists: the render needs an index by name, not a cast to `keyof Maxima`.
+  const values: Readonly<Record<string, number | undefined>> = policy.maxima;
   return [
     heading,
     'The policy\'s bounds on one run, as read when this text was rendered; the policy is re-read on every call. A call\'s `ceilings` may only lower them.\n\n',
     '| unit | maximum |\n',
     '|---|---|\n',
-    ...(MAXIMA_FIELDS as (keyof Maxima)[]).map((unit) => `| \`${unit}\` | ${String(policy.maxima[unit])} |\n`),
+    ...MAXIMA_FIELDS.map((unit) => `| \`${unit}\` | ${String(values[unit])} |\n`),
   ].join('');
 }
 
@@ -241,9 +271,10 @@ const PLACEHOLDER_TIMEOUT_S = 360;
 /** The Claude Code and Codex snippets for the running bin. */
 export function clientsSnippets(context: RenderContext): string {
   const bin = JSON.stringify(context.bin);
+  const margin = String(TIMEOUT_MARGIN_S);
   const timeout = context.policy.ok
-    ? `tool_timeout_sec = ${context.policy.maxima.wall_clock_s + TIMEOUT_MARGIN_S}     # policy maxima.wall_clock_s + ${TIMEOUT_MARGIN_S}`
-    : `tool_timeout_sec = ${PLACEHOLDER_TIMEOUT_S}     # placeholder: no readable policy (${context.policy.detail}); set maxima.wall_clock_s + ${TIMEOUT_MARGIN_S}`;
+    ? `tool_timeout_sec = ${String(context.policy.maxima.wall_clock_s + TIMEOUT_MARGIN_S)}     # policy maxima.wall_clock_s + ${margin}`
+    : `tool_timeout_sec = ${String(PLACEHOLDER_TIMEOUT_S)}     # placeholder: no readable policy (${context.policy.detail}); set maxima.wall_clock_s + ${margin}`;
   return `# Clients
 
 Claude Code (\`.mcp.json\` in the project):
@@ -272,17 +303,20 @@ read-only, it prompts for \`pi_agent\`, \`pi_agent_start\`, \`pi_agent_ack\` and
 `;
 }
 
+/** TEXT, which every section but a rendered one always carries: one that reached
+ *  here without it is a source table that disagrees with the renderer. */
+function requiredText(text: string | null, section: Section): string {
+  if (text === null) {throw new Error(`help section ${section} has neither a text nor a renderer`);}
+  return text;
+}
+
 /** One section's text: the snapshot's, with the rendered parts filled in. */
 export function sectionText(snapshot: HelpSnapshot, section: Section, context: RenderContext): string {
   const text = snapshot.texts.get(section) ?? null;
-  switch (section) {
-    case 'agent':
-      return `${text}\n${profileTable(context.profiles, context.policy)}\n${maximaTable(context.policy)}`;
-    case 'clients':
-      return text ?? clientsSnippets(context);
-    case 'reduce':
-      return text ?? `${REDUCE_USAGE}\n`;
-    default:
-      return text!;
+  if (section === 'agent') {
+    return `${requiredText(text, section)}\n${profileTable(context.profiles, context.policy)}\n${maximaTable(context.policy)}`;
   }
+  if (section === 'clients') {return text ?? clientsSnippets(context);}
+  if (section === 'reduce') {return text ?? `${REDUCE_USAGE}\n`;}
+  return requiredText(text, section);
 }

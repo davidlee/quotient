@@ -32,8 +32,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { resolveLocations } from '../config.ts';
 import { loadHelp } from '../help/help.ts';
-import { reduce, type Reduced } from '../reduce/reduce.ts';
-import { isRecord } from '../json.ts';
+import { reduce, SCHEMA as STATUS_SCHEMA, type Reduced, type Status } from '../reduce/reduce.ts';
+import { at, isRecord } from '../json.ts';
 import { serve, type ServeOptions } from './server.ts';
 import { MODERN_VERSION, TASKS_EXTENSION } from './protocol.ts';
 import { APPROVALS_SCHEMA } from './approvals.ts';
@@ -245,7 +245,7 @@ export function workspace(policy: unknown = validPolicy(), options: { raw?: bool
   const dir = mkdtempSync(join(tmpdir(), 'pi-mcp-ws-'));
   writeProfiles(xdgProfileLayer(dir), RIG_PROFILES);
   const policyPath = join(dir, 'policy.json');
-  writeFileSync(policyPath, options.raw ? String(policy) : JSON.stringify(policy, null, 2));
+  writeFileSync(policyPath, options.raw === true ? String(policy) : JSON.stringify(policy, null, 2));
   const runDir = join(dir, 'run');
   return {
     env: launchEnv(dir),
@@ -338,7 +338,8 @@ export type Rig = {
 
 /** Change one field of the policy on disk, as an operator's flip would. */
 export function patchPolicy(rig: Rig, field: string, value: unknown): void {
-  const policy = JSON.parse(readFileSync(rig.policyPath, 'utf8')) as Record<string, unknown>;
+  const policy: unknown = JSON.parse(readFileSync(rig.policyPath, 'utf8'));
+  if (!isRecord(policy)) {assert.fail(`the policy at ${rig.policyPath} is not an object`);}
   writeFileSync(rig.policyPath, JSON.stringify({ ...policy, [field]: value }));
 }
 
@@ -348,16 +349,19 @@ function killSurvivors(markerDir: string): void {
     if (!name.endsWith('pid') && !name.endsWith('pids')) {continue;}
     for (const raw of readText(join(markerDir, name)).split('\n')) {
       const pid = Number(raw.trim());
-      if (!Number.isInteger(pid) || pid <= 0) {continue;}
-      try {
-        process.kill(-pid, 'SIGKILL');
-      } catch {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // already gone
-        }
-      }
+      if (Number.isInteger(pid) && pid > 0) {killGroup(pid);}
+    }
+  }
+}
+
+/** SIGKILL PID's group, else PID alone, else nothing: it is already gone. */
+function killGroup(pid: number): void {
+  for (const target of [-pid, pid]) {
+    try {
+      process.kill(target, 'SIGKILL');
+      return;
+    } catch {
+      // not this target; the next, or already gone
     }
   }
 }
@@ -510,26 +514,49 @@ export function readText(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : '';
 }
 
-/** A JSONL file as records: the audit, the attempts ledger. */
-export function jsonLines(path: string): Record<string, any>[] {
-  return readText(path)
+/** Newline-framed JSON as records, failing the test on a line that is not one:
+ *  a JSONL file, a server's replies. */
+export function recordLines(text: string, what: string): Record<string, unknown>[] {
+  return text
     .split('\n')
     .filter((raw) => raw.length > 0)
-    .map((raw) => JSON.parse(raw) as Record<string, any>);
+    .map((raw) => {
+      const parsed: unknown = JSON.parse(raw);
+      if (!isRecord(parsed)) {assert.fail(`a line of ${what} is not a JSON object: ${raw}`);}
+      return parsed;
+    });
+}
+
+/** A JSONL file as records: the audit, the attempts ledger. */
+export function jsonLines(path: string): Record<string, unknown>[] {
+  return recordLines(readText(path), path);
+}
+
+/** The number at PATH inside VALUE, failing the test when it is anything else. */
+export function numberAt(value: unknown, ...path: readonly (string | number)[]): number {
+  const found = at(value, ...path);
+  if (typeof found !== 'number') {assert.fail(`expected a number at ${path.join('.')}: ${JSON.stringify(value)}`);}
+  return found;
+}
+
+/** The string at PATH inside VALUE, failing the test when it is anything else. */
+export function textAt(value: unknown, ...path: readonly (string | number)[]): string {
+  const found = at(value, ...path);
+  if (typeof found !== 'string') {assert.fail(`expected a string at ${path.join('.')}: ${JSON.stringify(value)}`);}
+  return found;
 }
 
 /** The `spawn` record of a run, read from its audit: what was launched, and from
  *  where. The audit has no contract (research F5), so the record's shape is this
  *  reader's and the suites' assertions'. */
 export function spawnRecord(audit: string): Record<string, unknown> {
-  const records: unknown[] = jsonLines(audit);
-  const spawn = records.find((record) => isRecord(record) && record.record === 'spawn');
-  if (!isRecord(spawn)) {assert.fail(`no spawn record in ${audit}`);}
+  const spawn = jsonLines(audit).find((record) => record.record === 'spawn');
+  if (spawn === undefined) {assert.fail(`no spawn record in ${audit}`);}
   return spawn;
 }
 
 /** The attempts ledger as records; a missing ledger reads as none. */
-export function attempts(runDir: string): Record<string, any>[] {
+export function attempts(runDir: string): Record<string, unknown>[] {
   return jsonLines(attemptsPath(runDir));
 }
 
@@ -547,12 +574,12 @@ export function markerPids(rig: Rig, name = 'pid'): number[] {
 /** Whether `pid` still exists. A missing pid is a broken rig, never "gone":
  *  `process.kill(undefined)` throws and `process.kill(0)` signals our own group. */
 export function isAlive(pid: number): boolean {
-  assert.ok(Number.isInteger(pid) && pid > 0, `isAlive needs a recorded pid, got ${pid}`);
+  assert.ok(Number.isInteger(pid) && pid > 0, `isAlive needs a recorded pid, got ${String(pid)}`);
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
+    return at(error, 'code') === 'EPERM';
   }
 }
 
@@ -569,7 +596,7 @@ export async function waitForPath(path: string, what = path, timeoutMs = 10000):
 /** A server in this process, with an input channel the test can write to and
  *  close: stdin EOF is a trigger here, so the test owns when it fires. */
 export type LiveServer = {
-  replies: () => Record<string, any>[];
+  replies: () => Record<string, unknown>[];
   /** One record, newline-framed. */
   write: (record: string) => void;
   /** Raw bytes, exactly as given: for framing cases. */
@@ -591,13 +618,13 @@ export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
   const out: string[] = [];
   const err: string[] = [];
   const output = new Writable({
-    write(chunk, _encoding, done) {
+    write(chunk: unknown, _encoding, done: () => void): void {
       out.push(String(chunk));
       done();
     },
   });
   const diagnostics = new Writable({
-    write(chunk, _encoding, done) {
+    write(chunk: unknown, _encoding, done: () => void): void {
       err.push(String(chunk));
       done();
     },
@@ -606,12 +633,7 @@ export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
   const launchDir = options.launchDir ?? mkdtempSync(join(tmpdir(), 'quotient-launch-'));
   const done = serve(input, output, env, diagnostics, { ...options, launchDir });
   return {
-    replies: () =>
-      out
-        .join('')
-        .split('\n')
-        .filter((raw) => raw.length > 0)
-        .map((raw) => JSON.parse(raw) as Record<string, any>),
+    replies: () => recordLines(out.join(''), 'the server\'s output'),
     write: (record) => input.write(`${record}\n`),
     send: (bytes) => input.write(bytes),
     end: () => input.end(),
@@ -625,10 +647,10 @@ export function openServer(env: Env, options: ServeOptions = {}): LiveServer {
 export const serveRig = (rig: Rig, options: ServeOptions = {}): LiveServer =>
   openServer(rig.env, { launchDir: rig.launchDir, ...options });
 
-export async function waitForReplies(server: LiveServer, count: number, timeoutMs = 10000): Promise<Record<string, any>[]> {
+export async function waitForReplies(server: LiveServer, count: number, timeoutMs = 10000): Promise<Record<string, unknown>[]> {
   const deadline = Date.now() + timeoutMs;
   while (server.replies().length < count) {
-    if (Date.now() > deadline) {throw new Error(`timed out waiting for ${count} replies: ${server.stderr()}`);}
+    if (Date.now() > deadline) {throw new Error(`timed out waiting for ${String(count)} replies: ${server.stderr()}`);}
     await pause(5);
   }
   return server.replies();
@@ -661,8 +683,8 @@ function expectedReplies(content: string): number {
   for (const raw of content.split('\n')) {
     if (raw.trim().length === 0) {continue;}
     try {
-      const message = JSON.parse(raw) as Record<string, unknown>;
-      if (message && typeof message === 'object' && Object.hasOwn(message, 'id')) {count += 1;}
+      const message: unknown = JSON.parse(raw);
+      if (isRecord(message) && Object.hasOwn(message, 'id')) {count += 1;}
     } catch {
       // an unparsable record answers nothing
     }
@@ -682,7 +704,7 @@ export async function converse(
   lines: string[],
   env: Env,
   options: ServeOptions & { chunks?: string[] } = {},
-): Promise<{ replies: Record<string, any>[]; stderr: string }> {
+): Promise<{ replies: Record<string, unknown>[]; stderr: string }> {
   const { chunks, ...serveOptions } = options;
   const content = (chunks ?? lines.map((l) => `${l}\n`)).join('');
   const expected = expectedReplies(content);
@@ -693,10 +715,37 @@ export async function converse(
   return { replies: server.replies(), stderr: server.stderr() };
 }
 
-/** The pi-agent-result/2 document inside one tool result. */
-export function resultDocument(reply: Record<string, any>): Record<string, any> {
-  assert.equal(reply.error, undefined, 'a call must never surface as a JSON-RPC error');
-  return JSON.parse(reply.result.content[0].text) as Record<string, any>;
+/** The document inside one tool result — its one text block — unchecked: what a
+ *  suite holds to a schema, or reads on purpose when it is not one. */
+export function toolDocument(reply: unknown): unknown {
+  assert.equal(at(reply, 'error'), undefined, 'a call must never surface as a JSON-RPC error');
+  const content = at(reply, 'result', 'content');
+  assert.ok(Array.isArray(content) && content.length === 1, `a tool result is one content block: ${JSON.stringify(reply)}`);
+  assert.equal(at(content, 0, 'type'), 'text');
+  return JSON.parse(textAt(content, 0, 'text'));
+}
+
+/** The pi-agent-result/2 document inside one tool result, held to its contract. */
+export function resultDocument(reply: unknown): AgentResult {
+  const doc = toolDocument(reply);
+  if (!isAgentResult(doc)) {assert.fail(`expected a valid pi-agent-result/2: ${faultOf(validateAgentResult(doc))}: ${JSON.stringify(doc)}`);}
+  return doc;
+}
+
+/** A result of a run that was spawned: its status and evidence are present. */
+export type RanResult = AgentResult & { status: Status; artifacts: Artifacts };
+
+/** The result of a spawned run inside one tool result. The status is held to its
+ *  schema token only: its fields are what the suite's assertions check. */
+export function ranResult(reply: unknown): RanResult {
+  const doc = resultDocument(reply);
+  const { status, artifacts } = doc;
+  if (!isStatus(status) || artifacts === null) {assert.fail(`expected a spawned run's result: ${JSON.stringify(doc)}`);}
+  return { ...doc, status, artifacts };
+}
+
+function isStatus(value: unknown): value is Status {
+  return isRecord(value) && value.schema === STATUS_SCHEMA;
 }
 
 /** The document each envelope schema names (design sec-2). */
@@ -723,7 +772,7 @@ function conforms<S extends keyof Envelopes>(doc: unknown, schema: S): doc is En
 /** The handle, wait or ack document inside one tool result: of SCHEMA, passing
  *  its validator, and never an error because of the runs inside it. */
 export function envelopeDocument<S extends keyof Envelopes>(reply: Record<string, unknown>, schema: S): Envelopes[S] {
-  const doc: unknown = resultDocument(reply);
+  const doc = toolDocument(reply);
   if (!conforms(doc, schema)) {
     assert.fail(`expected a valid ${schema}: ${faultOf(ENVELOPES[schema](doc))}: ${JSON.stringify(doc)}`);
   }
@@ -734,8 +783,7 @@ export function envelopeDocument<S extends keyof Envelopes>(reply: Record<string
 /** The refusal inside one tool result: a valid `pi-agent-result/2` that ran
  *  nothing, answered with `isError`. */
 export function refusalDocument(reply: Record<string, unknown>): AgentResult & { refusal: { reason: string; detail: string } } {
-  const doc: unknown = resultDocument(reply);
-  if (!isAgentResult(doc)) {assert.fail(`expected a valid pi-agent-result/2: ${faultOf(validateAgentResult(doc))}`);}
+  const doc = resultDocument(reply);
   if (doc.state !== 'refused' || doc.refusal === null) {assert.fail(`expected a refusal: ${JSON.stringify(doc)}`);}
   assert.equal(isErrorOf(reply), true, 'a refused call is an error');
   return { ...doc, refusal: doc.refusal };
