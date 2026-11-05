@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 71
+slug = "in-jail-quotient-is-jail-configuration"
+title = "In-jail quotient is a jail configuration: the existing form family nested, under a jail-supplied read-only policy"
+record_kind = "decision"
+status = "accepted"
+created = "2026-11-05"
+updated = "2026-11-05"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "IDE-008 asked how quotient runs inside an enclosing jail with evidence protected. flakes:DEC-122 made in-jail quotient the route for jailed claude once this lands. Probes in a real jailed-shell on 2026-11-05 showed nested bubblewrap works and that the host's real form family runs nested under quotient 0.6.1 once given the gateway key from the environment and its closure."
+choice = """1. Write reach stays form-1's: root, session directory, private temp and exposure paths; shared caches go in exposure. 2. A jail uses the existing form family with its narrow read view; a jail adds more through options. No new form type, posture or reading of unconfined. 3. The jail definition supplies policy and profiles, generated into the store and bound read-only at ~/.config/quotient. Ceilings there are defaults: they bind delegates of the registered server, not the orchestrator. 4. The policy has roots ["/workspace"]; the jail's mounts are the limit."""
+alternatives = ["Full inheritance of the jail's write reach: breaks G5 and needs a contract change", "A new thin form with a wide read view: a second builder that must reproduce the family's safeguards", "Landlock: allowlist-only and needs a helper binary because node cannot call it", "Evidence written out of reach: no location works without the host", "Project or agent-supplied policy: agents can rewrite it and the policy contract forbids lookup in the project tree", "Host-enforced policy: the relay DEC-122 turned off", "Launch-directory roots: needs a policy generated at each launch"]
+rationale = "Smallest mechanism that enforces protection: it reuses a checked builder and leaves the contract unchanged. The operator does not treat this as an adversarial boundary, so binding delegates is enough; the host relay stays the answer where controls must bind an untrusted agent. Static roots never exceed the jail, because a form's bind cannot widen a read-only jail mount (observed)."
+consequences = ["Most of the work is in flakes; quotient needs docs and probably no code", "The orchestrator can reach evidence and start its own server; the docs must say so", "No quotient allow in a jail; machine forms only", "flakes:DEC-122 needs a note that in-jail roots are limited by the jail's mounts", "Unproven until hostile-audit and the read form pass nested in a dev-envs jail"]
+decided_by = "user, 2026-11-05 (IDE-008 shaping session: A on each of four questions)"
+decided_on = "2026-11-05"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "IDE-008"

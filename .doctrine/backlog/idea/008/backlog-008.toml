@@ -3,7 +3,7 @@ version = 1
 
 id = 8
 slug = "inherited-confinement"
-title = "Inherited confinement: run inside an enclosing jail with no form, evidence still protected"
+title = "Inherited confinement: quotient in an enclosing jail, delegates under the nested form family"
 kind = "idea"
 status = "open"
 resolution = ""                 # seeded empty so `backlog edit` sets it in place
