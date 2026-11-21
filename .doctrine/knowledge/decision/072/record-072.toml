@@ -1,0 +1,37 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 72
+slug = "output-documents-are-open-to-added-fields-consumers-ignore-unknown-fields"
+title = "Output documents are open to added fields: consumers ignore unknown fields"
+record_kind = "decision"
+status = "accepted"
+created = "2026-11-21"
+updated = "2026-11-21"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "ISS-006: the output contracts did not say whether adding a field is additive within a version. IMP-019 (a next hint on non-final results), IMP-013, IMP-015 and IDE-007 all add fields."
+choice = "For the output documents pi-agent-result/2, pi-agent-wait/1, pi-run-handle/1 and pi-agent-ack/1: consumers ignore fields they do not know, and adding a field does not mint a new version. Removing or renaming a field, or changing its meaning or type, does. Input contracts (quotient-policy/2, form-1) stay strict. The rule is stated once in each output contract."
+alternatives = ["Mint a new version for every added field: churns versions for purely additive information"]
+rationale = "Standard open-world rule for JSON outputs; lets small hints and diagnostics land without a version bump while keeping breaking changes versioned."
+consequences = ["Each output contract gains a compatibility paragraph", "IMP-019 lands within pi-agent-result/2", "ISS-006 resolved"]
+decided_by = "user, 2026-11-21 (agreed the proposed rule in the IMP-018/IMP-019 scoping: 'yes')"
+decided_on = "2026-11-21"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "ISS-006"
+
+[[relation]]
+label = "shapes"
+target = "IMP-019"
