@@ -31,3 +31,11 @@ choose a viable `context_tokens` cap for a continuation.
 ## Evidence (2026-11-21)
 
 Run `run-20261121T032856897Z-76-4e28bfb03f62` stopped with `ceiling_exceeded` under the caps `requests: 30` and `context_tokens: 60000`. The envelope alone did not say which cap bound. The orchestrator had to work it out from `status.requests` (31) against `status.context.peak_tokens` (52349).
+
+## Done (2026-11-21)
+
+- `pi-agent-result/2` gains three fields: `ceilings` (the run's clamped bounds, with all four keys), `crossing` (`{unit, observed, limit}`, non-null exactly for `ceiling_exceeded` and `timeout`) and `elapsed_s` (from launch to settle, excluding queue time). The helpers `ceilingsOf` and `crossingOf` are in `src/server/result.ts`. `src/server/execute.ts` passes in the gate's trigger, `admitted.ceilings` and the clock.
+- The wait entry's status message now names the crossing, e.g. `ceiling_exceeded: cost_usd 0.01 > 0.005` (`src/server/documents.ts`).
+- One shared `Outcome` type (`Pick<AgentResult, 'state' | 'causes' | 'crossing'>`) replaces the two copies in `runs.ts` and `views.ts`.
+- Readers accept documents from an earlier server: a field added within `/2` that is absent reads as `null`. See the note on DEC-072.
+- Out of scope: an estimate of the context a resumed session retains. `peak_tokens` stands in for it, and `orchestrate.md` says to set the cap above it.

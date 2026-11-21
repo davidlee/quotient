@@ -14,7 +14,7 @@ import { messageOf } from '../errors.ts';
 import type { Admitted } from './admission.ts';
 import { appendAttempt, type RunLayout } from './evidence.ts';
 import { createGate, type Gate } from './gate.ts';
-import { createLatch, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
+import { createLatch, crossingOf, failedResult, refusedResult, resultFor, type AgentResult } from './result.ts';
 import { runChild, type RunOutcome, type SpawnPlan } from './spawn.ts';
 
 /** What the run reads from the server's own start-up and its options. */
@@ -123,6 +123,9 @@ async function runToResult(
   // cause → state map of its own (EX-8).
   const latch = createLatch();
 
+  // The clock starts immediately before the launcher runs, so queue time and the
+  // gate's own setup stay out of `elapsed_s`; it is read once the child has settled.
+  const startedAt = Date.now();
   const run = await runChild(spawnPlan(admitted, layout, deps), {
     signal: controller.signal,
     graceMs: deps.graceMs,
@@ -130,6 +133,7 @@ async function runToResult(
     onRecord: (tally) => { gate.tick(tally); },
     onAudit,
   });
+  const elapsedS = (Date.now() - startedAt) / 1000;
 
   // Nothing was launched: the call is a refusal.
   if (run.auditFailedBeforeSpawn) {return auditFailed(admitted, run);}
@@ -156,5 +160,8 @@ async function runToResult(
     outcome: run,
     causes: latch.commit(),
     session: admitted.session.session,
+    ceilings: admitted.ceilings,
+    crossing: crossingOf(gate.triggers()[0]),
+    elapsedS,
   });
 }

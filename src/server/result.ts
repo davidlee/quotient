@@ -9,6 +9,7 @@
 // child's, and `resultFor` is the ONLY place a verdict is derived (EX-8).
 import type { Reduced } from '../reduce/reduce.ts';
 import { isRecord, isMember } from '../json.ts';
+import type { Maxima } from './policy.ts';
 
 export const RESULT_SCHEMA = 'pi-agent-result/2';
 
@@ -121,6 +122,58 @@ export function nextStep(termination: Termination, session: string | null): stri
 }
 
 /**
+ * The ceiling units a run is bounded by, in `Maxima`'s order. The three counting
+ * units are a ceiling's; `wall_clock_s` is the timeout's.
+ */
+export const CEILING_UNITS = ['requests', 'context_tokens', 'cost_usd', 'wall_clock_s'] as const;
+export type CeilingUnit = (typeof CEILING_UNITS)[number];
+
+/** The run's clamped ceilings as the wire carries them: every unit present, null
+ *  where the run had no such bound (`Maxima`'s keys are optional). */
+export type Ceilings = Record<CeilingUnit, number | null>;
+
+/** The bound that stopped the run: which unit crossed, what the gate read at the
+ *  crossing, and the clamped limit it crossed. Every member is a number, because a
+ *  crossing a call reports is one the gate measured. */
+export type Crossing = { unit: CeilingUnit; observed: number; limit: number };
+
+/** What the gate knows about a fired trigger, read structurally so this module
+ *  does not depend on the gate's own type. */
+export type TriggerFacts = {
+  cause: string;
+  unit: string;
+  observed: number | null;
+  limit: number | null;
+};
+
+/**
+ * `Maxima` → the wire's ceilings: four keys, every unit, null where nothing was
+ * fitted. The whole field is null only for a run the server settled without a
+ * timed launch (`refusedResult`, `failedResult`), which build their own arms.
+ */
+export function ceilingsOf(maxima: Maxima): Ceilings {
+  return {
+    requests: maxima.requests ?? null,
+    context_tokens: maxima.context_tokens ?? null,
+    cost_usd: maxima.cost_usd ?? null,
+    wall_clock_s: maxima.wall_clock_s ?? null,
+  };
+}
+
+/**
+ * The crossing a gate trigger names, or null: only a ceiling or timeout trigger
+ * carries one, and only when both numbers were read. A switch or an accounting
+ * verdict stopped the run without crossing a bound.
+ */
+export function crossingOf(trigger: TriggerFacts | undefined): Crossing | null {
+  if (trigger === undefined) {return null;}
+  if (trigger.cause !== 'ceiling' && trigger.cause !== 'timeout') {return null;}
+  const { unit, observed, limit } = trigger;
+  if (!isMember(CEILING_UNITS, unit) || observed === null || limit === null) {return null;}
+  return { unit, observed, limit };
+}
+
+/**
  * The refusal reasons this module declares valid (EX-3): a refusal token, or a
  * failure to record one. Steps 1-8 own the tokens they raise (`disabled`,
  * `profile-invalid`, `session-busy`, …) and name them where they are raised;
@@ -165,7 +218,21 @@ export type AgentResult = {
   /** The caller's next step, or null when the call is over: `CONTINUE_HINT` when
    *  the termination is continuable and a session exists, null otherwise. */
   next: string | null;
+  /** The run's clamped ceilings, each unit present: null where the run had no such
+   *  bound, and the whole field null for a run the server settled without a timed
+   *  launch (a refusal, a failure arm). */
+  ceilings: Ceilings | null;
+  /** The bound that stopped the run: non-null exactly when `state` is
+   *  `ceiling_exceeded` (a counting unit) or `timeout` (`wall_clock_s`). */
+  crossing: Crossing | null;
+  /** Seconds from launch to settle, queue time excluded; null when no timed launch
+   *  happened. */
+  elapsed_s: number | null;
 };
+
+/** What a registry or reader keeps of a settled result: its verdict and the bound
+ *  that stopped it, enough to say why without the whole document. */
+export type Outcome = Pick<AgentResult, 'state' | 'causes' | 'crossing'>;
 
 // ── The latch ──────────────────────────────────────────────────────────────
 
@@ -247,6 +314,12 @@ export type ResultInput = {
   causes: LatchCause[];
   /** The id this call minted or named. A run always has one. */
   session: string;
+  /** The run's clamped ceilings (`admitted.ceilings`). */
+  ceilings: Maxima;
+  /** The gate trigger that stopped the run, or null when none did. */
+  crossing: Crossing | null;
+  /** Seconds from launch to settle. */
+  elapsedS: number;
 };
 
 /**
@@ -331,6 +404,9 @@ export function resultFor(input: ResultInput): AgentResult {
     },
     refusal: null,
     next: nextStep(termination, session),
+    ceilings: ceilingsOf(input.ceilings),
+    crossing: input.crossing,
+    elapsed_s: input.elapsedS,
   };
 }
 
@@ -350,6 +426,9 @@ export function refusedResult(reason: string, detail: string): AgentResult {
     artifacts: null,
     refusal: { reason, detail },
     next: null,
+    ceilings: null,
+    crossing: null,
+    elapsed_s: null,
   };
 }
 
@@ -392,6 +471,9 @@ export function failedResult(
     },
     refusal: null,
     next: nextStep(termination, session),
+    ceilings: null,
+    crossing: null,
+    elapsed_s: null,
   };
 }
 
@@ -444,9 +526,24 @@ function validateFields(doc: Record<string, unknown>): Validation {
   return validateNext(doc);
 }
 
-/** `next` is always present, a string or null, and null once the call is final:
+/**
+ * The fields added within `/2`. A writer always emits them; a document an earlier
+ * server wrote lacks them, and a reader takes absence as null (DEC-072). So each
+ * rule below that would demand one of these skips it when it is absent: the drift
+ * suite, not this check, holds the writers to the Fields table.
+ */
+export const ADDED_FIELDS = ['next', 'ceilings', 'crossing', 'elapsed_s'] as const;
+export type AddedField = (typeof ADDED_FIELDS)[number];
+
+/** Whether DOC predates FIELD: a document from an earlier server. */
+function predates(doc: Record<string, unknown>, field: AddedField): boolean {
+  return !(field in doc);
+}
+
+/** `next`, where present, is a string or null, and null once the call is final:
  *  nothing follows the answer. */
 function validateNext(doc: Record<string, unknown>): Validation {
+  if (predates(doc, 'next')) {return { ok: true };}
   if (doc.next !== null && typeof doc.next !== 'string') {return invalid('next must be a string or null');}
   if (doc.final === true && doc.next !== null) {return invalid('a final run has nothing to continue');}
   return { ok: true };
@@ -459,12 +556,16 @@ const REFUSAL_NULLS = [
   ['artifacts', 'a refusal has no artifacts: nothing ran'],
   ['result', 'a refusal carries no result'],
   ['next', 'a refusal has nothing to continue'],
+  ['ceilings', 'a refusal ran under no bound'],
+  ['crossing', 'a refusal crossed nothing'],
+  ['elapsed_s', 'a refusal never launched, so it has no clock'],
 ] as const;
 
 /** Every field of REFUSAL_NULLS, in that order. */
 function validateRefusalNils(doc: Record<string, unknown>): Validation {
   for (const [field, detail] of REFUSAL_NULLS) {
-    if (doc[field] !== null) {return invalid(detail);}
+    const added = isMember(ADDED_FIELDS, field) && predates(doc, field);
+    if (!added && doc[field] !== null) {return invalid(detail);}
   }
   return { ok: true };
 }
@@ -495,6 +596,67 @@ function validateRunCarriage(doc: Record<string, unknown>): Validation {
   return { ok: true };
 }
 
+/** The states whose launch was timed and bounded: a run the server settled without
+ *  one (a failure arm, a queued run dropped) reports null ceilings and clock. */
+const TIMED_STATES: readonly ResultState[] = ['completed', 'ceiling_exceeded', 'timeout'];
+
+/** The crossing's own shape: a known unit and two numbers. */
+function validateCrossingShape(crossing: Record<string, unknown>): Validation {
+  const unit = crossing.unit;
+  if (!isMember(CEILING_UNITS, unit)) {return invalid(`crossing.unit is not a ceiling unit: ${String(unit)}`);}
+  if (typeof crossing.observed !== 'number') {return invalid('crossing.observed must be the number the gate read');}
+  if (typeof crossing.limit !== 'number') {return invalid('crossing.limit must be the number it crossed');}
+  return { ok: true };
+}
+
+/** The crossing ↔ state rule: a crossing exactly where a bound stopped the run, and
+ *  the unit that matches the state (`wall_clock_s` is the timeout's alone). */
+function validateCrossing(doc: Record<string, unknown>, state: ResultState): Validation {
+  const crossing = doc.crossing;
+  const stopped = state === 'ceiling_exceeded' || state === 'timeout';
+  if (crossing === null) {
+    return stopped ? invalid(`state ${state} names the bound that stopped it`) : { ok: true };
+  }
+  if (!isRecord(crossing)) {return invalid('crossing must be an object or null');}
+  const shape = validateCrossingShape(crossing);
+  if (!shape.ok) {return shape;}
+  const expected: ResultState = crossing.unit === 'wall_clock_s' ? 'timeout' : 'ceiling_exceeded';
+  return state === expected ? { ok: true } : invalid(`crossing.unit ${String(crossing.unit)} belongs to state ${expected}, not ${state}`);
+}
+
+/** `ceilings`: the four units, each a number or null, or the whole field null. */
+function validateCeilings(doc: Record<string, unknown>): Validation {
+  const ceilings = doc.ceilings;
+  if (ceilings === null || predates(doc, 'ceilings')) {return { ok: true };}
+  if (!isRecord(ceilings)) {return invalid('ceilings must be an object or null');}
+  for (const unit of CEILING_UNITS) {
+    const bound = ceilings[unit];
+    if (bound !== null && typeof bound !== 'number') {return invalid(`ceilings.${unit} must be a number or null`);}
+  }
+  return { ok: true };
+}
+
+/** The clock: seconds since launch, never negative, present for a timed launch. */
+function validateElapsed(doc: Record<string, unknown>, state: ResultState): Validation {
+  if (predates(doc, 'elapsed_s')) {return { ok: true };}
+  const elapsed = doc.elapsed_s;
+  if (elapsed === null) {
+    return TIMED_STATES.includes(state) ? invalid(`state ${state} reports how long it took`) : { ok: true };
+  }
+  if (typeof elapsed !== 'number' || elapsed < 0) {return invalid('elapsed_s must be a non-negative number or null');}
+  return { ok: true };
+}
+
+/** What bounded the run and what stopped it, and the two rules tying them to `state`. */
+function validateBounds(doc: Record<string, unknown>, state: ResultState): Validation {
+  const ceilings = validateCeilings(doc);
+  if (!ceilings.ok) {return ceilings;}
+  if (TIMED_STATES.includes(state) && doc.ceilings === null) {return invalid(`state ${state} reports the bounds it ran under`);}
+  const elapsed = validateElapsed(doc, state);
+  if (!elapsed.ok) {return elapsed;}
+  return predates(doc, 'crossing') ? { ok: true } : validateCrossing(doc, state);
+}
+
 /** DEC-093 withdraws exactly `result` and `final` on a non-completed run. */
 function validateVerdict(doc: Record<string, unknown>, state: ResultState): Validation {
   const completed = state === 'completed';
@@ -502,6 +664,17 @@ function validateVerdict(doc: Record<string, unknown>, state: ResultState): Vali
   if (!completed && doc.final !== false) {return invalid('only a completed run is final');}
   if (!completed && doc.result !== null) {return invalid('only a completed run carries a result');}
   return { ok: true };
+}
+
+/** Everything a non-refusal arm owes: no refusal object, the run's carriage, what
+ *  bounded it, and the verdict's own withdrawals. */
+function validateRunArm(doc: Record<string, unknown>, state: ResultState): Validation {
+  if (doc.refusal !== null) {return invalid('only a refusal carries refusal');}
+  const carriage = validateRunCarriage(doc);
+  if (!carriage.ok) {return carriage;}
+  const bounds = validateBounds(doc, state);
+  if (!bounds.ok) {return bounds;}
+  return validateVerdict(doc, state);
 }
 
 /**
@@ -519,10 +692,14 @@ export function validateAgentResult(doc: unknown): Validation {
   const fields = validateFields(doc);
   if (!fields.ok) {return fields;}
   if (vocabulary.state === 'refused') {return validateRefusalArm(doc);}
-  if (doc.refusal !== null) {return invalid('only a refusal carries refusal');}
-  const carriage = validateRunCarriage(doc);
-  if (!carriage.ok) {return carriage;}
-  return validateVerdict(doc, vocabulary.state);
+  return validateRunArm(doc, vocabulary.state);
+}
+
+/** DOC with each field added within `/2` that it predates read as null, as the
+ *  contract says a reader takes absence: an in-memory result then always matches
+ *  its type, whichever server wrote it. */
+export function withAddedFields(doc: Omit<AgentResult, AddedField> & Partial<Pick<AgentResult, AddedField>>): AgentResult {
+  return { next: null, ceilings: null, crossing: null, elapsed_s: null, ...doc };
 }
 
 /**

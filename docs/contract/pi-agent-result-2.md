@@ -5,7 +5,9 @@ breaks it mints `pi-agent-result/3`, and this contract stays alongside.
 
 **Adding a field is not a breaking change.** A consumer ignores fields it does
 not know. Removing or renaming a field, or changing its type or meaning, mints
-a new version.
+a new version. `next`, `ceilings`, `crossing` and `elapsed_s` were added within
+`/2`: a document an earlier server wrote lacks them, and a reader takes each
+absent one as `null`. This server writes all four, always.
 
 The same document is also the answer inside a completed MCP task, the `result`
 of each settled entry of a `pi-agent-wait/1` answer
@@ -141,6 +143,16 @@ key listed is always present; `nullable` says whether its value may be `null`.
 | `refusal.reason` | string | no | a token of the Refusals table |
 | `refusal.detail` | string | no | prose naming what failed, for an operator |
 | `next` | string | yes | a hint for the caller's next step: continue `session` with a short prompt and fitted ceilings. Non-null only when the termination is `ceiling`, `timeout`, `toolUse` or `deferred` and a session exists; `null` otherwise |
+| `ceilings` | object | yes | the run's clamped ceilings; `null` for a refusal, and may be `null` for a run the server settled without a timed launch |
+| `ceilings.requests` | number | yes | the request bound; `null` when the run had no such bound |
+| `ceilings.context_tokens` | number | yes | the context-token bound; `null` when the run had no such bound |
+| `ceilings.cost_usd` | number | yes | the cost bound, in US dollars; `null` when the run had no such bound |
+| `ceilings.wall_clock_s` | number | yes | the wall-clock bound, in seconds; `null` when the run had no such bound |
+| `crossing` | object | yes | the bound that stopped the run; non-null exactly when `state` is `ceiling_exceeded` or `timeout` |
+| `crossing.unit` | string | no | one of the four ceiling names; `wall_clock_s` exactly for `timeout` |
+| `crossing.observed` | number | no | the value the gate read at the crossing |
+| `crossing.limit` | number | no | the clamped bound it crossed |
+| `elapsed_s` | number | yes | seconds from launch to settle, queue time excluded; it can exceed `crossing.observed` on a timeout, since it is read after the stop; `null` for a refusal |
 
 ## Usage counters and accounting
 

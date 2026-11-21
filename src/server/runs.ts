@@ -27,7 +27,7 @@ import {
   type AuditRecord,
   type RunLayout,
 } from './evidence.ts';
-import { failedResult, refusedResult, type AgentResult, type ResultState, type Termination } from './result.ts';
+import { failedResult, refusedResult, type AgentResult, type Outcome } from './result.ts';
 
 /** A run's four states: `lost` is reached only when `result.json` cannot land. */
 export type RunState = 'queued' | 'running' | 'settled' | 'lost';
@@ -62,8 +62,9 @@ export type RunRecord = {
   /** The latest audit record's ts, or the moment `result.json` landed. */
   updatedAt: string;
   state: RunState;
-  /** The settled result's state and causes, or null when nothing was written. */
-  outcome: { state: ResultState; causes: Termination[] } | null;
+  /** The settled result's state, causes and crossing, or null when nothing was
+   *  written. */
+  outcome: Outcome | null;
   /** An intent mark, taken before any await; it never changes the state. */
   cancelled: boolean;
   /** Set only by `ack`, and only once the run is terminal. */
@@ -484,7 +485,7 @@ function noteOutcome(state: RegistryState, record: RunRecord, document: AgentRes
     audit(state, record, { record: 'lost' });
     return;
   }
-  record.outcome = { state: document.state, causes: document.causes };
+  record.outcome = { state: document.state, causes: document.causes, crossing: document.crossing };
   record.updatedAt = writtenAt;
 }
 

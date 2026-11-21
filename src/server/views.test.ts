@@ -209,7 +209,7 @@ describe('Live records', () => {
     const afterwards = viewIn(settled, 'settled');
     const document = foundResult(record.layout).found;
     assert.deepEqual(resolvedResult(settled), document, 'the result comes back with the view');
-    assert.deepEqual(afterwards.outcome, { state: document.state, causes: document.causes });
+    assert.deepEqual(afterwards.outcome, { state: document.state, causes: document.causes, crossing: document.crossing });
     assert.equal(afterwards.foreignPid, null);
   });
 
@@ -257,7 +257,7 @@ describe('On disk', () => {
     const view = viewIn(resolution, 'settled');
     const written = foundResult(run.layout);
     assert.deepEqual(resolvedResult(resolution), written.found, 'the document is read once, with the view');
-    assert.deepEqual(view.outcome, { state: written.found.state, causes: written.found.causes });
+    assert.deepEqual(view.outcome, { state: written.found.state, causes: written.found.causes, crossing: written.found.crossing });
     assert.equal(view.createdAt, run.stamps[0], 'createdAt is the admitted record ts');
     // File timestamps are coarse: the mtime may round below the record's ts.
     assert.equal(view.updatedAt, latest(run.stamps[0], written.writtenAt), 'updatedAt is the result.json write');

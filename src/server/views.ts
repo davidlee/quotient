@@ -17,7 +17,7 @@ import {
   type AuditRecord,
   type RunLayout,
 } from './evidence.ts';
-import type { AgentResult, ResultState, Termination } from './result.ts';
+import type { AgentResult, Outcome } from './result.ts';
 import { absent } from './paths.ts';
 import type { Registry, RunRecord } from './runs.ts';
 import { ownerLiveness, parseRunOwner, type HostIdentity, type RunOwner } from './session.ts';
@@ -37,7 +37,7 @@ export type RunView = {
   session: string | null;
   predecessor: string | null;
   cancelled: boolean;
-  outcome: { state: ResultState; causes: Termination[] } | null;
+  outcome: Outcome | null;
   foreignPid: number | null;
 };
 
@@ -62,7 +62,9 @@ export function viewOf(record: RunRecord): RunView {
     session: record.session,
     predecessor: record.predecessor,
     cancelled: record.cancelled,
-    outcome: record.outcome === null ? null : { state: record.outcome.state, causes: [...record.outcome.causes] },
+    outcome: record.outcome === null
+      ? null
+      : { state: record.outcome.state, causes: [...record.outcome.causes], crossing: record.outcome.crossing ?? null },
     foreignPid: null,
   };
 }
@@ -291,7 +293,9 @@ function diskView(read: DiskRead, state: ViewState, found: Found | null, foreign
     session: textOf(admitted?.session),
     predecessor: textOf(admitted?.predecessor),
     cancelled: false,
-    outcome: found === null ? null : { state: found.found.state, causes: [...found.found.causes] },
+    outcome: found === null
+      ? null
+      : { state: found.found.state, causes: [...found.found.causes], crossing: found.found.crossing },
     foreignPid,
   };
 }

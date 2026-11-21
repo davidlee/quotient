@@ -25,7 +25,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { isRecord } from '../json.ts';
 import { messageOf } from '../errors.ts';
 import { absent } from './paths.ts';
-import { isAgentResult, type AgentResult } from './result.ts';
+import { isAgentResult, withAddedFields, type AgentResult } from './result.ts';
 
 /** The JSON-RPC id a call carried, or null when the call had none. */
 export type CallId = string | number | null;
@@ -368,8 +368,9 @@ export function readResult(
   } catch (error) {
     return absent(layout.result, error) ? 'absent' : 'unreadable';
   }
-  const found = parseAs(text, isAgentResult);
-  if (found === null || !reserialisable(found)) {return 'unreadable';}
+  const parsed = parseAs(text, isAgentResult);
+  if (parsed === null || !reserialisable(parsed)) {return 'unreadable';}
+  const found = withAddedFields(parsed);
   try {
     return { found, writtenAt: statSync(layout.result).mtime.toISOString() };
   } catch {

@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { reduce } from '../reduce/reduce.ts';
-import { ARTIFACTS, buildResult, messageEnd, numberAt, SETTLED_RECORD, type RunInput } from './test-rig.ts';
+import { ARTIFACTS, buildResult, messageEnd, numberAt, predating, SETTLED_RECORD, type RunInput } from './test-rig.ts';
 import {
   CAUSE_STATE,
   CONTINUE_HINT,
@@ -670,13 +670,10 @@ test('`next` is always present, and it names the caller\'s next step (IMP-019)',
     assert.ok(CONTINUE_HINT.includes('working tree'), 'the hint says to check the working tree');
   });
 
-  await t.test('the schema rejects a next that is missing, mistyped or on a completed run', () => {
+  await t.test('the schema rejects a next that is mistyped or on a completed run', () => {
     const ceiling = PRODUCED.ceiling();
     assert.equal(validateAgentResult(ceiling).ok, true, 'a produced ceiling document conforms');
 
-    const withoutNext: Record<string, unknown> = { ...ceiling };
-    delete withoutNext.next;
-    assert.equal(validateAgentResult(withoutNext).ok, false, 'next is always present, so a missing one is a defect');
 
     assert.equal(validateAgentResult({ ...ceiling, next: 42 }).ok, false, 'next is a string or null');
 
@@ -685,3 +682,153 @@ test('`next` is always present, and it names the caller\'s next step (IMP-019)',
     assert.equal(validateAgentResult({ ...completed, next: 'x' }).ok, false, 'a final run has nothing to continue');
   });
 });
+
+// ── IMP-015: the ceilings fitted, the bound that crossed, and the clock ────
+
+/** The counting units a gate can cross, in the order `Maxima` names them. */
+const COUNTING_UNITS = ['requests', 'context_tokens', 'cost_usd'] as const;
+
+/** A copy of DOC with fields replaced: the malformed variants the validator owes. */
+function withFields(doc: AgentResult, fields: Record<string, unknown>): Record<string, unknown> {
+  return { ...doc, ...fields };
+}
+
+/** The all-null ceilings echo: what a run with no bound at all reports. */
+const NO_CEILINGS = { requests: null, context_tokens: null, cost_usd: null, wall_clock_s: null };
+
+/** The fixture crossing for one counting unit: the value read and the bound. */
+const CROSSINGS = {
+  requests: { observed: 21, limit: 20 },
+  context_tokens: { observed: 210, limit: 150 },
+  cost_usd: { observed: 0.01, limit: 0.005 },
+} as const;
+
+test('ceilings, crossing and elapsed_s say what bounded the run and what stopped it (IMP-015)', async (t) => {
+  await t.test('a ceiling crossing is carried verbatim, on each counting unit', async (inner) => {
+    for (const unit of COUNTING_UNITS) {
+      await inner.test(unit, () => {
+        const { observed, limit } = CROSSINGS[unit];
+        const { doc } = buildResult({
+          lines: [messageEnd('stop'), SETTLED_RECORD],
+          causes: ['ceiling'],
+          ceilings: { [unit]: limit },
+          crossing: { unit, observed, limit },
+          elapsedS: 3.5,
+        });
+        assert.equal(doc.state, 'ceiling_exceeded');
+        assert.deepEqual(doc.crossing, { unit, observed, limit }, `${unit}: the numbers and the unit are the gate's, unrounded`);
+        assert.deepEqual(doc.ceilings, { ...NO_CEILINGS, [unit]: limit }, `${unit}: only the fitted unit is non-null`);
+        assert.equal(doc.elapsed_s, 3.5, 'the clock is echoed, not rounded');
+      });
+    }
+  });
+
+  await t.test('a timeout carries the wall clock as the unit that crossed', () => {
+    const { doc } = buildResult({
+      lines: [messageEnd('stop'), SETTLED_RECORD],
+      causes: ['timeout'],
+      crossing: { unit: 'wall_clock_s', observed: 601, limit: 600 },
+    });
+    assert.equal(doc.state, 'timeout');
+    assert.deepEqual(doc.crossing, { unit: 'wall_clock_s', observed: 601, limit: 600 });
+    assert.deepEqual(doc.ceilings, NO_CEILINGS, 'a run with no fitted maxima says so, key by key');
+  });
+
+  await t.test('a completed run crossed nothing, and echoes the ceilings it ran under', () => {
+    const { doc } = buildResult({
+      lines: [messageEnd('stop'), SETTLED_RECORD],
+      ceilings: { requests: 30 },
+      elapsedS: 2.25,
+    });
+    assert.equal(doc.state, 'completed');
+    assert.equal(doc.crossing, null, 'nothing crossed, so nothing is named');
+    assert.deepEqual(doc.ceilings, { requests: 30, context_tokens: null, cost_usd: null, wall_clock_s: null });
+    assert.equal(doc.elapsed_s, 2.25);
+  });
+
+  await t.test('a refusal and a post-run failure never ran, so all three are null', () => {
+    const refusal = refusedResult('lane-predecessor-failed', 'the run before it in its lane did not complete');
+    assert.equal(refusal.ceilings, null, 'nothing ran under any bound');
+    assert.equal(refusal.crossing, null, 'nothing crossed');
+    assert.equal(refusal.elapsed_s, null, 'no clock started');
+    assert.equal(validateAgentResult(refusal).ok, true, 'and that is the conforming shape for a refusal');
+
+    const status = reduce([], {}).status;
+    const failed = failedResult('error', ['error'], 'sess-9', status, ARTIFACTS);
+    assert.equal(failed.ceilings, null);
+    assert.equal(failed.crossing, null);
+    assert.equal(failed.elapsed_s, null);
+    assert.equal(validateAgentResult(failed).ok, true, 'and that is the conforming shape for a failed arm');
+  });
+
+  await t.test('the schema holds the crossing and the state to one another', () => {
+    const ceiling = PRODUCED.ceiling();
+    const timeout = PRODUCED.timeout();
+    assert.equal(validateAgentResult(ceiling).ok, true, 'a produced ceiling document conforms');
+    assert.equal(validateAgentResult(timeout).ok, true, 'a produced timeout document conforms');
+
+    assert.equal(
+      validateAgentResult(withFields(ceiling, { crossing: null })).ok,
+      false,
+      'ceiling_exceeded names the trigger that stopped it',
+    );
+    assert.equal(
+      validateAgentResult(withFields(timeout, { crossing: null })).ok,
+      false,
+      'timeout names the trigger that stopped it',
+    );
+    assert.equal(
+      validateAgentResult(withFields(PRODUCED.stop(), { crossing: { unit: 'requests', observed: 5, limit: 20 } })).ok,
+      false,
+      'a run that crossed nothing cannot carry a crossing',
+    );
+    assert.equal(
+      validateAgentResult(withFields(ceiling, { crossing: { unit: 'wall_clock_s', observed: 601, limit: 600 } })).ok,
+      false,
+      'the wall clock is the timeout state, not a counting ceiling',
+    );
+    assert.equal(
+      validateAgentResult(withFields(timeout, { crossing: { unit: 'requests', observed: 21, limit: 20 } })).ok,
+      false,
+      'a timeout crossed the clock and no counting unit',
+    );
+  });
+
+  await t.test('elapsed_s is seconds since launch: never negative, and always there', () => {
+    const completed = PRODUCED.stop();
+    assert.equal(typeof completed.elapsed_s, 'number');
+    assert.ok((completed.elapsed_s ?? -1) >= 0, 'a settled run took some non-negative time');
+    assert.equal(validateAgentResult(withFields(completed, { elapsed_s: -1 })).ok, false, 'time does not run backwards');
+    assert.equal(validateAgentResult(withFields(completed, { elapsed_s: null })).ok, false, 'a run that settled has a clock');
+  });
+
+  await t.test('the refusal arm is the only one allowed to say no bound at all', () => {
+    const ceiling = PRODUCED.ceiling();
+    assert.equal(
+      validateAgentResult(withFields(ceiling, { ceilings: null })).ok,
+      false,
+      'a ceiling_exceeded run ran under a bound, so it reports one',
+    );
+    const refusal = refusedResult('policy-unavailable', 'no policy could be read');
+    assert.equal(
+      validateAgentResult(withFields(refusal, { ceilings: { requests: 20 } })).ok,
+      false,
+      'a refusal ran under nothing, so it cannot claim a ceiling',
+    );
+  });
+});
+
+// ── DEC-072: a document an earlier server wrote, read by this one ──────────
+
+test('a document that predates the fields added within /2 still conforms: absence reads as null (DEC-072)', () => {
+  for (const token of TERMINATIONS) {
+    const check = validateAgentResult(predating(PRODUCED[token]()));
+    assert.equal(check.ok, true, `${token}: ${check.ok ? '' : check.detail}`);
+  }
+  const refusal = predating(refusedResult('lane-predecessor-failed', 'the run before it in its lane did not complete'));
+  assert.equal(validateAgentResult(refusal).ok, true, 'a refusal from an earlier server conforms');
+  // Present fields are still judged: absence is tolerated, a wrong value is not.
+  assert.equal(validateAgentResult({ ...predating(PRODUCED.stop()), next: 'x' }).ok, false, 'a final run still has nothing to continue');
+  assert.equal(validateAgentResult({ ...predating(PRODUCED.ceiling()), crossing: null }).ok, false, 'a present crossing is held to its state');
+});
+

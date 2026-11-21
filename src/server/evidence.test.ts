@@ -34,7 +34,7 @@ import {
   writeResult,
   type RunLayout,
 } from './evidence.ts';
-import { buildResult } from './test-rig.ts';
+import { buildResult, predating } from './test-rig.ts';
 
 /** The temp the writer renames away; named here so a residue is provable. */
 const TMP = '.result.json.tmp';
@@ -174,6 +174,13 @@ test('readResult: absent when none was written, found for a written document, un
   const writtenAt = writeResult(l, doc);
   assert.ok(writtenAt !== null);
   assert.deepEqual(readResult(l), { found: doc, writtenAt }, 'the document and the moment it landed come back together');
+
+  // A document an earlier server wrote lacks the fields added within `/2`: it is
+  // found, and each absent field reads as null (DEC-072).
+  const earlier = predating(buildResult({ causes: ['ceiling'] }).doc);
+  const read = readResult(seeded(root, 11, JSON.stringify(earlier)));
+  if (typeof read === 'string') {assert.fail(`an earlier server's document is found, not ${read}`);}
+  assert.deepEqual(read.found, { ...earlier, next: null, ceilings: null, crossing: null, elapsed_s: null });
 
   assert.equal(readResult(seeded(root, 4, 'not json at all')), 'unreadable');
   assert.equal(readResult(seeded(root, 5, '{}')), 'unreadable', 'JSON that fails conformance is unreadable, not found');

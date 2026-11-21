@@ -250,7 +250,7 @@ function unsettled(overrides: Partial<RunView>): Resolved {
 /** A settled run carrying DOCUMENT, its view's outcome taken from it. */
 function settled(document: AgentResult): Resolved {
   return {
-    view: view({ state: 'settled', outcome: { state: document.state, causes: [...document.causes] } }),
+    view: view({ state: 'settled', outcome: { state: document.state, causes: [...document.causes], crossing: document.crossing } }),
     result: document,
   };
 }

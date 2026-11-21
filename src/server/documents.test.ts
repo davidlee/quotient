@@ -35,8 +35,8 @@ import type { RunView } from './views.ts';
 const RUN_DIR = join(tmpdir(), 'quotient-documents-never-made');
 
 /** A settled run's outcome for the two result states a status table row names. */
-const COMPLETED: RunView['outcome'] = { state: 'completed', causes: ['stop'] };
-const CANCELLED: RunView['outcome'] = { state: 'cancelled', causes: ['cancelled'] };
+const COMPLETED: RunView['outcome'] = { state: 'completed', causes: ['stop'], crossing: null };
+const CANCELLED: RunView['outcome'] = { state: 'cancelled', causes: ['cancelled'], crossing: null };
 
 /** The predecessor every queued-behind message names; a well-formed handle. */
 const PREDECESSOR = 'run-20261026T120259870Z-6-0b1c2d3e4f5a';
@@ -141,15 +141,36 @@ statusCase(
 statusCase('a settled completed run', view({ state: 'settled', outcome: COMPLETED }), 'completed', 'completed');
 statusCase(
   'a settled failed run',
-  view({ state: 'settled', outcome: { state: 'failed', causes: ['exit'] } }),
+  view({ state: 'settled', outcome: { state: 'failed', causes: ['exit'], crossing: null } }),
   'completed',
   'failed',
 );
 statusCase('a settled run with no outcome', view({ state: 'settled', outcome: null }), 'completed', 'settled');
 statusCase('a settled cancelled run', view({ state: 'settled', outcome: CANCELLED }), 'cancelled', 'cancelled');
+// The message names the bound that stopped the run, so a poller reading the status
+// line learns which ceiling crossed without fetching the result.
+statusCase(
+  'a settled run that crossed a ceiling',
+  view({
+    state: 'settled',
+    outcome: {
+      state: 'ceiling_exceeded',
+      causes: ['ceiling'],
+      crossing: { unit: 'cost_usd', observed: 0.01, limit: 0.005 },
+    },
+  }),
+  'completed',
+  'ceiling_exceeded: cost_usd 0.01 > 0.005',
+);
+statusCase(
+  'a settled ceiling run with no crossing recorded',
+  view({ state: 'settled', outcome: { state: 'ceiling_exceeded', causes: ['ceiling'], crossing: null } }),
+  'completed',
+  'ceiling_exceeded',
+);
 statusCase(
   'a settled cancelled run with two causes',
-  view({ state: 'settled', outcome: { state: 'cancelled', causes: ['cancelled', 'eof'] } }),
+  view({ state: 'settled', outcome: { state: 'cancelled', causes: ['cancelled', 'eof'], crossing: null } }),
   'cancelled',
   'cancelled, eof',
 );
@@ -295,7 +316,7 @@ function waitDocument(
 
 test('validateWait accepts the documents documents.ts emits', () => {
   const settled = view({ state: 'settled', lane: 'build', outcome: COMPLETED });
-  const refused = view({ state: 'settled', outcome: { state: 'refused', causes: ['refused'] } });
+  const refused = view({ state: 'settled', outcome: { state: 'refused', causes: ['refused'], crossing: null } });
   const unknown = runName('t');
   const doc = waitDocument(
     [
@@ -369,7 +390,7 @@ test('validateWait rejects a malformed wait document', () => {
 test('validateWait holds a settled entry to its own result\'s status', () => {
   const completedView = view({ state: 'settled', outcome: COMPLETED });
   const answer = completedResult(completedView.layout, 'sess-1');
-  const cancelledView = view({ state: 'settled', outcome: { state: 'cancelled', causes: ['cancelled', 'eof'] } });
+  const cancelledView = view({ state: 'settled', outcome: { state: 'cancelled', causes: ['cancelled', 'eof'], crossing: null } });
   const cancellation = failedResult('cancelled', ['cancelled', 'eof'], 'sess-1', EMPTY_STATUS, ARTIFACTS);
   const agreeing = waitEntry(cancelledView, { statusOnly: false, result: cancellation });
 

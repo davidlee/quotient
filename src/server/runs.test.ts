@@ -178,7 +178,7 @@ describe('Settle', () => {
     assert.equal(validateAgentResult(written).ok, true, 'a landed result must conform');
     assert.deepEqual(await run.document, document, 'the blocking caller is handed the document written');
     assert.equal(run.record.state, 'settled');
-    assert.deepEqual(run.record.outcome, { state: 'completed', causes: ['stop'] });
+    assert.deepEqual(run.record.outcome, { state: 'completed', causes: ['stop'], crossing: null });
 
     const seen = releaseOf(run.release);
     assert.equal(seen.resultExists, true, 'the file lands before the release');
@@ -199,7 +199,7 @@ describe('Settle', () => {
     assert.equal(written.state, 'refused');
     assert.equal(written.refusal?.reason, 'root-missing');
     assert.equal(run.record.state, 'settled');
-    assert.deepEqual(run.record.outcome, { state: 'refused', causes: ['refused'] });
+    assert.deepEqual(run.record.outcome, { state: 'refused', causes: ['refused'], crossing: null });
     assert.equal(releaseOf(run.release).state, 'running');
     assert.equal(run.release.calls.length, 1);
   });
@@ -287,7 +287,7 @@ describe('Settle', () => {
     pending.reject(Object.create(null));
     await run.record.settled;
 
-    assert.deepEqual(run.record.outcome, { state: 'failed', causes: ['error'] });
+    assert.deepEqual(run.record.outcome, { state: 'failed', causes: ['error'], crossing: null });
     assert.equal(run.release.calls.length, 1);
     await registry.close();
   });
@@ -303,7 +303,7 @@ describe('Settle', () => {
     await head.record.settled;
 
     assert.equal(head.record.state, 'settled');
-    assert.deepEqual(head.record.outcome, { state: 'failed', causes: ['error'] });
+    assert.deepEqual(head.record.outcome, { state: 'failed', causes: ['error'], crossing: null });
     assert.equal(releaseOf(head.release).state, 'running');
     assert.equal(head.release.calls.length, 1);
     const handed = await head.document;
@@ -329,7 +329,7 @@ describe('Settle', () => {
 
     assert.equal(fake.launches.length, 0, 'the throw happened before the launch was recorded');
     assert.equal(run.record.state, 'settled');
-    assert.deepEqual(run.record.outcome, { state: 'failed', causes: ['error'] });
+    assert.deepEqual(run.record.outcome, { state: 'failed', causes: ['error'], crossing: null });
     assert.equal(releaseOf(run.release).state, 'running');
     assert.equal(run.release.calls.length, 1);
     assert.equal((await run.document).causes[0], 'error');
@@ -693,7 +693,7 @@ describe('Cancel', () => {
 
     assert.equal(queued.record.cancelled, true);
     assert.equal(queued.record.state, 'settled');
-    assert.deepEqual(queued.record.outcome, { state: 'cancelled', causes: ['cancelled'] });
+    assert.deepEqual(queued.record.outcome, { state: 'cancelled', causes: ['cancelled'], crossing: null });
     assert.deepEqual(auditKinds(queued.record.layout), ['admitted', 'cancelled']);
     assertStamped(queued);
     assert.equal(foundResult(queued.record.layout).found.state, 'cancelled');
@@ -722,7 +722,7 @@ describe('Cancel', () => {
     pending.result(failedResult('cancelled', ['cancelled'], head.record.session, EMPTY_STATUS, head.record.layout));
     await done;
 
-    assert.deepEqual(head.record.outcome, { state: 'cancelled', causes: ['cancelled'] });
+    assert.deepEqual(head.record.outcome, { state: 'cancelled', causes: ['cancelled'], crossing: null });
     assert.equal(head.record.state, 'settled');
     assert.equal(fake.launches.length, 1, 'nothing but the head ever launched');
     assert.equal(tail.record.state, 'settled');
@@ -741,7 +741,7 @@ describe('Cancel', () => {
     await done;
 
     assert.equal(run.record.state, 'settled');
-    assert.deepEqual(run.record.outcome, { state: 'completed', causes: ['stop'] });
+    assert.deepEqual(run.record.outcome, { state: 'completed', causes: ['stop'], crossing: null });
     assert.equal(run.record.cancelled, true, 'the mark never changes the state');
   });
 });
@@ -756,7 +756,7 @@ describe('Close', () => {
     await run.record.settled;
 
     assert.equal(wasLaunched(fake, run.record), false, 'nothing launches after closing()');
-    assert.deepEqual(run.record.outcome, { state: 'incomplete', causes: ['eof'] });
+    assert.deepEqual(run.record.outcome, { state: 'incomplete', causes: ['eof'], crossing: null });
     assert.deepEqual(auditKinds(run.record.layout), ['admitted', 'dropped']);
     assert.equal(run.release.calls.length, 1);
     await registry.close();
@@ -814,7 +814,7 @@ describe('Close', () => {
     await done;
 
     assert.equal(run.record.state, 'settled');
-    assert.deepEqual(run.record.outcome, { state: 'incomplete', causes: ['eof'] });
+    assert.deepEqual(run.record.outcome, { state: 'incomplete', causes: ['eof'], crossing: null });
     assert.equal(releaseOf(run.release).state, 'running');
   });
 
@@ -829,7 +829,7 @@ describe('Close', () => {
     await queued.record.settled;
 
     assert.equal(queued.record.state, 'settled');
-    assert.deepEqual(queued.record.outcome, { state: 'incomplete', causes: ['eof'] });
+    assert.deepEqual(queued.record.outcome, { state: 'incomplete', causes: ['eof'], crossing: null });
     assert.deepEqual(auditKinds(queued.record.layout), ['admitted', 'dropped']);
     assertStamped(queued);
     assert.equal(foundResult(queued.record.layout).found.causes[0], 'eof');

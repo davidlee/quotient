@@ -87,7 +87,8 @@ A run that ends with `final: false` — a ceiling, a timeout, a stop to use a to
 - Fit the ceilings: a small `requests` budget, and a `context_tokens` cap above
   the run's `status.context.peak_tokens`, with room for the new prompt, a tool
   result and the answer — a continuation with the same cap can stop after one
-  request.
+  request. `crossing` names the bound that stopped it, and `ceilings` the bounds
+  it ran under.
 - Take over yourself when the remaining work is smaller than a brief.
 
 Restarting loses the context the session holds.

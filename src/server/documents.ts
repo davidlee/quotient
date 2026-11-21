@@ -103,7 +103,7 @@ export function envelopeResult(document: object, refused: boolean): ToolResult {
 const VIEW_STATES: readonly ViewState[] = ['queued', 'running', 'foreign', 'settled', 'lost'];
 
 /** The two outcomes a settled run's status can come from: a cancellation, or not. */
-const SETTLED_OUTCOMES: RunView['outcome'][] = [null, { state: 'cancelled', causes: ['cancelled'] }];
+const SETTLED_OUTCOMES: RunView['outcome'][] = [null, { state: 'cancelled', causes: ['cancelled'], crossing: null }];
 
 /**
  * Sec-2's status table, the only copy: a quotient state collapsed to the Task status
@@ -164,12 +164,19 @@ function foreignMessage(pid: number | null): string {
     : `owned by another quotient server (pid ${String(pid)})`;
 }
 
-/** A settled run's message: a cancellation's causes, else the result's state. */
+/** A settled run's message: a cancellation's causes, else the result's state — and,
+ *  when a bound stopped it, which bound and by how much. */
 function settledMessage(outcome: RunView['outcome']): string {
   if (outcome === null) {
     return 'settled';
   }
-  return outcome.state === 'cancelled' ? outcome.causes.join(', ') : outcome.state;
+  if (outcome.state === 'cancelled') {
+    return outcome.causes.join(', ');
+  }
+  const crossing = outcome.crossing ?? null;
+  return crossing === null
+    ? outcome.state
+    : `${outcome.state}: ${crossing.unit} ${String(crossing.observed)} > ${String(crossing.limit)}`;
 }
 
 /** One run as a Task (design sec-2): the seven Task fields, which a created task,

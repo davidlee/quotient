@@ -62,12 +62,14 @@ import {
 import { loadProfiles, type Filesystem } from './profiles.ts';
 import { createRegistry, type Launch, type Registry, type RunRecord, type StartSpec } from './runs.ts';
 import { readHostIdentity, type HostIdentity, type RunOwner } from './session.ts';
-import { admitCall, type Admission } from './policy.ts';
+import { admitCall, type Admission, type Maxima } from './policy.ts';
 import {
+  ADDED_FIELDS,
   isAgentResult,
   resultFor,
   validateAgentResult,
   type AgentResult,
+  type Crossing,
   type Validation, type Artifacts, type LatchCause, type RunFacts } from './result.ts';
 
 export type Env = Record<string, string | undefined>;
@@ -491,7 +493,32 @@ export type RunInput = {
   budgetBytes?: number;
   /** Patterns the reducer warns about (`status.alerts`). */
   alerts?: string[];
+  /** The run's clamped ceilings (`admitted.ceilings`); an absent key is unbounded. */
+  ceilings?: Maxima;
+  /** The gate trigger that stopped the run, or null when none did. */
+  crossing?: Crossing | null;
+  /** Seconds from launch to settle. */
+  elapsedS?: number;
 };
+
+/** The crossing a fixture's latch cause implies, so a produced document satisfies
+ *  the rule that a ceiling or timeout outcome names the bound it crossed. */
+function defaultCrossing(causes: readonly LatchCause[]): Crossing | null {
+  if (causes.includes('ceiling')) {return { unit: 'requests', observed: 21, limit: 20 };}
+  if (causes.includes('timeout')) {return { unit: 'wall_clock_s', observed: 601, limit: 600 };}
+  return null;
+}
+
+/** The IMP-015 fields' fixture defaults, kept out of `buildResult` so neither
+ *  function carries more branches than a document builder should. */
+function contractFields(input: RunInput): { ceilings: Maxima; crossing: Crossing | null; elapsedS: number } {
+  const causes = input.causes ?? [];
+  return {
+    ceilings: input.ceilings ?? {},
+    crossing: input.crossing === undefined ? defaultCrossing(causes) : input.crossing,
+    elapsedS: input.elapsedS ?? 1,
+  };
+}
 
 /** One run's result, offline: the real reducer, then the server's one builder. */
 export function buildResult(input: RunInput = {}): { doc: AgentResult; reduced: Reduced } {
@@ -505,7 +532,7 @@ export function buildResult(input: RunInput = {}): { doc: AgentResult; reduced: 
     layout: ARTIFACTS,
   };
   return {
-    doc: resultFor({ reduced, outcome, causes: input.causes ?? [], session: 'sess-1' }),
+    doc: resultFor({ reduced, outcome, causes: input.causes ?? [], session: 'sess-1', ...contractFields(input) }),
     reduced,
   };
 }
@@ -1009,6 +1036,9 @@ export function completedResult(layout: RunLayout, session: string, text = 'the 
     outcome: { exitCode: 0, spawnFailed: false, layout },
     causes: [],
     session,
+    ceilings: {},
+    crossing: null,
+    elapsedS: 1,
   });
 }
 
@@ -1347,3 +1377,11 @@ export async function launchFor(fake: FakeLaunch, record: RunRecord): Promise<Pe
 export function registryFor(fake: FakeLaunch): Registry {
   return createRegistry({ launch: fake.launch, diagnostics: new PassThrough() });
 }
+
+/** DOC as a server from before the fields added within `/2` wrote it: each of
+ *  `ADDED_FIELDS` removed, the rest untouched. */
+export function predating(doc: AgentResult): Record<string, unknown> {
+  const added: readonly string[] = ADDED_FIELDS;
+  return Object.fromEntries(Object.entries(doc).filter(([field]) => !added.includes(field)));
+}
+

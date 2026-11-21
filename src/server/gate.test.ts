@@ -379,6 +379,21 @@ test('ceiling: a live crossing aborts the run through the ladder, and the abort 
   assert.equal(doc.termination, 'ceiling');
   assert.deepEqual(doc.causes, ['ceiling']);
   assert.equal(doc.status.cost_usd, 0.01, 'the status is the accumulator that crossed');
+  // The result names what bounded the run and what crossed, so a caller does not
+  // have to join the abort record to the document to find out.
+  assert.deepEqual(
+    doc.crossing,
+    { unit: 'cost_usd', observed: 0.01, limit: 0.005 },
+    'the crossing is the gate\'s own numbers, not a reconstruction',
+  );
+  assert.deepEqual(
+    doc.ceilings,
+    { requests: 20, context_tokens: 100000, cost_usd: 0.005, wall_clock_s: 600 },
+    'the clamped ceilings are echoed as fitted',
+  );
+  const elapsed = doc.elapsed_s;
+  assert.equal(typeof elapsed, 'number', 'the clock is a number');
+  assert.ok(elapsed !== null && elapsed >= 0, 'and it is not negative');
 
   const audit = jsonLines(doc.artifacts.audit);
   const abort = audit.find((record) => record.record === 'abort');
@@ -421,6 +436,8 @@ test('a context abort freezes crossing-prefix evidence while buffered output rai
   assert.equal(abort.unit, 'context_tokens');
   assert.equal(abort.observed, 160);
   assert.equal(abort.limit, 150);
+  assert.equal(at(doc, 'crossing', 'unit'), 'context_tokens', 'the result names the unit that crossed');
+  assert.equal(at(doc, 'crossing', 'limit'), 150, 'and the clamped bound it crossed');
   assert.deepEqual(at(abort, 'usage', 'context'), { peak_tokens: 160, requests_unmeasured: 0 });
   assert.ok(
     numberAt(doc.status, 'context', 'peak_tokens') > numberAt(abort, 'observed'),
