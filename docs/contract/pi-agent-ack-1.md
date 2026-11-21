@@ -4,6 +4,10 @@ The document `pi_agent_ack` answers: one verdict per run id. Normative: a
 change that breaks it mints `pi-agent-ack/2`, and this contract stays
 alongside.
 
+**Adding a field is not a breaking change.** A consumer ignores fields it does
+not know. Removing or renaming a field, or changing its type or meaning, mints
+a new version.
+
 ## What acknowledgement is
 
 Acknowledging a run removes it from the implicit selections a wait makes — a

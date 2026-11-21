@@ -14,8 +14,10 @@ import { reduce } from '../reduce/reduce.ts';
 import { ARTIFACTS, buildResult, messageEnd, numberAt, SETTLED_RECORD, type RunInput } from './test-rig.ts';
 import {
   CAUSE_STATE,
+  CONTINUE_HINT,
   createLatch,
   failedResult,
+  nextStep,
   REACHABILITY,
   refusedResult,
   RESULT_REFUSAL_REASONS,
@@ -619,4 +621,67 @@ test('every state and every termination is produced by a named path or declared 
   const states = new Set([...produced.values()].map((doc) => doc.state));
   for (const state of RESULT_STATES) {assert.ok(states.has(state), `no named path produces state ${state}`);}
   assert.ok(states.has('ceiling_exceeded'), 'the gate\'s own state is reachable, not merely declared');
+});
+
+// ── IMP-019: `next`, the hint that tells the caller to continue ────────────
+
+/** The terminations whose run leaves a session a caller can continue: the gate
+ *  stopped it, the clock stopped it, or it stopped to hand work back. */
+const CONTINUABLE: readonly Termination[] = ['ceiling', 'timeout', 'toolUse', 'deferred'];
+
+test('`next` is always present, and it names the caller\'s next step (IMP-019)', async (t) => {
+  await t.test('every produced document carries next, and only a continuable one continues', () => {
+    for (const token of TERMINATIONS) {
+      const doc = PRODUCED[token]();
+      assert.ok('next' in doc, `${token}: next is always present, like refusal`);
+      if (CONTINUABLE.includes(token)) {
+        assert.equal(doc.next, CONTINUE_HINT, `${token}: the caller is told to continue`);
+      } else {
+        assert.equal(doc.next, null, `${token}: there is nothing to continue`);
+      }
+    }
+  });
+
+  await t.test('a refusal has nothing to continue', () => {
+    const doc = refusedResult('lane-predecessor-failed', 'the run before it in its lane did not complete');
+    assert.equal(doc.next, null, 'nothing ran, so no session was minted to continue');
+  });
+
+  await t.test('the post-run failure arm has nothing to continue', () => {
+    const status = reduce([], {}).status;
+    const doc = failedResult('error', ['error'], 'sess-9', status, ARTIFACTS);
+    assert.equal(doc.session, 'sess-9', 'the call\'s own session is still named');
+    assert.equal(doc.next, null, 'a throw after the run is not an invitation to continue');
+  });
+
+  await t.test('nextStep is the rule, and the rule is the whole of it', () => {
+    for (const token of CONTINUABLE) {
+      assert.equal(nextStep(token, 'sess-1'), CONTINUE_HINT, `${token} with a session continues`);
+      assert.equal(nextStep(token, null), null, `${token} without a session has nothing to continue`);
+    }
+    for (const token of TERMINATIONS.filter((member) => !CONTINUABLE.includes(member))) {
+      assert.equal(nextStep(token, 'sess-1'), null, `${token} is never continued`);
+    }
+  });
+
+  await t.test('the hint says what to do: `session` and the working tree', () => {
+    assert.equal(typeof CONTINUE_HINT, 'string');
+    assert.ok(CONTINUE_HINT.includes('`session`'), 'the hint names the `session` it passes back');
+    assert.ok(CONTINUE_HINT.includes('working tree'), 'the hint says to check the working tree');
+  });
+
+  await t.test('the schema rejects a next that is missing, mistyped or on a completed run', () => {
+    const ceiling = PRODUCED.ceiling();
+    assert.equal(validateAgentResult(ceiling).ok, true, 'a produced ceiling document conforms');
+
+    const withoutNext: Record<string, unknown> = { ...ceiling };
+    delete withoutNext.next;
+    assert.equal(validateAgentResult(withoutNext).ok, false, 'next is always present, so a missing one is a defect');
+
+    assert.equal(validateAgentResult({ ...ceiling, next: 42 }).ok, false, 'next is a string or null');
+
+    const completed = PRODUCED.stop();
+    assert.equal(completed.final, true, 'a completed run is final');
+    assert.equal(validateAgentResult({ ...completed, next: 'x' }).ok, false, 'a final run has nothing to continue');
+  });
 });

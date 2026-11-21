@@ -89,6 +89,38 @@ export const CAUSE_STATE: Record<Termination, ResultState> = {
 };
 
 /**
+ * The terminations whose run leaves a session a caller can carry on: the gate
+ * stopped it, the clock stopped it, or it stopped to hand work back. Every other
+ * cause ends the call — a completed run has its answer, and a run that never
+ * minted a session has nothing to pass back.
+ */
+export const CONTINUE_TERMINATIONS = ['ceiling', 'timeout', 'toolUse', 'deferred'] as const;
+
+const isContinuable = (termination: unknown): boolean => isMember(CONTINUE_TERMINATIONS, termination);
+
+/**
+ * The hint `next` carries: what a caller does with a run that stopped short.
+ *
+ * It says the two things a reader gets wrong unaided — that the session is what
+ * continues the run, so restarting throws away the context it holds, and that a
+ * session which could write may have left the working tree changed without a
+ * result in hand.
+ */
+export const CONTINUE_HINT =
+  'Continue this run: pass its `session` back with a short prompt (finish the current step, or answer now) '
+  + 'and ceilings fitted to what is left. Restarting loses the context the session holds. '
+  + 'If the run could write, check the working tree first: an edit may have landed without its result.';
+
+/**
+ * The rule behind `next`: a hint exactly when there is a session to continue and
+ * the termination left the work unfinished. Pure, so every producer applies the
+ * same answer.
+ */
+export function nextStep(termination: Termination, session: string | null): string | null {
+  return session !== null && isContinuable(termination) ? CONTINUE_HINT : null;
+}
+
+/**
  * The refusal reasons this module declares valid (EX-3): a refusal token, or a
  * failure to record one. Steps 1-8 own the tokens they raise (`disabled`,
  * `profile-invalid`, `session-busy`, …) and name them where they are raised;
@@ -130,6 +162,9 @@ export type AgentResult = {
   artifacts: Artifacts | null;
   /** Present only for a refusal: nothing ran, and this says why. */
   refusal: { reason: string; detail: string } | null;
+  /** The caller's next step, or null when the call is over: `CONTINUE_HINT` when
+   *  the termination is continuable and a session exists, null otherwise. */
+  next: string | null;
 };
 
 // ── The latch ──────────────────────────────────────────────────────────────
@@ -295,6 +330,7 @@ export function resultFor(input: ResultInput): AgentResult {
       audit: outcome.layout.audit,
     },
     refusal: null,
+    next: nextStep(termination, session),
   };
 }
 
@@ -313,6 +349,7 @@ export function refusedResult(reason: string, detail: string): AgentResult {
     status: null,
     artifacts: null,
     refusal: { reason, detail },
+    next: null,
   };
 }
 
@@ -354,6 +391,7 @@ export function failedResult(
       audit: layout.audit,
     },
     refusal: null,
+    next: nextStep(termination, session),
   };
 }
 
@@ -403,6 +441,14 @@ function validateFields(doc: Record<string, unknown>): Validation {
   if (typeof doc.truncated !== 'boolean') {return invalid('truncated must be a boolean');}
   if (typeof doc.transcript !== 'string') {return invalid('transcript must be a string');}
   if (doc.result !== null && typeof doc.result !== 'string') {return invalid('result must be a string or null');}
+  return validateNext(doc);
+}
+
+/** `next` is always present, a string or null, and null once the call is final:
+ *  nothing follows the answer. */
+function validateNext(doc: Record<string, unknown>): Validation {
+  if (doc.next !== null && typeof doc.next !== 'string') {return invalid('next must be a string or null');}
+  if (doc.final === true && doc.next !== null) {return invalid('a final run has nothing to continue');}
   return { ok: true };
 }
 
@@ -412,6 +458,7 @@ const REFUSAL_NULLS = [
   ['status', 'a refusal has no status: nothing ran'],
   ['artifacts', 'a refusal has no artifacts: nothing ran'],
   ['result', 'a refusal carries no result'],
+  ['next', 'a refusal has nothing to continue'],
 ] as const;
 
 /** Every field of REFUSAL_NULLS, in that order. */

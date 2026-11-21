@@ -7,6 +7,10 @@ of runs, each as a run document (`pi-run-handle/1`,
 Normative: a change that breaks it mints `pi-agent-wait/2`, and this contract
 stays alongside.
 
+**Adding a field is not a breaking change.** A consumer ignores fields it does
+not know. Removing or renaming a field, or changing its type or meaning, mints
+a new version.
+
 ## The envelope
 
 A `tools/call` of `pi_agent_wait` or `pi_agent_cancel` answers with an MCP tool

@@ -3,6 +3,10 @@
 The document every `pi_agent` call answers with. Normative: a change that
 breaks it mints `pi-agent-result/3`, and this contract stays alongside.
 
+**Adding a field is not a breaking change.** A consumer ignores fields it does
+not know. Removing or renaming a field, or changing its type or meaning, mints
+a new version.
+
 The same document is also the answer inside a completed MCP task, the `result`
 of each settled entry of a `pi-agent-wait/1` answer
 (`docs/contract/pi-agent-wait-1.md`), the content of every settled run's
@@ -136,6 +140,7 @@ key listed is always present; `nullable` says whether its value may be `null`.
 | `refusal` | object | yes | why nothing ran; `null` unless `state` is `refused` |
 | `refusal.reason` | string | no | a token of the Refusals table |
 | `refusal.detail` | string | no | prose naming what failed, for an operator |
+| `next` | string | yes | a hint for the caller's next step: continue `session` with a short prompt and fitted ceilings. Non-null only when the termination is `ceiling`, `timeout`, `toolUse` or `deferred` and a session exists; `null` otherwise |
 
 ## Usage counters and accounting
 
