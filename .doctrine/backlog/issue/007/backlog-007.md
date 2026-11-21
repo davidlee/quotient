@@ -19,3 +19,11 @@ started leaves no trace, since `renderProse` drops non-text blocks
 
 Red test with parallel tool calls first. Pair results to calls by tool-call id.
 Related: IMP-016.
+
+## Resolution (2026-11-21)
+
+Reproduced from run `run-20261121T034331935Z-206-b557b1ca372c` (parallel
+calls rendered as calls then loose results). Fixed in `src/reduce/reduce.ts`:
+results pair to calls by `toolCallId`; an end with no open call stays a loose
+line. Calls requested but never started split out to IMP-020 by the user's
+choice.

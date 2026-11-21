@@ -119,6 +119,8 @@ type Entry = {
   line: string;
   /** Unrendered text, for alert matching only. Never persisted. */
   text: string;
+  /** A call's result line, once an end paired with it by tool-call id. */
+  result: string | null;
 };
 
 /** The last assistant message seen and where its own prose landed. A later
@@ -134,6 +136,9 @@ type Candidate = {
  *  raised, and the stream-side facts the status and the answer come from. */
 type Run = {
   entries: Entry[];
+  /** Calls awaiting their result, by `toolCallId`, holding the entry itself so a
+   *  spliced answer never invalidates the handle. */
+  openCalls: Map<string | null, Entry>;
   alerts: Status['alerts'];
   patterns: { pattern: string; re: RegExp }[];
   tally: Tally;
@@ -157,6 +162,8 @@ const RESULT_CHARS = 200;
 const ERROR_CHARS = 500;
 const ALERT_TEXT_CHARS = 160;
 const MAX_ALERTS = 50;
+/** What a call with no observed end renders instead of borrowing a result. */
+const NO_RESULT_LINE = '  ↳ (no tool result observed)';
 
 export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
   const run = createRun(opts.alerts ?? []);
@@ -168,6 +175,7 @@ export function reduce(lines: string[], opts: ReduceOptions = {}): Reduced {
 function createRun(alerts: string[]): Run {
   return {
     entries: [],
+    openCalls: new Map(),
     alerts: [],
     patterns: alerts.map((pattern) => ({ pattern, re: new RegExp(pattern, 'i') })),
     tally: createTally(),
@@ -209,11 +217,16 @@ function applyLine(run: Run, raw: string): void {
  *  answer can be spliced back out of the body. */
 function addEntry(run: Run, entry: Entry): number {
   run.entries.push(entry);
+  matchAlerts(run, entry.text);
+  return run.entries.length - 1;
+}
+
+/** Raise the alerts TEXT matches, up to the cap. */
+function matchAlerts(run: Run, text: string): void {
   for (const { pattern, re } of run.patterns) {
     if (run.alerts.length >= MAX_ALERTS) {break;}
-    if (re.test(entry.text)) {run.alerts.push({ pattern, text: alertText(entry.text, re) });}
+    if (re.test(text)) {run.alerts.push({ pattern, text: alertText(text, re) });}
   }
-  return run.entries.length - 1;
 }
 
 /** Route one event to its observer. An event type the reducer does not know is
@@ -284,7 +297,7 @@ function renderProse(run: Run, content: unknown): { texts: string[]; entryIndice
     const text = at(block, 'text');
     if (typeof text !== 'string' || text.trim() === '') {continue;}
     texts.push(text.trimEnd());
-    entryIndices.push(addEntry(run, { kind: 'prose', line: text.trimEnd(), text }));
+    entryIndices.push(addEntry(run, { kind: 'prose', line: text.trimEnd(), text, result: null }));
   }
   return { texts, entryIndices };
 }
@@ -293,19 +306,41 @@ function applyToolStart(run: Run, event: Event): void {
   run.toolCalls += 1;
   const name = at(event, 'toolName');
   const signature = describeCall(name, at(event, 'args'));
-  addEntry(run, { kind: 'call', line: `→ ${signature}`, text: `${String(name)} ${signature}` });
+  const entry: Entry = { kind: 'call', line: `→ ${signature}`, text: `${String(name)} ${signature}`, result: null };
+  addEntry(run, entry);
+  run.openCalls.set(callId(event), entry);
 }
 
 function applyToolEnd(run: Run, event: Event): void {
   const result = at(event, 'result');
   const text = resultText(result);
-  const exit = at(result, 'structuredContent', 'exit_code');
-  if (Boolean(at(event, 'isError'))) {
-    addEntry(run, { kind: 'error', line: `  ✗ ${clip(firstLine(text), ERROR_CHARS)}`, text });
+  const isError = Boolean(at(event, 'isError'));
+  const line = resultLine(result, text, isError);
+  const id = callId(event);
+  const open = run.openCalls.get(id);
+  if (open === undefined) {
+    // No call to pair with: a result observed without its start stays loose.
+    addEntry(run, { kind: isError ? 'error' : 'result', line, text, result: null });
     return;
   }
+  open.result = line;
+  run.openCalls.delete(id);
+  matchAlerts(run, text);
+}
+
+/** The id a result pairs with its call by; a non-string id keys as null. */
+function callId(event: Event): string | null {
+  const id = at(event, 'toolCallId');
+  return typeof id === 'string' ? id : null;
+}
+
+/** The line a tool result renders as: a failure marker, else the `↳` line,
+ *  tagged when the tool exited non-zero. */
+function resultLine(result: unknown, text: string, isError: boolean): string {
+  if (isError) {return `  ✗ ${clip(firstLine(text), ERROR_CHARS)}`;}
+  const exit = at(result, 'structuredContent', 'exit_code');
   const tag = typeof exit === 'number' && exit !== 0 ? `[exit ${String(exit)}] ` : '';
-  addEntry(run, { kind: 'result', line: `  ↳ ${tag}${clip(firstLine(text), RESULT_CHARS)}`, text });
+  return `  ↳ ${tag}${clip(firstLine(text), RESULT_CHARS)}`;
 }
 
 const PREFERRED_ARGUMENTS = ['command', 'path', 'file', 'query', 'pattern'];
@@ -435,20 +470,15 @@ function streamState(stopReason: string | null, settled: boolean): Status['state
 
 type Unit = { lines: string[]; kind: Entry['kind'] };
 
-/** Fold each tool call together with the result that immediately followed it. */
+/** Render each tool call as its call line plus the result paired to it by
+ *  tool-call id, an unanswered call saying so rather than borrowing a neighbour.
+ *  Every other entry is one line on its own. */
 function units(entries: Entry[]): Unit[] {
-  const out: Unit[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const next = entries.at(i + 1);
-    if (entry.kind === 'call' && next !== undefined && (next.kind === 'result' || next.kind === 'error')) {
-      out.push({ lines: [entry.line, next.line], kind: 'call' });
-      i += 1;
-    } else {
-      out.push({ lines: [entry.line], kind: entry.kind });
-    }
-  }
-  return out;
+  return entries.map((entry) =>
+    entry.kind === 'call'
+      ? { lines: [entry.line, entry.result ?? NO_RESULT_LINE], kind: 'call' }
+      : { lines: [entry.line], kind: entry.kind },
+  );
 }
 
 /** One rendered block, the identity it collapsed on, and how many identical
@@ -488,9 +518,10 @@ function renderRun(run: ActivityRun): string {
 /** Render entries to blocks, collapsing runs of identical ACTIVITY, then elide
  *  the middle until the rendered size fits `budget`.
  *
- *  A unit is a call plus the result that followed it, kept together so a retried
- *  command folds as a whole: `→ bash(cmd) ×3` above one representative output.
- *  Collapsing on single lines would never fire — call and result alternate. */
+ *  A unit is a call plus the result paired to it by tool-call id, kept together
+ *  so a retried command folds as a whole: `→ bash(cmd) ×3` above one
+ *  representative output. Collapsing on single lines would never fire — call and
+ *  result alternate. */
 function fit(entries: Entry[], budget: number): { blocks: string; elided: number } {
   const rendered = activityRuns(units(entries)).map(renderRun);
   const sizes = rendered.map((block) => Buffer.byteLength(block));

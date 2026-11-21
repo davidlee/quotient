@@ -81,7 +81,9 @@ A run that ends with `final: false` — a ceiling, a timeout, a stop to use a to
 
 - If it could write, check the tree first (`git diff`): a ceiling can stop a run
   before an edit lands, or after the edit lands but before its test result
-  returns.
+  returns. In the transcript, a call followed by `(no tool result observed)`
+  had no result when the run stopped. The transcript cannot tell whether that
+  call took effect; the tree can.
 - Continue its `session` with a specific short prompt: "the patch is in the
   tree; run this test and report its exit code", "stop probing; answer now".
 - Fit the ceilings: a small `requests` budget, and a `context_tokens` cap above

@@ -18,3 +18,11 @@ cannot tell from the transcript whether an edit or test completed.
 Mark an unanswered call (`no tool result observed`). Keep the wording about
 observed tool evidence, not workspace state. Consider a completed/failed split
 in `status.tool_calls`. Depends on ISS-007's pairing fix.
+
+## Resolution (2026-11-21)
+
+Fixed with ISS-007: a call with no paired result renders
+`  ↳ (no tool result observed)`; `help/orchestrate.md` § When a run stops short
+says the tree, not the transcript, settles whether it took effect. The user
+chose transcript only: the completed/failed split in `status.tool_calls` is not
+done and has no item yet (an added field would be additive under DEC-072).

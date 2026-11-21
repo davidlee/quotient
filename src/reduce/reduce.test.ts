@@ -17,8 +17,8 @@ const ev = (type: string, extra: Record<string, unknown> = {}): string => JSON.s
 const assistant = (content: unknown[], stopReason = 'stop', usage?: unknown): string =>
   ev('message_end', { message: { role: 'assistant', content, stopReason, model: 'test-model', usage } });
 
-const call = (name: string, args: Record<string, unknown>): string[] => [
-  ev('tool_execution_start', { toolCallId: `c-${name}-${JSON.stringify(args)}`, toolName: name, args }),
+const call = (name: string, args: Record<string, unknown>, id = 'c'): string[] => [
+  ev('tool_execution_start', { toolCallId: id, toolName: name, args }),
 ];
 
 const result = (text: string, extra: Record<string, unknown> = {}): string =>
@@ -146,6 +146,91 @@ test('alerts match untruncated text, beyond the rendered snippet', () => {
   assert.equal(status.alerts[0].pattern, 'forbidden-path');
   // The rendered line is clipped; the alert still fires on the full text.
   assert.match(status.alerts[0].text, /FORBIDDEN-PATH$/);
+});
+
+test('parallel calls: each result renders under its own call, in call order', () => {
+  const { transcript } = reduceLines(
+    run(
+      ...call('bash', { command: 'first' }, 'a'),
+      ...call('bash', { command: 'second' }, 'b'),
+      result('second output', { toolCallId: 'b' }),
+      result('first output', { toolCallId: 'a' }),
+      assistant([{ type: 'text', text: 'both done' }]),
+    ),
+  );
+  assert.match(transcript, /^→ bash\(first\)\n {2}↳ first output\n→ bash\(second\)\n {2}↳ second output$/m);
+});
+
+test('a failed result pairs to its own call among parallel calls', () => {
+  const { transcript } = reduceLines(
+    run(
+      ...call('bash', { command: 'ok-call' }, 'a'),
+      ...call('bash', { command: 'bad-call' }, 'b'),
+      result('boom: no such file', { toolCallId: 'b', isError: true }),
+      result('fine output', { toolCallId: 'a' }),
+      assistant([{ type: 'text', text: 'done' }]),
+    ),
+  );
+  assert.match(transcript, /^→ bash\(ok-call\)\n {2}↳ fine output\n→ bash\(bad-call\)\n {2}✗ boom: no such file$/m);
+});
+
+test('an unanswered call says so instead of looking completed', () => {
+  const { transcript } = reduceLines(
+    run(...call('bash', { command: 'orphan' }, 'a'), assistant([{ type: 'text', text: 'moved on' }])),
+  );
+  assert.match(transcript, /^→ bash\(orphan\)\n {2}↳ \(no tool result observed\)$/m);
+});
+
+test('in parallel, an unanswered call does not borrow the answered call\'s result', () => {
+  const { transcript } = reduceLines(
+    run(
+      ...call('bash', { command: 'answered' }, 'a'),
+      ...call('bash', { command: 'unanswered' }, 'b'),
+      result('only output', { toolCallId: 'a' }),
+      assistant([{ type: 'text', text: 'done' }]),
+    ),
+  );
+  assert.match(
+    transcript,
+    /^→ bash\(answered\)\n {2}↳ only output\n→ bash\(unanswered\)\n {2}↳ \(no tool result observed\)$/m,
+  );
+});
+
+test('identical calls that differ only in having a result do not collapse', () => {
+  const cmd = { command: 'grep -r x .' };
+  const { transcript } = reduceLines(
+    run(
+      ...call('bash', cmd, 'a'),
+      ...call('bash', cmd, 'b'),
+      result('found it', { toolCallId: 'b' }),
+      assistant([{ type: 'text', text: 'ok' }]),
+    ),
+  );
+  assert.doesNotMatch(transcript, /×2/);
+  assert.equal(transcript.match(/^→ bash\(grep -r x \.\)$/gm)?.length, 2);
+  assert.match(transcript, /^ {2}↳ \(no tool result observed\)$/m);
+  assert.match(transcript, /^ {2}↳ found it$/m);
+});
+
+test('alerts match the text of a result paired by id, not the nearest result', () => {
+  const buried = `${'x'.repeat(400)} FORBIDDEN-PATH`;
+  const { transcript, status } = reduceLines(
+    run(
+      ...call('bash', { command: 'first' }, 'a'),
+      ...call('bash', { command: 'second' }, 'b'),
+      result('harmless output', { toolCallId: 'a' }),
+      result(buried, { toolCallId: 'b' }),
+      assistant([{ type: 'text', text: 'ok' }]),
+    ),
+    8192,
+    ['forbidden-path'],
+  );
+  assert.equal(status.alerts.length, 1);
+  assert.equal(status.alerts[0].pattern, 'forbidden-path');
+  // The alert text comes from the id-paired result, untruncated.
+  assert.match(status.alerts[0].text, /FORBIDDEN-PATH$/);
+  assert.match(transcript, /^→ bash\(first\)\n {2}↳ harmless output$/m);
+  assert.match(transcript, /^→ bash\(second\)\n {2}↳ x+…$/m);
 });
 
 test('budget is enforced, elided from the middle, and never eats the result', () => {
