@@ -14,6 +14,9 @@ needs.
   tools exist (`command -v`; `which` may be absent), whether the network works,
   and whether the root is writable under a write profile. Plan around the
   answers: a step the form cannot run is yours.
+- Pass the project root as `cwd` on every call: an absent `cwd` resolves to the
+  server's launch directory, and a delegate there spends its budget in the
+  wrong tree.
 - Stay under the per-run maxima in the agent section. A call above one is
   refused, not clamped.
 - Changing a project's form (packages, binds) needs the operator to approve it
@@ -48,7 +51,10 @@ the round trips.
   specification and another write the code. Ask for red-first evidence: the
   failure output, failing for the right reason.
 - Say what runs concurrently. Parallel runs in one tree must touch disjoint
-  files, and still contend for shared build locks and caches.
+  files, and still contend for shared build locks and caches. Disjoint source
+  files can still share test helpers and test artifacts (coverage, timing
+  files): confirm read dependencies before trusting a parallel green run, and
+  serialize gates that write the same artifacts.
 
 ## Concurrency and lanes
 
@@ -70,10 +76,21 @@ the round trips.
 
 ## When a run stops short
 
-A run that ends with `final: false` (a ceiling, a timeout): continue its
-`session` with a short prompt ("stop probing; combine commands; finish X;
-answer now") and a small ceiling. Restarting loses the context the session
-holds.
+A run that ends with `final: false` — a ceiling, a timeout, a stop to use a tool
+— is usually continued, not abandoned.
+
+- If it could write, check the tree first (`git diff`): a ceiling can stop a run
+  before an edit lands, or after the edit lands but before its test result
+  returns.
+- Continue its `session` with a specific short prompt: "the patch is in the
+  tree; run this test and report its exit code", "stop probing; answer now".
+- Fit the ceilings: a small `requests` budget, and a `context_tokens` cap above
+  the run's `status.context.peak_tokens`, with room for the new prompt, a tool
+  result and the answer — a continuation with the same cap can stop after one
+  request.
+- Take over yourself when the remaining work is smaller than a brief.
+
+Restarting loses the context the session holds.
 
 ## Verification that stays yours
 

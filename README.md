@@ -485,7 +485,8 @@ protected stores, project forms),
   also what the server tells the calling agent, one section per tool
   (`tool`, `tool-start`, `tool-wait`, `tool-ack`, `tool-cancel`), which are the
   tools' descriptions, and `quotient help orchestrate`, a guide for a caller
-  driving many runs.
+  driving many runs. `quotient help leash` is the short version for a strong
+  model driving cheaper delegates.
 - [`docs/contract/pi-agent-result-2.md`](docs/contract/pi-agent-result-2.md):
   the result document (`quotient help result`): fields, states, causes and
   refusals, context completeness and cost accounting.

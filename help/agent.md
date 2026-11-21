@@ -20,7 +20,10 @@ means.
   not on the request alone. `form-unapproved` and `form-invalid` need the
   operator: a project's form is approved by hand with `quotient allow`, so no
   retry clears them.
-- Pass the returned `session` back to continue the same conversation.
+- Pass the returned `session` back to continue the same conversation. A run
+  that stopped short (`final: false`) is usually continued this way, with a
+  short prompt and fitted ceilings, rather than restarted or abandoned; the
+  result's `next` hint, when present, says so.
 - Ask for batched reads and a capped answer: a delegate that reads one file per
   turn exhausts its request ceiling before it answers.
 - The evidence for every run is under `artifacts.dir`.
@@ -49,6 +52,8 @@ means.
 
 `quotient help orchestrate` is the guide for driving many runs: briefs,
 recovering a run that stopped short, and the verification that stays yours.
+`quotient help leash` is its short operating mode for a strong model driving
+cheaper delegates.
 
 `quotient help result` is the full result/2 and status/3 contract, including
 context gaps, cost accounting, states, causes and refusals.

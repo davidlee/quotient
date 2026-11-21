@@ -108,6 +108,7 @@ test('help: every section resolves; refusals is an alias of result; an unknown n
     'tool-ack',
     'tool-cancel',
     'orchestrate',
+    'leash',
     'result',
     'handle',
     'wait',
@@ -130,6 +131,7 @@ test('help: with no override each section is its built-in source', () => {
   const snapshot = loaded(layers().all);
   assert.equal(sectionText(snapshot, 'tool', CONTEXT), builtin('help/tool.md'));
   assert.equal(sectionText(snapshot, 'orchestrate', CONTEXT), builtin('help/orchestrate.md'));
+  assert.equal(sectionText(snapshot, 'leash', CONTEXT), builtin('help/leash.md'));
   assert.equal(sectionText(snapshot, 'profiles', CONTEXT), builtin('help/profiles.md'));
   assert.ok(sectionText(snapshot, 'agent', CONTEXT).startsWith(builtin('help/agent.md')));
   assert.match(sectionText(snapshot, 'reduce', CONTEXT), /usage: quotient reduce/);
