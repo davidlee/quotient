@@ -25,7 +25,8 @@ any of its runs, and a new server knows no acknowledgement.
 ## The envelope
 
 A `tools/call` of `pi_agent_ack { runs }` answers with an MCP tool result: one
-`text` content item whose text is a JSON document.
+`text` content item whose text is a JSON document, and the same document as
+`structuredContent` (`pi-agent-result-2.md`, The envelope).
 
 - **Answered:** the document is `pi-agent-ack/1`, and `isError` is `false`,
   whatever the verdicts.

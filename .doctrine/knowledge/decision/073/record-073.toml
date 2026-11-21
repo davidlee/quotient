@@ -1,0 +1,33 @@
+schema = "doctrine.knowledge"
+version = 1
+
+id = 73
+slug = "tool-outputschema-is-minimal-an-object-naming-its-possible-document-schemas"
+title = "Tool outputSchema is minimal: an object naming its possible document schemas"
+record_kind = "decision"
+status = "accepted"
+created = "2026-11-21"
+updated = "2026-11-21"
+tags = []
+
+[facet]                         # every field typed; seeded empty (captured later)
+context = "IMP-017: tool results gain structuredContent and tools/list gains outputSchema. Each tool can answer more than one document (every tool's refusal is a pi-agent-result/2). The contract tables under docs/contract/ are the field-level authority."
+choice = "Each tool's outputSchema is {type: object, required: [schema], properties: {schema: {type: string, enum: <the document ids that tool can answer, always including pi-agent-result/2>}}}, with no additionalProperties restriction. structuredContent carries the same document as the JSON text content, which is kept."
+alternatives = ["Full JSON Schemas per document with a drift test against the contract tables: larger and a wrong schema makes strict clients reject calls", "structuredContent with no outputSchema: gives clients no declared discriminator"]
+rationale = "A client parses once and discriminates by schema, which the contracts already promise; nothing duplicates the contract tables so nothing drifts; open to added fields per DEC-072."
+consequences = ["tools/list lists outputSchema for all five tools", "result-2 contract's envelope section names structuredContent"]
+decided_by = "user, 2026-11-21 (chose 'Minimal (Recommended)' in the IMP-017 scoping question)"
+decided_on = "2026-11-21"
+
+[evidence]                      # free-text citations (supports / contradicts / notes)
+supports    = []
+contradicts = []
+notes       = []
+
+[relationships]                 # verb-written edges (set by doctrine supersede)
+supersedes    = []   # record ids this one replaces (set by doctrine supersede)
+superseded_by = []   # set on superseded predecessor (verb-written)
+
+[[relation]]
+label = "shapes"
+target = "IMP-017"

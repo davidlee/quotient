@@ -9,7 +9,9 @@
 import { resolve } from 'node:path';
 import type { Section } from '../help/help.ts';
 import { isRecord } from '../json.ts';
+import { ACK_SCHEMA, HANDLE_SCHEMA, WAIT_SCHEMA } from './documents.ts';
 import { RUN_NAME_GRAMMAR, sha256Hex } from './evidence.ts';
+import { RESULT_SCHEMA } from './result.ts';
 import { SESSION_GRAMMAR } from './session.ts';
 
 export type ToolName = 'pi_agent' | 'pi_agent_start' | 'pi_agent_wait' | 'pi_agent_ack' | 'pi_agent_cancel';
@@ -19,12 +21,36 @@ export type ToolName = 'pi_agent' | 'pi_agent_start' | 'pi_agent_wait' | 'pi_age
  *  everywhere. */
 type Annotations = { readOnlyHint?: boolean; openWorldHint?: boolean; idempotentHint?: boolean };
 
-/** One tool: its input schema (kept literal, so a reader can see its fields),
- *  its hints, and the help section that is its description. */
-type Tool<S extends object = object> = { inputSchema: S; annotations: Annotations; section: Section };
+/** What a tool's answer declares: an object naming its document by `schema`,
+ *  open to added fields. The contracts under `docs/contract/` own the fields. */
+type OutputSchema = {
+  type: 'object';
+  properties: { schema: { type: 'string'; enum: string[] } };
+  required: ['schema'];
+};
 
-const tool = <S extends object>(inputSchema: S, annotations: Annotations, section: Section): Tool<S> => ({
+/** One tool: its input schema (kept literal, so a reader can see its fields),
+ *  its output schema, its hints, and the help section that is its description. */
+type Tool<S extends object = object> = {
+  inputSchema: S;
+  outputSchema: OutputSchema;
+  annotations: Annotations;
+  section: Section;
+};
+
+/** A tool that answers ANSWERS, or the refusal every tool can answer. */
+const tool = <S extends object>(
+  inputSchema: S,
+  annotations: Annotations,
+  section: Section,
+  answers: string[] = [],
+): Tool<S> => ({
   inputSchema,
+  outputSchema: {
+    type: 'object',
+    properties: { schema: { type: 'string', enum: [...answers, RESULT_SCHEMA] } },
+    required: ['schema'],
+  },
   annotations,
   section,
 });
@@ -106,6 +132,7 @@ export const TOOLS = {
     ),
     { readOnlyHint: false, openWorldHint: true },
     'tool-start',
+    [HANDLE_SCHEMA],
   ),
   pi_agent_wait: tool(
     schema(
@@ -121,9 +148,10 @@ export const TOOLS = {
     ),
     { readOnlyHint: true },
     'tool-wait',
+    [WAIT_SCHEMA],
   ),
-  pi_agent_ack: tool(schema({ runs: RUN_IDS }, ['runs']), { readOnlyHint: false, idempotentHint: true }, 'tool-ack'),
-  pi_agent_cancel: tool(schema({ runs: RUN_IDS }, ['runs']), { readOnlyHint: false, idempotentHint: true }, 'tool-cancel'),
+  pi_agent_ack: tool(schema({ runs: RUN_IDS }, ['runs']), { readOnlyHint: false, idempotentHint: true }, 'tool-ack', [ACK_SCHEMA]),
+  pi_agent_cancel: tool(schema({ runs: RUN_IDS }, ['runs']), { readOnlyHint: false, idempotentHint: true }, 'tool-cancel', [WAIT_SCHEMA]),
 } satisfies Record<ToolName, Tool>;
 
 /** A `pi_agent` or `pi_agent_start` call's arguments, once their shape has been checked. */

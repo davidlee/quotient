@@ -17,11 +17,11 @@ import type { RunView, ViewState } from './views.ts';
 export const POLL_INTERVAL_MS = 2000;
 
 /** What start's handle is (design sec-2). */
-const HANDLE_SCHEMA = 'pi-run-handle/1';
+export const HANDLE_SCHEMA = 'pi-run-handle/1';
 /** What wait and cancel answer (design sec-2). */
 export const WAIT_SCHEMA = 'pi-agent-wait/1';
 /** What ack answers (design sec-2). */
-const ACK_SCHEMA = 'pi-agent-ack/1';
+export const ACK_SCHEMA = 'pi-agent-ack/1';
 /** The two `until` conditions a wait may name (design sec-5). */
 const UNTIL = ['all', 'any'] as const;
 /** The reasons an ack declines a run: not terminal here, or no record at all. */
@@ -78,16 +78,22 @@ export type WaitDocument = {
 /** What ack answers (design sec-2): one verdict per id. */
 export type AckDocument = { schema: typeof ACK_SCHEMA; runs: AckEntry[] };
 
-export type ToolResult = { content: { type: 'text'; text: string }[]; isError: boolean };
+/** A tool result: the document as JSON text, for every client, and the same
+ *  document as `structuredContent`, for a client that parses it once. */
+export type ToolResult = { content: { type: 'text'; text: string }[]; structuredContent: object; isError: boolean };
+
+/** DOCUMENT framed for the wire: one text block and its structured twin. */
+const framed = (document: object, isError: boolean): ToolResult => ({
+  content: [{ type: 'text', text: JSON.stringify(document) }],
+  structuredContent: document,
+  isError,
+});
 
 /** One `pi-agent-result/2` framed for the wire. `tools/call` always answers a tool
  *  result — a refusal is a successful call that ran nothing, never a JSON-RPC error
  *  (design sec-5) — and the document is an error unless the run completed. */
 export function toolResult(document: AgentResult): ToolResult {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(document) }],
-    isError: document.state !== 'completed',
-  };
+  return framed(document, document.state !== 'completed');
 }
 
 /**
@@ -96,7 +102,7 @@ export function toolResult(document: AgentResult): ToolResult {
  * call itself was refused.
  */
 export function envelopeResult(document: object, refused: boolean): ToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(document) }], isError: refused };
+  return framed(document, refused);
 }
 
 /** Every ViewState, in sec-2's table order. */

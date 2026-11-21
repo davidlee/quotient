@@ -107,6 +107,21 @@ function payload(reply: Record<string, unknown>): { doc: AgentResult; isError: u
   return { doc: resultDocument(reply), isError: at(reply, 'result', 'isError') };
 }
 
+/** A tool result's structuredContent is the document its one text block holds,
+ *  and the text block itself is kept unchanged (design sec-2). */
+function assertStructured(reply: Record<string, unknown>): void {
+  assert.equal(at(reply, 'error'), undefined, 'a call must never surface as a JSON-RPC error');
+  const content = at(reply, 'result', 'content');
+  assert.ok(Array.isArray(content) && content.length === 1, `a tool result is one content block: ${JSON.stringify(reply)}`);
+  const block: unknown = content[0];
+  assert.equal(at(block, 'type'), 'text');
+  const text = at(block, 'text');
+  if (typeof text !== 'string') {assert.fail(`the text block carries a string: ${JSON.stringify(reply)}`);}
+  const parsed: unknown = JSON.parse(text);
+  assert.deepEqual(at(reply, 'result', 'structuredContent'), parsed, 'structuredContent is the document the text block holds');
+  assert.deepEqual(block, { type: 'text', text }, 'the text content item is unchanged');
+}
+
 /** Drive exactly one tools/call. */
 async function call(
   params: unknown,
@@ -194,10 +209,15 @@ test('tools/list lists the five tools in sec-2 order, each with its help section
   assert.deepEqual(tools.map((tool) => tool.name), [...TOOL_NAMES]);
   TOOL_NAMES.forEach((name, index) => {
     const tool = tools[index];
-    assert.deepEqual(Object.keys(tool), ['name', 'description', 'inputSchema', 'annotations'], name);
+    assert.deepEqual(
+      keysOf(tool),
+      ['name', 'description', 'inputSchema', 'outputSchema', 'annotations'],
+      `${name} lists its output schema too`,
+    );
     assert.equal(tool.description, renderedSection(rig, TOOLS[name].section), `${name}'s description is its help section`);
     assert.ok(typeof tool.description === 'string' && tool.description.length > 0, name);
     assert.deepEqual(tool.inputSchema, TOOLS[name].inputSchema, name);
+    assert.deepEqual(tool.outputSchema, TOOLS[name].outputSchema, `${name}'s output schema, verbatim`);
     assert.deepEqual(tool.annotations, ANNOTATIONS[name], `${name}'s annotations are exactly sec-2's`);
   });
   assert.equal(new Set(tools.map((tool) => tool.description)).size, tools.length, 'no two tools share a description');
@@ -219,6 +239,20 @@ test('tools/list lists the five tools in sec-2 order, each with its help section
     fields,
     'start shares pi_agent\'s property set and adds key',
   );
+});
+
+test('a tools/call answers structuredContent deep-equal to its text block: a pi_agent refusal and a wait envelope', async () => {
+  const refused = await call(callTool({ prompt: 'hi', profile: 'read' }), workspace(validPolicy({ enabled: false })).env);
+  assert.equal(refused.isError, true);
+  assertStructured(refused.reply);
+
+  const { replies } = await converse(
+    [line({ id: 43, method: 'tools/call', params: { name: 'pi_agent_wait', arguments: { timeout_s: 0 } } })],
+    workspace().env,
+  );
+  assert.equal(replies.length, 1);
+  assert.equal(at(replies[0], 'result', 'isError'), false, 'an envelope is not an error');
+  assertStructured(replies[0]);
 });
 
 test('an unknown method answers -32601 with the request id', async () => {
@@ -1370,8 +1404,8 @@ test('tasks: without the declaration, a modern and a legacy pi_agent both block 
   const legacy = await waitForReply(server, 2);
   await closeServer(server);
 
-  assert.deepEqual(Object.keys(modernAnswer(modern, 'complete')).sort(), ['content', 'isError', 'resultType']);
-  assert.deepEqual(keysOf(resultOfReply(legacy)).sort(), ['content', 'isError'], 'a legacy result carries no resultType');
+  assert.deepEqual(Object.keys(modernAnswer(modern, 'complete')).sort(), ['content', 'isError', 'resultType', 'structuredContent']);
+  assert.deepEqual(keysOf(resultOfReply(legacy)).sort(), ['content', 'isError', 'structuredContent'], 'a legacy result carries no resultType');
   for (const [reply, id] of [[modern, 1], [legacy, 2]] as const) {
     const run = runOf(rig.runDir, id);
     const doc = resultDocument(reply);

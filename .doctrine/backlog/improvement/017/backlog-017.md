@@ -19,3 +19,12 @@ fixed: the profile table renders once, in the server instructions
 Where the client negotiates a protocol version that supports it, return
 `structuredContent` with the same document and declare `outputSchema`. Keep
 the text content for older clients.
+
+## Resolution (2026-11-21)
+
+No version gating was needed: the legacy `initialize` announces 2025-06-18,
+the revision that introduced `structuredContent` and `outputSchema`, and the
+modern era is later. Every tool result now carries `structuredContent` (the
+same document as the kept JSON text; `framed` in `src/server/documents.ts`),
+and `tools/list` declares a minimal `outputSchema` per tool (DEC-073: the
+`schema` discriminator only, open to added fields).

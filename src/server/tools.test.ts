@@ -115,6 +115,28 @@ test('TOOLS: pi_agent_wait declares its own set; ack and cancel require runs and
   }
 });
 
+/** The schema ids each tool's answers may carry (design sec-2), as literals:
+ *  the contract, not a value read back from the table. */
+const OUTPUT_SCHEMA_IDS: Record<ToolName, string[]> = {
+  pi_agent: ['pi-agent-result/2'],
+  pi_agent_start: ['pi-run-handle/1', 'pi-agent-result/2'],
+  pi_agent_wait: ['pi-agent-wait/1', 'pi-agent-result/2'],
+  pi_agent_ack: ['pi-agent-ack/1', 'pi-agent-result/2'],
+  pi_agent_cancel: ['pi-agent-wait/1', 'pi-agent-result/2'],
+};
+
+test('TOOLS: each outputSchema names the documents its tool answers, and stays open to added fields', () => {
+  // Exact, so an `additionalProperties` key fails it: documents are open to added fields.
+  const declared = Object.fromEntries(Object.entries(TOOLS).map(([name, tool]) => [name, tool.outputSchema]));
+  const expected = Object.fromEntries(
+    Object.entries(OUTPUT_SCHEMA_IDS).map(([name, ids]) => [
+      name,
+      { type: 'object', properties: { schema: { type: 'string', enum: ids } }, required: ['schema'] },
+    ]),
+  );
+  assert.deepEqual(declared, expected);
+});
+
 // ── readAgentRequest: lane, needs_success, key ────────────────────────────
 
 test('readAgentRequest: arguments that are not an object are refused', () => {

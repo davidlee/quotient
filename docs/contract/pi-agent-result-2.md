@@ -17,8 +17,13 @@ of each settled entry of a `pi-agent-wait/1` answer
 ## The envelope
 
 A `tools/call` of `pi_agent` answers with an MCP tool result: one `text`
-content item whose text is this JSON document. `isError` is `false` exactly
-when `state` is `completed`. Two requests answer otherwise:
+content item whose text is this JSON document, and the same document as
+`structuredContent`, for a client that reads structured tool output (MCP
+2025-06-18 and later). The text item is always present. `tools/list` declares
+each tool's `outputSchema`: an object whose `schema` is one of the documents
+that tool answers, this document's refusal arm included, open to added fields;
+the contracts here own every other field. `isError` is `false` exactly when
+`state` is `completed`. Two requests answer otherwise:
 
 - A request that declares the MCP tasks extension is answered with a task, not
   this document; once the task has completed, `tasks/get` carries the tool result

@@ -24,6 +24,7 @@ import {
   validateHandle,
   validateWait,
   type TaskStatus,
+  type ToolResult,
 } from './documents.ts';
 import { layoutFor, runName } from './evidence.ts';
 import { failedResult, refusedResult, type AgentResult, type Validation } from './result.ts';
@@ -440,6 +441,15 @@ test('validateAck rejects a malformed ack document', () => {
   assertRejects(validateAck, withField(doc([]), 'schema', 'pi-agent-ack/2'), 'wrong schema');
 });
 
+/** A tool result's structuredContent is the document its one text block holds,
+ *  and the text block itself is kept unchanged (design sec-2). */
+function assertStructured(result: ToolResult): void {
+  const text = result.content[0].text;
+  const parsed: unknown = JSON.parse(text);
+  assert.deepEqual(result.structuredContent, parsed, 'structuredContent is the document the text block holds');
+  assert.deepEqual(result.content, [{ type: 'text', text }], 'the text content item is unchanged');
+}
+
 // ── Envelopes ──────────────────────────────────────────────────────────────
 
 test('envelopeResult is an error only when the call was refused', () => {
@@ -468,4 +478,21 @@ test('toolResult keeps today\'s isError rule', () => {
   assert.deepEqual(parseText(toolResult(answered)), answered);
   assert.equal(toolResult(refused).isError, true);
   assert.deepEqual(parseText(toolResult(refused)), refused);
+});
+
+test('toolResult carries structuredContent: the completed document and the refusal alike', () => {
+  const settled = view({ state: 'settled', outcome: COMPLETED });
+
+  assertStructured(toolResult(completedResult(settled.layout, 'sess-1')));
+  assertStructured(toolResult(refusedResult('request-invalid', 'the request was not understood')));
+  assertStructured(toolResult(refusedResult('policy-denied', 'the policy does not allow this call')));
+});
+
+test('envelopeResult carries structuredContent: a handle, a wait document and a refused call alike', () => {
+  assertStructured(envelopeResult(runDocument(view({ state: 'queued', lane: 'build' })), false));
+
+  const lostEntry = waitEntry(view({ state: 'lost' }), { statusOnly: true, result: null });
+  assertStructured(envelopeResult(waitDocument([lostEntry]), false));
+  assertStructured(envelopeResult(ackDocument([]), false));
+  assertStructured(envelopeResult(runDocument(view({ state: 'queued' })), true));
 });

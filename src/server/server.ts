@@ -463,6 +463,7 @@ function toolList(context: Context): { tools: object[] } {
       name,
       description: selfDescription(context, tool.section),
       inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
       annotations: tool.annotations,
     })),
   };

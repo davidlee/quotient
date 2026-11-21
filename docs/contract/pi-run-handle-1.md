@@ -12,7 +12,8 @@ a new version.
 ## The envelope
 
 A `tools/call` of `pi_agent_start` answers with an MCP tool result: one `text`
-content item whose text is a JSON document.
+content item whose text is a JSON document, and the same document as
+`structuredContent` (`pi-agent-result-2.md`, The envelope).
 
 - **Started, or found by its key:** the document is `pi-run-handle/1`, and
   `isError` is `false` — whatever state the run is in, a terminal one included.

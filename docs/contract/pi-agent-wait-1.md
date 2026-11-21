@@ -14,7 +14,8 @@ a new version.
 ## The envelope
 
 A `tools/call` of `pi_agent_wait` or `pi_agent_cancel` answers with an MCP tool
-result: one `text` content item whose text is a JSON document.
+result: one `text` content item whose text is a JSON document, and the same
+document as `structuredContent` (`pi-agent-result-2.md`, The envelope).
 
 - **Answered:** the document is `pi-agent-wait/1`, and `isError` is `false`. A
   wait answer is never an error because of the runs inside it: a failed,
