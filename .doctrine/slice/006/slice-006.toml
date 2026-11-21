@@ -1,0 +1,53 @@
+id = 6
+slug = "handback-reserve"
+title = "Handback reserve: nearing-ceiling wrap-up and a partial-result label"
+status = "proposed"
+created = "2026-11-21"
+updated = "2026-11-21"
+tags = []
+
+[relationships]
+needs = []                      # slice→work hard prerequisite
+after = []                      # slice→work soft sequence: { to, rank }
+
+[[selector]]
+selector = "src/server/spawn.ts"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/server/gate.ts"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/server/result.ts"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/server/tools.ts"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "src/server/policy.ts"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "docs/contract/**"
+intent = "scope-relevant"
+
+[[selector]]
+selector = "help/**"
+intent = "scope-relevant"
+
+[[relation]]
+label = "references"
+role = "originates_from"
+target = "IDE-010"
+
+# STRUCTURAL relations are uniform `[[relation]]` rows, never a typed
+# `[relationships]` axis. Slices carry no typed STRUCTURAL
+# relation axes — the `[relationships]` table above holds only the dep/seq payload
+# (`needs`/`after`). Author a structural edge with the `doctrine link` verb
+# — it validates the (source, label) pair and resolves the target:
+#   doctrine link SL-NNN specs SPEC-NNN
+#   doctrine link SL-NNN governed_by ADR-NNN
+# `doctrine inspect SL-NNN` renders the inbound + outbound edges.

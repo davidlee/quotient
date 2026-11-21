@@ -24,3 +24,8 @@ stays. A result produced under the reserve is labelled partial.
 
 - How to inject a mid-run message into pi (steer/follow-up support?).
 - Result-shape change: see ISS-006.
+
+## Carried by SL-006 (2026-11-21)
+
+The user chose to slice this. Mechanism findings (pi 1.6.0: a `turn_end`
+extension hook, or RPC `steer`) and the open questions live in SL-006's scope.
