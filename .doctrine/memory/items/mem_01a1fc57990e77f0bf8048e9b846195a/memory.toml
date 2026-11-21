@@ -1,0 +1,46 @@
+memory_uid = "mem_01a1fc57990e77f0bf8048e9b846195a"
+memory_key = "mem.pattern.quotient.release"
+schema_version = 1
+memory_type = "pattern"
+status = "active"
+title = "Quotient release: version bump changes the flake's npmDepsHash"
+summary = "Release = npm version X --no-git-tag-version, recompute flake.nix npmDepsHash, nix build, commit 'Release X', pack-check, annotated tag vX"
+created = "2026-11-21"
+updated = "2026-11-21"
+
+[scope]
+paths = ["flake.nix", "package.json", "justfile"]
+globs = []
+commands = []
+tags = ["area:release"]
+workspace = "default"
+repo = "github.com/davidlee/quotient"
+repo_id_kind = "remote"
+repo_id_confidence = "high"
+
+[git]
+anchor_kind = "checkout_state"
+commit = ""
+tree = "be69885bd751a2801de65ad15339a59c2e7ea02f"
+ref_name = "refs/heads/main"
+checkout_state_id = "b0fef2c2999e68fc1e91eed8fba5f615eb4bcc91c646106c04259a2ddbb190e3"
+base_commit = "82bd6082354cea3642c0a73a52e253fc5c312988"
+verified_sha = ""
+normalizer = "forget.checkout.v1"
+
+[review]
+verification_state = "unverified"
+reviewed = ""
+review_by = ""
+
+[trust]
+trust_level = "medium"
+
+[ranking]
+severity = "none"
+weight = 0
+
+[[source]]
+kind = "commit"
+ref = "82bd608"
+
